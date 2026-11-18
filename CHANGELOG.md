@@ -2,7 +2,8 @@
 
 ## [Unreleased]
 
-Nothing yet.
+- Fix non-Windows strict Clippy validation of closed-pipe handling. Install and
+  explicitly select the musl C compiler required by native TLS dependencies in CI.
 
 ## [0.10.0] — 2026-11-19
 

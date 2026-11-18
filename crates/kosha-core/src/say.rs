@@ -110,17 +110,10 @@ pub fn write_out(args: fmt::Arguments, newline: bool) {
 /// version — and the wrong answer there is a tool that prints an error and
 /// exits 1 every time somebody pipes it into `head`.
 pub fn reader_is_gone(error: &io::Error) -> bool {
-    if error.kind() == ErrorKind::BrokenPipe {
-        return true;
-    }
+    let reader_closed = error.kind() == ErrorKind::BrokenPipe;
     #[cfg(windows)]
-    {
-        matches!(error.raw_os_error(), Some(109) | Some(232))
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+    let reader_closed = reader_closed || matches!(error.raw_os_error(), Some(109) | Some(232));
+    reader_closed
 }
 
 /// The same question, of an error that has been boxed and possibly wrapped.
