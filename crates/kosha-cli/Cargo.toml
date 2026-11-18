@@ -1,0 +1,32 @@
+[package]
+name = "kosha-cli"
+description = "Headless scanner front-end, used for benchmarking and scripting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# The bare name, because this is the one that gets *typed*: in scripts, in
+# CI, and on a headless machine where the window could not open at all.
+# The window is launched from an icon, a desktop entry or a bundle, each of
+# which carries its own display name — so the application is still called
+# kosha everywhere a person looks.
+[[bin]]
+name = "kosha"
+path = "src/main.rs"
+
+[dependencies]
+kosha-core.workspace = true
+kosha-analyze.workspace = true
+kosha-query.workspace = true
+kosha-search.workspace = true
+kosha-marketplace.workspace = true
+anyhow.workspace = true
+ctrlc = "3"
+
+# For the temporary tree the broken-pipe test exports; see tests/pipe.rs.
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "kosha-query"
+description = "A small query language for filtering a scanned size tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+kosha-core.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One kosha natural-search JSONL corpus case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "input"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "input": {"type": "string", "minLength": 1},
+    "dsl": {"type": "string", "minLength": 1},
+    "diagnostic": {"type": "string", "minLength": 1},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "span", "text", "value"],
+        "properties": {
+          "kind": {
+            "enum": ["Kind", "FileType", "Size", "Count", "Name", "Path", "Modified", "Created", "Literal", "Dsl", "Flag", "Age", "Exclusion", "Connector"]
+          },
+          "span": {
+            "description": "Zero-based UTF-8 byte offsets [start, exclusive end] in input",
+            "type": "array", "minItems": 2, "maxItems": 2,
+            "items": {"type": "integer", "minimum": 0}
+          },
+          "text": {"type": "string"},
+          "value": {"type": "string"}
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {"required": ["dsl", "entities"], "not": {"required": ["diagnostic"]}},
+    {"required": ["diagnostic"], "not": {"required": ["dsl"]}}
+  ]
+}

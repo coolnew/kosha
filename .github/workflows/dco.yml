@@ -1,0 +1,32 @@
+# The sign-off check, on its own, so it can be a required status check with a
+# name that says what it wants: a contributor looking at a red tick called
+# "DCO / sign-off" knows what to do about it, where one called "CI / hygiene"
+# could be any of six things.
+#
+# `ci.yml`'s hygiene job runs the same script, and the overlap is deliberate
+# rather than a leftover: this one triggers on pull requests only, so a direct
+# push to `main` would be checked by nothing without it. They cover different
+# ways a commit arrives and agree on pull requests, which costs a few seconds
+# and removes a gap.
+
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check:
+    name: sign-off
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole PR range, plus its base, so every commit can be inspected.
+          fetch-depth: 0
+
+      - name: Every commit is signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 xtask-dco.py "$BASE..$HEAD"

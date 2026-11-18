@@ -1,0 +1,62 @@
+[package]
+name = "kosha-gui"
+description = "Cross-platform GPU-accelerated disk usage explorer built on GPUI Kit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# Named for its crate. The bare `kosha` belongs to the command-line tool,
+# which is the one anybody types; this is reached through a desktop entry,
+# a macOS bundle or a shortcut, and all three say "kosha" to the user.
+[[bin]]
+name = "kosha-gui"
+path = "src/main.rs"
+
+# Windows only, and only at build time: it compiles the icon and the version
+# metadata into the executable's resource section. Without it the .exe has the
+# default icon in Explorer, the taskbar and Alt-Tab, and no version tab in its
+# properties. Nothing links against it and no other platform sees it.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[dependencies]
+kosha-core.workspace = true
+kosha-analyze.workspace = true
+kosha-fsops.workspace = true
+kosha-query.workspace = true
+kosha-search.workspace = true
+kosha-marketplace.workspace = true
+gpui-kit = "0.6"
+rustc-hash.workspace = true
+anyhow.workspace = true
+crossbeam-channel = "0.5"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Never named in kosha's code: this is here only for the feature.
+# gpui-kit-assets embeds the component library's icons with rust-embed, which
+# in debug builds reads them from the crate's folder in this machine's cargo
+# registry instead. A debug kosha-gui run anywhere else drew the moon, the
+# panel toggles and the window controls as empty buttons. Features merge across
+# the build, so turning `debug-embed` on here embeds them in every profile.
+rust-embed = { version = "8.7.2", features = ["debug-embed"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+# AttachConsole, because a windows-subsystem binary has no console and this
+# lets output reach the terminal it was launched from; and the registry, to
+# read the desktop accent colour.
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Registry",
+    # ShellExecuteW with the "runas" verb: the only way to obtain an elevated
+    # token is to start a new process with one.
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

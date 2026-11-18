@@ -1,0 +1,17 @@
+[package]
+name = "kosha-search"
+description = "Deterministic natural language search over immutable kosha arenas."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+kosha-core.workspace = true
+kosha-query.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex = "1.12"

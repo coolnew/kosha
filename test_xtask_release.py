@@ -1,0 +1,250 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
+
+import importlib.util
+from contextlib import redirect_stdout
+import io
+import json
+from pathlib import Path
+import subprocess
+import tarfile
+import tempfile
+import unittest
+from unittest.mock import patch
+import zipfile
+
+
+ROOT = Path(__file__).resolve().parent
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), ROOT / (name + ".py"))
+    result = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(result)
+    return result
+
+
+release = load("xtask-release")
+package = load("xtask-package")
+
+
+def git(root, *args):
+    return subprocess.check_output(["git", *args], cwd=root, stderr=subprocess.DEVNULL).decode().strip()
+
+
+class ReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def project(self):
+        (self.root / "crates/core").mkdir(parents=True)
+        (self.root / "crates/core/Cargo.toml").write_text('[package]\nname="kosha-core"\nversion.workspace=true\n', encoding="utf-8")
+        (self.root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/core"]\n[workspace.package]\nversion = "0.9.0"\n[workspace.dependencies]\nkosha-core = {path="crates/core",version = "0.9.0"}\nexternal = {version = "0.9.0"}\n', encoding="utf-8")
+        (self.root / "Cargo.lock").write_text('version = 4\n\n[[package]]\nname = "kosha-core"\nversion = "0.9.0"\n\n[[package]]\nname = "external"\nversion = "0.9.0"\nsource = "registry+https://example.invalid"\n', encoding="utf-8")
+        (self.root / "CHANGELOG.md").write_text('# Changelog\n\n## [Unreleased]\n\n- Existing work must survive.\n\n## [0.9.0] — 2026-09-21\n\nBaseline.\n\n[Unreleased]: https://github.com/coolnew/kosha/compare/v0.9.0...HEAD\n', encoding="utf-8")
+
+    def test_preparation_changes_only_local_versions_and_preserves_notes(self):
+        self.project()
+        original = (self.root / "Cargo.toml").read_bytes()
+        updates = release.preparation(self.root, "0.9.1", "- Reviewed release summary.", "2026-11-18")
+        self.assertEqual((self.root / "Cargo.toml").read_bytes(), original, "planning must not write")
+        self.assertIn(b'kosha-core = {path="crates/core",version = "0.9.1"}', updates["Cargo.toml"])
+        self.assertIn(b'external = {version = "0.9.0"}', updates["Cargo.toml"])
+        self.assertIn(b'name = "external"\nversion = "0.9.0"', updates["Cargo.lock"])
+        self.assertIn("## [0.9.1] — 2026-11-18", updates["CHANGELOG.md"].decode())
+        self.assertIn(b"Existing work must survive", updates["CHANGELOG.md"])
+        self.assertIn(b"v0.9.1...HEAD", updates["CHANGELOG.md"])
+        with self.assertRaises(ValueError):
+            release.preparation(self.root, "0.8.0", "notes", "2026-11-18")
+
+    def test_semver_order_and_existing_changelog_entries(self):
+        values = ["1.0.0-alpha.1", "1.0.0-alpha.2", "1.0.0-alpha.10", "1.0.0-beta", "1.0.0", "1.0.1"]
+        self.assertEqual(sorted(values, key=release.semver_key), values)
+        for value in ["v1.0.0", "1.02.3", "1.0.0-01"]:
+            with self.assertRaises(ValueError):
+                release.semver_key(value)
+        with self.assertRaisesRegex(ValueError, "already contains"):
+            release.updated_changelog("## Unreleased\n\nnotes\n\n## [1.0.0] — 2026-01-01\n", "1.0.0", "more", "2026-11-18")
+
+    def test_output_is_confined_and_existing_artifacts_are_preserved(self):
+        good = release.safe_output(self.root, Path("dist/releases/candidate"))
+        self.assertEqual(good, self.root / "dist/releases/candidate")
+        for bad in [self.root, self.root / ".git/objects", self.root / "dist", self.root.parent / "elsewhere"]:
+            with self.assertRaises(ValueError):
+                release.safe_output(self.root, bad)
+        good.mkdir(parents=True)
+        (good / "archive.zip").write_bytes(b"keep me")
+        with self.assertRaisesRegex(ValueError, "not empty"):
+            release.safe_output(self.root, good)
+        self.assertEqual((good / "archive.zip").read_bytes(), b"keep me")
+
+    def test_source_archives_match_reviewed_bytes_and_are_reproducible(self):
+        files = {"README.md": b"public README\n", "crates/core/src/lib.rs": b"// code\n"}
+        outputs = []
+        for name in ("one", "two"):
+            folder = self.root / name
+            folder.mkdir()
+            outputs.append(release.write_sources(files, folder, "0.9.1", 1234567890))
+        for left, right in zip(*outputs):
+            self.assertEqual(left.read_bytes(), right.read_bytes())
+        with zipfile.ZipFile(outputs[0][0]) as archive:
+            self.assertEqual(set(archive.namelist()), {"kosha-v0.9.1-source/" + p for p in files})
+        with tarfile.open(outputs[0][1]) as archive:
+            for entry in archive.getmembers():
+                self.assertEqual(archive.extractfile(entry).read(), files[entry.name.removeprefix("kosha-v0.9.1-source/")])
+
+    def test_build_target_cannot_pollute_git_or_source(self):
+        self.assertEqual(release.safe_target(self.root, Path("target/release-check")), self.root / "target/release-check")
+        self.assertEqual(release.safe_target(self.root, self.root.parent / "separate-build"), self.root.parent / "separate-build")
+        for target in (self.root, self.root / "crates", self.root / ".git/objects", self.root.parent / "other/.git/build"):
+            with self.assertRaises(ValueError):
+                release.safe_target(self.root, target)
+
+    def test_clean_guard_and_git_refs_index_are_not_repaired_or_overwritten(self):
+        git(self.root, "init")
+        git(self.root, "config", "user.name", "Fixture")
+        git(self.root, "config", "user.email", "fixture@example.invalid")
+        (self.root / "README.md").write_text("baseline", encoding="utf-8")
+        git(self.root, "add", "README.md")
+        git(self.root, "commit", "-s", "-m", "fixture")
+        before = release.require_clean(self.root)
+        (self.root / "README.md").write_text("work to preserve", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "staged, modified"):
+            release.require_clean(self.root)
+        git(self.root, "add", "README.md")
+        with self.assertRaisesRegex(ValueError, "index changed"):
+            release.protected(self.root, before)
+        self.assertEqual((self.root / "README.md").read_text(), "work to preserve")
+        self.assertEqual(git(self.root, "rev-parse", "HEAD"), before["head"])
+
+    def test_failed_commands_still_check_git_protection(self):
+        before = {"head": "a" * 40, "index": "same", "refs": "same", "status": ""}
+        failure = subprocess.CalledProcessError(1, ["fixture"])
+        with patch.object(release.subprocess, "run", side_effect=failure), \
+             patch.object(release, "protected") as guard, redirect_stdout(io.StringIO()):
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.run_command(self.root, ["fixture"], {}, before)
+        guard.assert_called_once_with(self.root, before)
+
+    def test_preflight_rejects_concurrent_git_changes(self):
+        before = {"head": "a" * 40, "index": "same", "refs": "same", "status": ""}
+        release.unchanged_preflight(before, dict(before))
+        for key in ("head", "index", "refs"):
+            after = dict(before, **{key: "changed"})
+            with self.assertRaisesRegex(ValueError, "Git changed while planning"):
+                release.unchanged_preflight(before, after)
+
+    def test_public_selection_is_portable_and_private_selects_separate_checkout(self):
+        with patch.object(release, "ROOT", self.root):
+            self.assertEqual(release.choose_repo(public=True), self.root)
+            (self.root / "publication").mkdir()
+            (self.root / "publication/files.jsonl").write_text("fixture", encoding="utf-8")
+            self.assertEqual(release.choose_repo(public=True), self.root.parent / "github/kosha")
+
+    def test_binary_stamp_must_match_version_head_and_target(self):
+        head = "abcdef123456" + "0" * 28
+        target = "x86_64-pc-windows-msvc"
+        stamp = f"kosha 0.9.0 ({head[:12]}, {target})"
+        self.assertEqual(package.stamp_problems(stamp, "0.9.0", head, target), [])
+        for broken, version, commit, triple in (
+            (stamp, "0.9.1", head, target),
+            (stamp, "0.9.0", "0" * 40, target),
+            (stamp, "0.9.0", head, "aarch64-apple-darwin"),
+            (stamp.replace(", ", "+, "), "0.9.0", head, target),
+            ("kosha 0.9.0 (unknown, unknown)", "0.9.0", head, target),
+        ):
+            self.assertTrue(package.stamp_problems(broken, version, commit, triple), broken)
+
+    def test_private_payloads_use_templates_and_exclude_internal_docs_and_env(self):
+        if not (ROOT / "xtask-public.py").exists():
+            self.skipTest("Private manifest exporter is intentionally absent from public source")
+        git(self.root, "init")
+        files = {"README.md": b"internal README", "publication/templates/README.md": b"# Public\n", "docs/manual/README.md": b"# Public manual\n", "docs/dev/private.md": b"private design", "marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json": b"[]\n", "secret.txt": b"private credential fixture", "xtask-public.py": (ROOT / "xtask-public.py").read_bytes()}
+        for name, data in files.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        rows = [{"path": name, "visibility": "public" if name in {"README.md", "docs/manual/README.md", "marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json"} else "private", "reason": "fixture"} for name in files]
+        rows[0]["source"] = "publication/templates/README.md"
+        rows.append({"path": "publication/files.jsonl", "visibility": "private", "reason": "fixture"})
+        (self.root / "publication/files.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        git(self.root, "add", ".")
+        (self.root / ".env").write_text("private untracked token fixture", encoding="utf-8")
+        payload = package.public_payloads(self.root)
+        self.assertEqual(payload, {"README.md": b"# Public\n", "docs/manual/README.md": b"# Public manual\n"})
+
+    def test_public_checkout_rejects_unclassified_tracked_files(self):
+        git(self.root, "init")
+        (self.root / "README.md").write_text("# Public\n", encoding="utf-8")
+        git(self.root, "add", "README.md")
+        self.assertEqual(set(package.public_payloads(self.root)), {"README.md"})
+        (self.root / ".env").write_text("not a real credential", encoding="utf-8")
+        git(self.root, "add", ".env")
+        with self.assertRaisesRegex(ValueError, "Unclassified"):
+            package.public_payloads(self.root)
+
+    def test_git_recipe_packs_are_omitted_from_archive_payloads(self):
+        git(self.root, "init")
+        (self.root / "README.md").write_text("# Public\n", encoding="utf-8")
+        for name in ["marketplace/catalog.json", "marketplace/indexes/recipes.jsonl", "marketplace/packages/recipes/coolnew/tools/1.0.0/pack.json"]:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("[]\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        self.assertEqual(set(package.public_payloads(self.root)), {"README.md"})
+        self.assertEqual(set(package.documentation_payloads(self.root)), {"README.md"})
+
+    def test_public_source_includes_authoring_validator_and_rejects_retired_flat_packs(self):
+        git(self.root, "init")
+        helper = self.root / "scripts/check-recipe-authoring-manual.py"
+        helper.parent.mkdir()
+        helper.write_text("# public validator fixture\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        self.assertEqual(set(package.public_payloads(self.root)), {"scripts/check-recipe-authoring-manual.py"})
+        retired = self.root / "recipes/linux.json"
+        retired.parent.mkdir()
+        retired.write_text("[]\n", encoding="utf-8")
+        git(self.root, "add", ".")
+        with self.assertRaisesRegex(ValueError, "Unclassified"):
+            package.public_payloads(self.root)
+
+    def test_public_asset_cannot_smuggle_a_private_key(self):
+        git(self.root, "init")
+        (self.root / "assets").mkdir()
+        marker = "-----BEGIN RSA " + "PRIVATE KEY-----"
+        (self.root / "assets/key.pem").write_text(marker + "\nfixture, not a key\n", encoding="utf-8")
+        git(self.root, "add", "assets/key.pem")
+        with self.assertRaisesRegex(ValueError, "Potential credential"):
+            package.public_payloads(self.root)
+
+    def test_dry_run_never_builds_or_creates_output(self):
+        (self.root / "publication").mkdir()
+        (self.root / "publication/files.jsonl").write_text("fixture", encoding="utf-8")
+        class Version:
+            @staticmethod
+            def validate(root):
+                return "0.9.0"
+        class Package:
+            @staticmethod
+            def public_payloads(root):
+                return {"README.md": b"# Public\n", "CHANGELOG.md": b"# Changes\n"}
+        def selected_module(path, name):
+            return Version if name == "release_versions" else Package
+        before = {"head": "a" * 40, "index": "unchanged", "refs": "unchanged", "status": ""}
+        def selected_git(root, *args):
+            return str(self.root) if args == ("rev-parse", "--show-toplevel") else ""
+        with patch.object(release.sys, "argv", ["xtask-release.py", "--repo-path", str(self.root)]), \
+             patch.object(release, "module", selected_module), patch.object(release, "git", selected_git), \
+             patch.object(release, "git_state", return_value=before), \
+             patch.object(release, "validation_commands", return_value=[["must-not-run"]]), \
+             patch.object(release.subprocess, "run") as run, redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main(), 0)
+        run.assert_not_called()
+        self.assertFalse((self.root / "dist").exists())
+        self.assertFalse(json.loads(output.getvalue())["execute"])
+
+
+if __name__ == "__main__":
+    unittest.main()

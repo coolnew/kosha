@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # GPUI needs system libraries for Wayland, X11 and font handling.
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-x11-dev openssl libssl-dev \
+            libzstd-dev libvulkan1 libgit2-dev make cmake clang mold
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Everything but the GUI is where the logic lives, and it builds in
+      # seconds. Check it on its own first so a trivial mistake does not cost a
+      # full GPUI compile before it is reported. The query language and the CLI
+      # belong in this list too: they are logic, they are fast, and leaving them
+      # to the workspace step only delayed the report.
+      - name: Check core crates
+        run: >
+          cargo clippy -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          -p kosha-fsops -p kosha-cli --all-targets
+
+      - name: Test core crates
+        run: >
+          cargo test -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          -p kosha-fsops -p kosha-cli
+
+      - name: Build everything
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test everything
+        run: cargo test --workspace
+
+  # A different libc, not a different kernel. `statvfs` field widths differ
+  # between musl and glibc, and a numeric conversion that is a no-op on one can
+  # truncate on the other — there was such a cast, and building natively on
+  # three operating systems would never have found it, because all three of
+  # them use glibc or Apple's libc.
+  #
+  # `cargo check` rather than build: it stops before linking, so this needs no
+  # musl cross-linker.
+  musl:
+    name: musl (libc portability)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check against musl
+        run: >
+          cargo check --target x86_64-unknown-linux-musl --all-targets
+          -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          -p kosha-fsops -p kosha-cli
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The sign-off check needs the pull request's base commit, which a
+          # shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Consistent versions
+        run: |
+          python3 xtask-version.py
+          python3 -m unittest test_xtask_version
+
+      - name: Generated LLM guide
+        run: |
+          python3 xtask-llms.py --check
+          python3 -m unittest test_xtask_llms
+
+      - name: Release and publication script tests
+        run: python3 -m unittest discover -p 'test_*.py'
+
+      - name: Generated marketplace seed
+        run: |
+          if [ -d marketplace ]; then
+            python3 xtask-marketplace.py --root marketplace --check
+          fi
+
+      # CONTRIBUTING.md says the DCO is enforced here. Until
+      # this step existed they were describing something that did not happen,
+      # and an unsigned commit would have merged with the build green.
+      #
+      # The base SHA goes through the environment rather than straight into the
+      # shell: it is only ever a hash, but interpolating workflow context into
+      # a command is a habit worth not having.
+      - name: Sign-off (DCO)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE" ]; then
+            python3 xtask-dco.py "$BASE..HEAD"
+          else
+            python3 xtask-dco.py
+          fi
+
+      - name: SPDX headers
+        run: python3 xtask-spdx.py --check
+
+      # .gitattributes normalises to LF; this catches a file that slipped in
+      # before the rule existed, or one committed with -c core.autocrlf=false.
+      #
+      # Done in Python rather than as a grep one-liner: grep builds differ in
+      # how they treat a lone carriage return, and the obvious `grep $'\r$'`
+      # can match every line or none depending on the shell. A check that
+      # silently always passes is worse than no check.
+      - name: Line endings
+        run: python3 xtask-eol.py
+
+      # A string broken across source lines keeps the next line's indentation
+      # unless the break is escaped. The source reads correctly either way and
+      # the window draws the gap, so the only way to see one is to open the
+      # panel it is in and read it. Six were shipping when this was written.
+      - name: Whitespace in drawn strings
+        run: python3 xtask-gaps.py
+
+      - name: Licenses present
+        run: test -f LICENSE-MIT && test -f LICENSE-APACHE && test -f DCO

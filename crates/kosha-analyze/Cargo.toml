@@ -1,0 +1,28 @@
+[package]
+name = "kosha-analyze"
+description = "Smart analysis and optimization tips over a scanned size tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+kosha-core.workspace = true
+rayon.workspace = true
+# The window watches a hunt the same way it watches a scan, over a bounded
+# channel that drops rather than blocks.
+crossbeam-channel.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+# Rule packs are a user-authored file, and hand-rolling a reader for one is
+# where a parser bug becomes somebody else's confusing error. Both front ends
+# have to honour packs identically, so this lives here rather than in either.
+serde = { workspace = true }
+serde_json = { workspace = true }
+blake3 = { version = "1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+rustc-hash = "2"
+tempfile = "3"

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "indexes": [
+    {
+      "kind": "recipe-pack",
+      "path": "indexes/recipes.jsonl",
+      "bytes": 1640,
+      "sha256": "6daa9c86cdbb9bd9aa00e0b6780e4fe9b2aa5153112cb4730018e940c265c0e4",
+      "entries": 3
+    }
+  ]
+}

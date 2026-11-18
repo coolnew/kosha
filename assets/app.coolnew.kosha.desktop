@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=kosha
+GenericName=Disk Usage Explorer
+Comment=See what is eating your disk, and what to do about it
+Exec=kosha-gui %f
+Icon=app.coolnew.kosha
+Terminal=false
+Categories=System;Filesystem;
+Keywords=disk;usage;space;size;treemap;duplicates;cleanup;storage;
+StartupNotify=true
+StartupWMClass=app.coolnew.kosha
+MimeType=inode/directory;

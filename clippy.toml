@@ -1,0 +1,2 @@
+# The scanner deliberately keeps hot structs small; flag anything that grows.
+too-many-arguments-threshold = 9

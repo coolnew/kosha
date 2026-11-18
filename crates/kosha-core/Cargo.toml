@@ -1,0 +1,51 @@
+[package]
+name = "kosha-core"
+description = "Blazing-fast parallel filesystem scanner and compact size tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+rayon.workspace = true
+rustc-hash.workspace = true
+crossbeam-channel.workspace = true
+thiserror.workspace = true
+# Snapshots. A million-entry tree is ~80 MB of arena and names, and a tool for
+# reclaiming disk space must not ask somebody to keep ten of those. Already in
+# this workspace's lock file by way of the window's image decoding, and pure
+# Rust by default (miniz_oxide), so it costs a compile nobody was avoiding.
+flate2 = "1"
+
+
+# `statvfs` has no std equivalent, and free space is not something to shell out
+# for. Nothing else here needs libc: the metadata path is all std.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    # The token, for "is this process elevated" and for asking it to enable
+    # SeBackupPrivilege before a raw volume read.
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    # Where WSL records which distributions exist and where their disk images
+    # are. Read rather than asked of `wsl.exe`, which would start the service.
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    # SystemTimeToTzSpecificLocalTime: what the clock on the wall said at a
+    # given moment, for that date's daylight saving rather than today's.
+    "Win32_System_Time",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
+
+[features]
+default = []

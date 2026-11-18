@@ -1,0 +1,165 @@
+# Public candidate validation and draft release. Manual runs only retain artifacts.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  public-source:
+    name: Reviewed public source only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Refuse private repository and internal source
+        env:
+          EXPECTED_REPOSITORY: coolnew/kosha
+        run: |
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          python - <<'PY'
+          from pathlib import Path
+          import runpy
+          forbidden = ["publication", "CLAUDE.md", "AGENTS.md", ".agents", ".claude", ".codex", ".aws", ".env"]
+          if any(Path(name).exists() for name in forbidden):
+              raise SystemExit("Release refused: private instructions, credentials or export metadata present")
+          runpy.run_path("xtask-package.py")["public_payloads"]()
+          PY
+      - name: Verify version and generated documentation
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            python xtask-version.py --tag "$GITHUB_REF_NAME"
+          else
+            python xtask-version.py
+          fi
+          python xtask-llms.py --check
+
+  build:
+    name: ${{ matrix.target }}
+    needs: public-source
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwayland-dev libxkbcommon-x11-dev openssl libssl-dev \
+            libzstd-dev libvulkan1 libgit2-dev make cmake clang mold
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Verify host architecture
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: >-
+          python -c "import os,runpy; actual=runpy.run_path('xtask-package.py')['target_triple'](); assert actual == os.environ['EXPECTED_TARGET'], 'Runner architecture changed: ' + actual"
+      - name: Validate, build, package, and smoke-test clean candidate
+        run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate
+      - name: Name host-specific release manifest
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: python -c "import os,pathlib; p=pathlib.Path('dist/candidate'); (p/'release-manifest.json').rename(p/('release-manifest-'+os.environ['RELEASE_TARGET']+'.json'))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kosha-${{ matrix.target }}
+          path: |
+            dist/candidate/kosha-v*-${{ matrix.target }}.zip
+            dist/candidate/kosha-v*-${{ matrix.target }}.tar.gz
+            dist/candidate/kosha-v*-${{ matrix.target }}.zip.sha256
+            dist/candidate/kosha-v*-${{ matrix.target }}.tar.gz.sha256
+            dist/candidate/release-manifest-${{ matrix.target }}.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: kosha-source
+          path: |
+            dist/candidate/kosha-v*-source.zip
+            dist/candidate/kosha-v*-source.tar.gz
+            dist/candidate/kosha-v*-source.zip.sha256
+            dist/candidate/kosha-v*-source.tar.gz.sha256
+          if-no-files-found: error
+
+  draft:
+    name: Draft GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Verify downloaded archives and manifests
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path("artifacts")
+          archives = {p.name for p in root.iterdir() if p.name.endswith((".zip", ".tar.gz"))}
+          sidecars = {p.name.removesuffix(".sha256") for p in root.glob("*.sha256")}
+          if not archives or archives != sidecars:
+              raise SystemExit("Missing archive or SHA-256 sidecar")
+          hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in archives}
+          for name, digest in hashes.items():
+              if (root / (name + ".sha256")).read_text().strip() != f"{digest}  {name}":
+                  raise SystemExit("SHA-256 mismatch: " + name)
+          manifests = list(root.glob("release-manifest-*.json"))
+          if len(manifests) != 3:
+              raise SystemExit("Expected all three host manifests")
+          for path in manifests:
+              manifest = json.loads(path.read_text())
+              if not manifest["publication_candidate"] or manifest["commit"] != os.environ["GITHUB_SHA"]:
+                  raise SystemExit("Manifest is not from the selected public commit")
+              for entry in manifest["artifacts"]:
+                  if hashes.get(entry["name"]) != entry["sha256"]:
+                      raise SystemExit("Manifest/archive hash mismatch: " + entry["name"])
+          PY
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-') }}
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
+            manuals, SHA-256 sidecars, and a manifest for each host build.
+            Both executables report their version, commit, and target with `--version`.
+
+            Windows/macOS binaries are unsigned. Windows SmartScreen may warn;
+            macOS is experimental and may require opening the app from its context menu.
+            Linux desktop prerequisites and integration are described in `assets/README.md`.
+            Review platform acceptance and downloaded hashes before publishing this draft.

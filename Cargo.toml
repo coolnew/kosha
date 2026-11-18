@@ -1,0 +1,75 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kosha-core",
+    "crates/kosha-analyze",
+    "crates/kosha-fsops",
+    "crates/kosha-query",
+    "crates/kosha-search",
+    "crates/kosha-marketplace",
+    "crates/kosha-cli",
+    "crates/kosha-gui",
+]
+
+[workspace.package]
+version = "0.10.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/coolnew/kosha"
+authors = ["Neeraj Sharma <neerajsharma.9@outlook.com>"]
+
+[workspace.dependencies]
+kosha-core = { path = "crates/kosha-core", version = "0.10.0" }
+kosha-analyze = { path = "crates/kosha-analyze", version = "0.10.0" }
+kosha-fsops = { path = "crates/kosha-fsops", version = "0.10.0" }
+kosha-query = { path = "crates/kosha-query", version = "0.10.0" }
+kosha-search = { path = "crates/kosha-search", version = "0.10.0" }
+
+kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.10.0" }
+
+rayon = "1.10"
+rustc-hash = "2"
+crossbeam-channel = "0.5"
+thiserror = "2"
+anyhow = "1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[profile.dev]
+# Debug builds still have to scan millions of files without feeling broken.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Dependencies are not what we debug; compile them fast-and-optimized once.
+opt-level = 2
+
+[profile.dev.package.gpui-pre-windows]
+# With debug assertions on, GPUI compiles its HLSL shaders at startup from its
+# own source directory — a path inside this machine's cargo registry. A debug
+# kosha-gui copied anywhere else (a Windows Sandbox, a colleague's machine)
+# panicked before opening a window: "Error creating DirectWriteTextSystem …
+# The system cannot find the path specified". Off, its build script compiles
+# the shaders with fxc.exe and embeds them, exactly as in release.
+debug-assertions = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+# Kept as "unwind": the scanner isolates per-directory failures and GPUI
+# relies on unwinding for its own error reporting.
+panic = "unwind"
+
+[profile.bench]
+inherits = "release"
+debug = true
+strip = "none"
+
+# Profiling build: release codegen with frame pointers and symbols intact.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+lto = "thin"

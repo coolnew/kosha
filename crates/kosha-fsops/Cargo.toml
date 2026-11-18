@@ -1,0 +1,35 @@
+[package]
+name = "kosha-fsops"
+description = "Gated, auditable mutations. Every write goes through read-write mode."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+kosha-core.workspace = true
+thiserror.workspace = true
+trash = "5"
+
+# The one filesystem-mutating API in the tree that is not `std`, and it is
+# linked here because this is the crate that is allowed to mutate. The
+# dependency graph is part of the proof, so a crate that can
+# change a file has to be a crate that says so in its manifest.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    # DeviceIoControl, and FSCTL_SET_COMPRESSION for it to carry.
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+# Also a normal dependency, but an integration test links against this crate
+# rather than through it. Needed so the trash test can check that the file is
+# recoverable rather than merely gone — which is the whole difference between
+# Trash and DeletePermanently.
+trash = "5"
