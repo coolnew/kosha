@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.10.0] — 2026-11-19
 
 Kosha 0.10.0 is a preview release for people and coding agents investigating disk usage.
@@ -58,3 +62,5 @@ on every platform. Release tags must match the workspace and lockfile versions;
 see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
+
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.0...HEAD
