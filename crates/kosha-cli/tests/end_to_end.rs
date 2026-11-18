@@ -731,6 +731,11 @@ fn a_comparison_against_another_folder_says_so() {
     let home = tempfile::tempdir().unwrap();
     let tree = fixture();
     let root = tree.path().to_string_lossy().to_string();
+    // Records store canonical paths; the original CLI argument may use an
+    // alias such as macOS /var or a Windows short temporary-directory name.
+    let recorded_root = kosha_core::path::canonical(tree.path())
+        .to_string_lossy()
+        .into_owned();
     run(&[&root, "--snapshot"], home.path());
     let snapshot = find_snapshot(home.path()).to_string_lossy().to_string();
 
@@ -748,7 +753,7 @@ fn a_comparison_against_another_folder_says_so() {
         home.path(),
     ));
     assert!(
-        elsewhere.contains(&format!("the record is of {root}")),
+        elsewhere.contains(&format!("the record is of {recorded_root}")),
         "the comparison does not say which folder the record is of:\n{elsewhere}"
     );
     assert!(
@@ -790,7 +795,7 @@ fn a_comparison_against_another_folder_says_so() {
         home.path(),
     ));
     assert!(
-        copied.contains(&format!("the record is of {root}")),
+        copied.contains(&format!("the record is of {recorded_root}")),
         "{copied}"
     );
     assert!(
