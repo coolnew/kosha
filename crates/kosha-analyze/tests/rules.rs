@@ -295,7 +295,9 @@ fn sparse_files_are_credited_with_what_they_save() {
 #[test]
 fn a_cache_pattern_written_with_slashes_matches_the_real_directory() {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path();
+    // The scanner resolves aliases such as macOS /var and Windows short names.
+    // Context paths must use that same spelling, as Context::detect does.
+    let home = kosha_core::path::canonical(dir.path());
 
     // One pattern from each platform's family, all rooted at the same fake
     // home so a single scan covers them.
@@ -305,11 +307,11 @@ fn a_cache_pattern_written_with_slashes_matches_the_real_directory() {
     // Not a cache: a directory that merely lives near them.
     write(&home.join("AppData/Local/Programs/app.exe"), 4);
 
-    let tree = scan(home);
+    let tree = scan(&home);
     let found: Vec<Insight> = analyze(
         &tree,
         &Context {
-            home: Some(home.to_path_buf()),
+            home: Some(home),
             ..ctx()
         },
     )
@@ -1429,7 +1431,7 @@ fn a_pack_rule_finds_what_it_describes_and_nothing_else() {
     );
     assert_eq!(
         tree.path_of(insight.nodes[0]),
-        dir.path().join("scene").join("renders")
+        kosha_core::path::canonical(&dir.path().join("scene/renders"))
     );
 }
 

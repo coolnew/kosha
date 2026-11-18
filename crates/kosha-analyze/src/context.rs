@@ -17,6 +17,7 @@ pub struct Context {
     pub now: u32,
     /// The user's home directory, when we can identify it. Cache rules that
     /// match on well-known locations need it; everything else ignores it.
+    /// Use `kosha_core::path::canonical` so its spelling matches scanned paths.
     pub home: Option<PathBuf>,
     /// Findings smaller than this are dropped before ranking. A 40 MB tip in a
     /// panel about a 900 GB volume is noise.
@@ -98,4 +99,5 @@ fn home_dir() -> Option<PathBuf> {
     std::env::var_os(var)
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
+        .map(|path| kosha_core::path::canonical(&path))
 }

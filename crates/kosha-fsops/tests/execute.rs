@@ -1074,23 +1074,30 @@ fn a_link_in_a_doomed_directory_is_removed_without_what_it_points_at() {
         fs::write(root.join("cache/junk.bin"), vec![0u8; 4096]).unwrap();
         link_to_a_directory(&root.join("victim"), &root.join("cache/link"));
 
+        // Directory entry tables can occupy blocks too (for example on ext4).
+        // Count the cache's own allocation and its real file, independently of
+        // the scanned aggregate. The linked directory and treasure are excluded.
+        let expected = kosha_core::allocated_size(&root.join("cache")).unwrap()
+            + kosha_core::allocated_size(&root.join("cache/junk.bin")).unwrap();
+        assert!(
+            kosha_core::allocated_size(&root.join("victim/treasure.bin")).unwrap() > 0,
+            "the linked target must occupy bytes to detect accidental counting"
+        );
         let tree = scan(root);
         let session = writable(root);
         let plan = ActionPlan::build(&tree, &[node(&tree, "cache")], action, &session);
 
-        // Sixteen times the doomed tree sits behind that link, and none of it
-        // is in the promise: a plan that counted it would be offering bytes it
-        // must not take.
+        // The treasure behind the link must not contribute to the promise.
         assert_eq!(
             plan.dry_run().bytes_freed,
-            4096,
+            expected,
             "{action:?} counted what the link points at"
         );
 
         let grant = session.grant().unwrap();
         let report = plan.execute(&grant, &mut AuditLog::disabled());
         assert_eq!(report.failed, 0, "{action:?} failed: {report:?}");
-        assert_eq!(report.bytes_freed, 4096, "{action:?}");
+        assert_eq!(report.bytes_freed, expected, "{action:?}");
 
         assert!(
             !root.join("cache/link").exists(),

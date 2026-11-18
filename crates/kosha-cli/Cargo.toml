@@ -23,7 +23,6 @@ kosha-analyze.workspace = true
 kosha-query.workspace = true
 kosha-search.workspace = true
 kosha-marketplace.workspace = true
-anyhow.workspace = true
 ctrlc = "3"
 
 # For the temporary tree the broken-pipe test exports; see tests/pipe.rs.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Normalize detected home paths for cache findings and canonicalize test
+  expectations across path aliases. Measure deletion-test allocation rather
+  than assuming a filesystem's block size. Remove the CLI's unused anyhow dependency.
+
 - Fix non-Windows strict Clippy validation of closed-pipe handling. Install and
   explicitly select the musl C compiler required by native TLS dependencies in CI.
 

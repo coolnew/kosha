@@ -3740,7 +3740,6 @@ dependencies = [
 name = "kosha-cli"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "ctrlc",
  "kosha-analyze",
  "kosha-core",
