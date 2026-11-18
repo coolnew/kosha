@@ -56,14 +56,15 @@ workspace. The Debian/Ubuntu list follows the project's Linux CI setup.
 
 ```sh
 sudo apt-get install build-essential pkg-config libwayland-dev libxkbcommon-x11-dev \
-  openssl libssl-dev libzstd-dev libvulkan1 libgit2-dev make cmake clang mold
+  openssl libssl-dev libzstd-dev libvulkan1 libgit2-dev libfontconfig1-dev \
+  libfreetype6-dev make cmake clang mold
 ```
 
 On Arch, install the corresponding build dependencies.
 
 ```sh
 sudo pacman -S --needed base-devel pkgconf wayland libxcb libxkbcommon-x11 \
-  openssl zstd vulkan-icd-loader libgit2 cmake clang mold
+  openssl zstd vulkan-icd-loader libgit2 fontconfig freetype2 cmake clang mold
 ```
 
 With default Cargo paths, run `./target/release/kosha` or

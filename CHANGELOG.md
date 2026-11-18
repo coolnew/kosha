@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Add Linux GUI font development prerequisites to CI/release builds and the
+  manual. Make export fixtures independent of temp-path aliases and filesystem
+  restrictions on invalid UTF-8 filenames.
+
 - Normalize detected home paths for cache findings and canonicalize test
   expectations across path aliases. Measure deletion-test allocation rather
   than assuming a filesystem's block size. Remove the CLI's unused anyhow dependency.

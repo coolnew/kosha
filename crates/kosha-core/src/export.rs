@@ -562,7 +562,7 @@ mod tests {
 
     #[test]
     fn path_lists_and_jsonl_export_every_selected_entry() {
-        let (dir, tree) = fixture();
+        let (_dir, tree) = fixture();
         let selected: Vec<_> = (1..tree.len()).map(NodeId::from_index).collect();
         let mut out = Vec::new();
         let written = write_rows(
@@ -580,7 +580,7 @@ mod tests {
         assert_eq!(written.rows, selected.len());
         for line in text.lines() {
             assert!(std::path::Path::new(line).is_absolute());
-            assert!(std::path::Path::new(line).starts_with(dir.path()));
+            assert!(std::path::Path::new(line).starts_with(tree.root_path()));
             assert!(std::path::Path::new(line).exists());
         }
 
@@ -1259,12 +1259,12 @@ old,old,file
         assert_eq!(flag_list(Flags::SPARSE | Flags::PARTIAL), "sparse;partial");
     }
 
-    /// Names that are legal on Unix and impossible on Windows.
+    /// Raw Unix names, including bytes a host filesystem may refuse to create.
     ///
     /// The data model's claim is that a filename is bytes rather than text, so
     /// one that is not valid UTF-8 survives a round trip and one containing a
-    /// newline does not corrupt the document. Neither could be tested before
-    /// the suite ran on Linux, because neither name can be created on NTFS.
+    /// newline does not corrupt the document. Construct the invalid name in the
+    /// arena so this also exercises exports on macOS filesystems requiring UTF-8.
     #[cfg(unix)]
     #[test]
     fn a_name_that_is_not_text_survives_the_export() {
@@ -1272,15 +1272,29 @@ old,old,file
         use std::os::unix::ffi::OsStrExt;
 
         let dir = tempfile::tempdir().unwrap();
-        // A lone 0xE9 — latin-1 'é', and not a valid UTF-8 sequence by itself.
-        let invalid = OsStr::from_bytes(b"caf\xe9.txt");
-        std::fs::write(dir.path().join(invalid), b"x").unwrap();
+        std::fs::write(dir.path().join("cafe.txt"), b"x").unwrap();
         // A newline is legal in a filename and breaks every line-based tool.
         std::fs::write(dir.path().join("two\nlines.txt"), b"y").unwrap();
 
         let tree = Scanner::new(ScanOptions::default())
             .scan(dir.path())
             .unwrap();
+        let id = tree
+            .child_named(tree.root(), OsStr::new("cafe.txt"))
+            .unwrap();
+        let mut names = crate::NameArena::from_bytes(tree.names_bytes().to_vec());
+        // A lone 0xE9 — latin-1 'é', and not a valid UTF-8 sequence by itself.
+        let (offset, len) = names.push(OsStr::from_bytes(b"caf\xe9.txt"));
+        let mut nodes = tree.nodes_slice().to_vec();
+        nodes[id.index()].name_off = offset;
+        nodes[id.index()].name_len = len;
+        let tree = SizeTree::from_parts(
+            nodes,
+            names,
+            crate::Owners::default(),
+            tree.root_path().to_path_buf(),
+            tree.stats().clone(),
+        );
         let csv = export(&tree, &Options::default());
 
         // The undecodable name is written lossily and *marked*, so a reader
