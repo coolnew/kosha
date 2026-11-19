@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.10.4] — 2026-11-19
 
 Kosha 0.10.4 is the first public release, incorporating the reviewed CLI feedback.
