@@ -46,6 +46,72 @@ they do not provide code signing or replace platform acceptance.
 
 ## Tag the public candidate
 
+### Partner Center upload MSIX in GitHub releases
+
+The release workflow can attach `kosha-vVERSION-x64-store-upload.msix`, its
+SHA-256 sidecar and `msix-store-upload.json` alongside the Windows ZIP. This is
+an **unsigned Store submission package**, not a consumer sideload installer.
+Download the MSIX and sidecar from the reviewed release, verify the digest,
+then upload the MSIX to Partner Center. Microsoft signs approved Store packages.
+Restricted-capability approval and listing/certification are separate steps.
+
+Enable the repository Actions variable `KOSHA_MSIX_STORE_UPLOAD=true` and set
+`KOSHA_MSIX_IDENTITY_NAME`, `KOSHA_MSIX_PUBLISHER`,
+`KOSHA_MSIX_PUBLISHER_DISPLAY_NAME`, `KOSHA_MSIX_AUTHOR_NAME`,
+`KOSHA_MSIX_SUPPORT_EMAIL` and `KOSHA_MSIX_WEBSITE` to the reviewed non-secret
+identity/contact values. No production PFX or Microsoft API key is needed to
+build an upload package. Missing fields fail before the Windows build. With
+the switch absent/false, release packaging continues without an MSIX. The
+current numeric package-version policy supports suffix-free releases; disable
+MSIX for preview tags until a separate flight/version policy is implemented.
+
+The Windows pipeline invokes `xtask-release.py --msix-store` after the same
+host validations and builds used for the ZIP. It uses the exact registered
+identity, `KoshaApp` display name, normal CLI/GUI aliases and the experimentally
+tested unvirtualized/elevation capabilities. `CONTACT.txt` holds the reviewed
+author, publisher, support email and website. Publisher identity remains the
+Partner Center-assigned value; personal authorship does not replace it.
+
+Final assembly verifies MSIX identity/runtime/capabilities, source commit,
+SHA-256 and size, and byte-for-byte agreement of both executables with the
+Windows ZIP. Development identities, diagnostic probes and test signatures
+are rejected. The selected mode must match the exact final release inventory.
+The workflow still creates a draft; nothing is submitted to Microsoft or
+published automatically. Existing release tags are not changed to add this
+workflow; prepare a reviewed new candidate for the first hosted MSIX output.
+
+### Development MSIX rehearsal on Windows
+
+`xtask-msix.py` creates an unsigned development package from existing x64
+Windows release binaries. Supply the exact Partner Center identity fields:
+
+```powershell
+python xtask-msix.py --identity-name YOUR.IDENTITY.NAME --publisher 'CN=YOUR-ASSIGNED-PUBLISHER' --publisher-display-name 'Your publisher' --binary-dir target/release
+```
+
+The default is a read-only plan; add `--execute` to package with Windows SDK
+MakeAppx. Use `--allow-elevation` only for restricted-capability/UAC testing.
+The default `packagedClassicApp` runtime is virtualized. Local Windows testing
+found that it redirects new AppData files and blocks the raw volume reads used
+by the MFT scanner, even when elevated. `--unvirtualized` selects experimental
+`win32App` behavior with `unvirtualizedResources`; this preserved ordinary
+AppData storage and passed an elevated packaged MFT scan. This additional
+restricted capability needs its own Store policy review; a sideload success
+does not imply Store eligibility. `--probe-binary PATH` can explicitly include
+a local diagnostic executable in a development package; never treat that
+diagnostic package as a production upload.
+Output stays in a fresh `dist/` child. The package name has `.Development`
+appended and its console alias is `kosha-msix-dev.exe`, protecting the Store
+identity and regular CLI alias. Both binaries must report the same workspace
+version/commit/target. The evidence file retains their actual stamp; development
+packaging does not certify that their commit matches current HEAD.
+
+This command does not create certificates, install packages, submit to the
+Store or add MSIX to GitHub releases. Installation requires a separately signed
+copy and certificate trust on a controlled test machine. Keep self-signed test
+packages out of consumer downloads. Production signing, Store approval and
+installed-app data/elevation testing remain separate acceptance gates.
+
 For an orchestrated candidate build, use `python xtask-release.py` to inspect
 the plan and `python xtask-release.py --execute` to run host validations,
 build release binaries, and retain source ZIP/TAR.GZ plus host binary archives,

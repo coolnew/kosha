@@ -35,6 +35,10 @@ The binaries are not code-signed. Follow your organization's software policy
 when deciding whether to run downloaded software. Release archives have a
 companion `.sha256` checksum. See the distribution's installation notes for
 desktop integration and operating-system prerequisites.
+An asset ending in `-x64-store-upload.msix`, when present, is for the maintainer
+to submit to Microsoft Partner Center. It is unsigned and is not a directly
+installable alternative to the Windows ZIP. Use the ZIP for ordinary Windows
+downloads until a Store-distributed or separately trusted MSIX is available.
 On Linux, see [install and build on Linux](linux.md) for archive verification,
 desktop dependencies, and source builds.
 

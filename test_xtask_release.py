@@ -399,6 +399,88 @@ class ReleaseAssetTests(unittest.TestCase):
             self.seed(root)
             release.verify_release_assets(root, self.commit)
 
+    def seed_msix(self, root):
+        self.seed(root)
+        version = "0.10.2"
+        prefix = "kosha-v" + version
+        win_name = prefix + "-x86_64-pc-windows-msvc.zip"
+        binaries = {"kosha.exe": b"same cli", "kosha-gui.exe": b"same gui"}
+        with zipfile.ZipFile(root / win_name, "w") as archive:
+            for name, data in binaries.items():
+                archive.writestr(prefix + "-x86_64-pc-windows-msvc/" + name, data)
+        win_meta_path = root / "release-manifest-x86_64-pc-windows-msvc.json"
+        win_meta = json.loads(win_meta_path.read_text())
+        digest = hashlib.sha256((root / win_name).read_bytes()).hexdigest()
+        win_meta["artifacts"][0].update(sha256=digest, bytes=(root / win_name).stat().st_size)
+        win_meta_path.write_text(json.dumps(win_meta), encoding="utf-8")
+        (root / (win_name + ".sha256")).write_text(f"{digest}  {win_name}\n", encoding="utf-8")
+        name = prefix + "-x64-store-upload.msix"
+        msix_module = load("xtask-msix")
+        with zipfile.ZipFile(root / name, "w") as archive:
+            archive.writestr("AppxManifest.xml", msix_module.manifest("Example.Kosha", "CN=Example", "Example Publisher", version, True, False, True, True))
+            archive.writestr("CONTACT.txt", "KoshaApp\nAuthor: Example Author\nPublisher: Example Publisher\nSupport: support@example.com\nWebsite: https://example.com/\n")
+            for binary, data in binaries.items():
+                archive.writestr(binary, data)
+        metadata = {"schema": "kosha.msix-store-upload.v1", "package": name, "commit": self.commit,
+                    "version": version, "target": "x86_64-pc-windows-msvc", "publication_candidate": True,
+                    "signed": False, "diagnostic_probe": False, "runtime": "win32App",
+                    "identity": "Example.Kosha", "publisher": "CN=Example", "publisher_display_name": "Example Publisher",
+                    "author_name": "Example Author", "support_email": "support@example.com", "website": "https://example.com/"}
+        self.refresh_msix(root, metadata)
+        return metadata
+
+    def refresh_msix(self, root, metadata):
+        name = metadata["package"]
+        metadata.update(sha256=hashlib.sha256((root / name).read_bytes()).hexdigest(), bytes=(root / name).stat().st_size)
+        (root / (name + ".sha256")).write_text(f"{metadata['sha256']}  {name}\n", encoding="utf-8")
+        (root / "msix-store-upload.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    def test_opted_in_msix_verifies_with_identical_windows_zip_binaries(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.seed_msix(root)
+            release.verify_release_assets(root, self.commit, expect_msix=True)
+            with self.assertRaisesRegex(ValueError, "Unexpected"):
+                release.verify_release_assets(root, self.commit)
+
+    def test_msix_integrity_private_provenance_and_development_artifacts_are_rejected(self):
+        for problem in ["private", "identity", "publisher", "runtime", "signature", "probe", "binary", "contact", "hash", "sidecar", "missing"]:
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                metadata = self.seed_msix(root)
+                path = root / metadata["package"]
+                if problem in {"signature", "probe", "binary", "contact"}:
+                    with zipfile.ZipFile(path) as archive:
+                        files = {name: archive.read(name) for name in archive.namelist()}
+                    if problem == "signature":
+                        files["AppxSignature.p7x"] = b"development signature"
+                    elif problem == "probe":
+                        files["kosha-msix-probe.exe"] = b"private probe"
+                    elif problem == "contact":
+                        files["CONTACT.txt"] = b"wrong contact metadata"
+                    else:
+                        files["kosha.exe"] = b"different binary"
+                    with zipfile.ZipFile(path, "w") as archive:
+                        for name, data in files.items():
+                            archive.writestr(name, data)
+                elif problem == "private":
+                    metadata["publication_candidate"] = False
+                elif problem == "identity":
+                    metadata["identity"] += ".Development"
+                elif problem == "publisher":
+                    metadata["publisher"] = "CN=Wrong"
+                elif problem == "runtime":
+                    metadata["runtime"] = "packagedClassicApp"
+                self.refresh_msix(root, metadata)
+                if problem == "hash":
+                    path.write_bytes(b"changed package")
+                elif problem == "sidecar":
+                    (root / (path.name + ".sha256")).write_text("wrong")
+                elif problem == "missing":
+                    path.unlink()
+                with self.assertRaises((ValueError, OSError)):
+                    release.verify_release_assets(root, self.commit, expect_msix=True)
+
     def test_mac_host_requires_dmg_instead_of_legacy_tar(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

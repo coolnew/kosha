@@ -4,6 +4,10 @@
 
 - Package macOS downloads as a compressed DMG with an Applications shortcut,
   companion CLI, offline manuals and verified SHA-256 sidecar.
+- Add opt-in development MSIX packaging with isolated app identities and CLI
+  aliases. Production signing and Microsoft Store distribution remain pending.
+- Add an opt-in unsigned Partner Center MSIX upload artifact alongside the ZIP
+  in GitHub releases, with registered identity, contact details and SHA-256 checks.
 
 ## [0.10.4] — 2026-11-19
 

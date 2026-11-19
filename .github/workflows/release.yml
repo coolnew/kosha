@@ -11,6 +11,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  KOSHA_MSIX_STORE_UPLOAD: ${{ vars.KOSHA_MSIX_STORE_UPLOAD }}
 
 jobs:
   public-source:
@@ -49,6 +50,13 @@ jobs:
     name: ${{ matrix.target }}
     needs: public-source
     runs-on: ${{ matrix.os }}
+    env:
+      KOSHA_MSIX_IDENTITY_NAME: ${{ vars.KOSHA_MSIX_IDENTITY_NAME }}
+      KOSHA_MSIX_PUBLISHER: ${{ vars.KOSHA_MSIX_PUBLISHER }}
+      KOSHA_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.KOSHA_MSIX_PUBLISHER_DISPLAY_NAME }}
+      KOSHA_MSIX_AUTHOR_NAME: ${{ vars.KOSHA_MSIX_AUTHOR_NAME }}
+      KOSHA_MSIX_SUPPORT_EMAIL: ${{ vars.KOSHA_MSIX_SUPPORT_EMAIL }}
+      KOSHA_MSIX_WEBSITE: ${{ vars.KOSHA_MSIX_WEBSITE }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,8 +97,11 @@ jobs:
         if: runner.os == 'Linux'
         run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate
       - name: Validate and package host binaries (shared sources are built on Linux)
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS' || (runner.os == 'Windows' && env.KOSHA_MSIX_STORE_UPLOAD != 'true')
         run: python xtask-release.py --execute --binary-only --target-dir target --output-dir dist/candidate
+      - name: Validate and package Windows ZIP plus Partner Center upload MSIX
+        if: runner.os == 'Windows' && env.KOSHA_MSIX_STORE_UPLOAD == 'true'
+        run: python xtask-release.py --execute --binary-only --msix-store --target-dir target --output-dir dist/candidate
       - name: Name host-specific release manifest
         env:
           RELEASE_TARGET: ${{ matrix.target }}
@@ -106,6 +117,9 @@ jobs:
             dist/candidate/kosha-v*-${{ matrix.target }}.tar.gz.sha256
             dist/candidate/kosha-v*-${{ matrix.target }}.dmg.sha256
             dist/candidate/release-manifest-${{ matrix.target }}.json
+            dist/candidate/kosha-v*-x64-store-upload.msix
+            dist/candidate/kosha-v*-x64-store-upload.msix.sha256
+            dist/candidate/msix-store-upload.json
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
         if: runner.os == 'Linux'
@@ -136,7 +150,7 @@ jobs:
           python3 - <<'PY'
           import os, runpy
           from pathlib import Path
-          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"])
+          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true")
           PY
       - name: Classify release channel from the validated version
         id: channel
@@ -159,6 +173,11 @@ jobs:
             Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
             manuals, SHA-256 sidecars, and a manifest for each host build.
             Both executables report their version, commit, and target with `--version`.
+
+            When included, `*-x64-store-upload.msix` is an unsigned Partner Center
+            submission package, not a directly installable consumer download.
+            It retains the registered Store identity and restricted capabilities;
+            Microsoft certification/approval is separate from this build.
 
             Windows/macOS binaries are unsigned. Windows SmartScreen may warn;
             macOS is experimental and may require opening the app from its context menu.

@@ -31,7 +31,8 @@ of silently being overwritten with defaults.
 ## Application directories
 
 The `kosha` CLI and `kosha-gui` resolve the same per-user configuration and
-data directories on Windows and Linux. A snapshot saved by either executable
+data directories when run in the same user and installation/package context.
+A snapshot saved by either executable
 appears in the other's snapshot list. Both read `search-recipes.json`; the CLI
 can also opt into the GUI's saved drive records with `--cache`.
 
@@ -47,6 +48,15 @@ Automatic drive records live in the data directory because they retain the
 last completed observation across sessions. Windows scan
 data stays in the local profile rather than roaming with settings. macOS
 interactive coverage is less extensive than Windows and Linux.
+
+The Windows paths above describe the portable ZIP installation. Development
+MSIX packages can retain those logical paths while Windows redirects new data
+to per-package storage. An experimental unvirtualized package can instead use
+the ordinary AppData folders directly. Do not assume a packaged installation
+and the ZIP share every record, or that records survive package reset/uninstall.
+Back up explicit snapshots and export important results outside package-managed
+storage before changing installations. Development MSIX builds are test artifacts;
+there is no production MSIX distribution yet.
 
 | File or folder | Directory | Purpose |
 | --- | --- | --- |

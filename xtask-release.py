@@ -25,6 +25,7 @@ import sys
 import tarfile
 import tomllib
 import zipfile
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent
 
@@ -218,7 +219,7 @@ RELEASE_TARGETS = {"x86_64-unknown-linux-gnu": ".tar.gz",
 SOURCE_OWNER = "x86_64-unknown-linux-gnu"
 
 
-def verify_release_assets(root: Path, commit: str) -> None:
+def verify_release_assets(root: Path, commit: str, expect_msix: bool = False) -> None:
     """Verify the exact published inventory, with one producer for shared sources."""
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Expected the full selected source commit")
@@ -259,8 +260,66 @@ def verify_release_assets(root: Path, commit: str) -> None:
             if sidecar.read_text(encoding="utf-8").strip() != f"{digest}  {name}":
                 raise ValueError(f"SHA-256 sidecar mismatch: {name}")
             expected.update({name, name + ".sha256"})
+    if expect_msix:
+        expected.update(verify_msix_upload(root, commit, version))
     if {p.name for p in files} != expected:
         raise ValueError("Unexpected files in published release inventory")
+
+
+def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
+    """Verify Store-upload identity/provenance and the same binaries as the ZIP."""
+    metadata_name = "msix-store-upload.json"
+    metadata = json.loads((root / metadata_name).read_text(encoding="utf-8"))
+    name = f"kosha-v{version}-x64-store-upload.msix"
+    if (metadata.get("schema") != "kosha.msix-store-upload.v1" or metadata.get("package") != name
+            or metadata.get("commit") != commit or metadata.get("version") != version
+            or metadata.get("publication_candidate") is not True or metadata.get("signed") is not False
+            or metadata.get("diagnostic_probe") is not False or metadata.get("target") != "x86_64-pc-windows-msvc"
+            or metadata.get("runtime") != "win32App"):
+        raise ValueError("MSIX upload provenance/purpose does not match the public release")
+    package, sidecar = root / name, root / (name + ".sha256")
+    digest = hashlib.sha256(package.read_bytes()).hexdigest()
+    if (digest != metadata.get("sha256") or type(metadata.get("bytes")) is not int
+            or metadata["bytes"] != package.stat().st_size
+            or sidecar.read_text(encoding="utf-8").strip() != f"{digest}  {name}"):
+        raise ValueError("MSIX upload digest, size or sidecar mismatch")
+    ns = {"f": "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
+          "uap10": "http://schemas.microsoft.com/appx/manifest/uap/windows10/10",
+          "rescap": "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"}
+    numeric = module(ROOT / "xtask-msix.py", "verify_msix").numeric_version(version)
+    with zipfile.ZipFile(package) as msix:
+        names = msix.namelist()
+        if len(names) != len(set(names)) or any("probe" in n.lower() or n.lower().endswith((".pfx", ".cer", ".ps1", ".cs")) for n in names):
+            raise ValueError("MSIX upload contains duplicate or development-only entries")
+        if "AppxSignature.p7x" in names:
+            raise ValueError("Store upload must not contain a development signature")
+        tree = ET.fromstring(msix.read("AppxManifest.xml"))
+        identity = tree.find("f:Identity", ns)
+        if (identity is None or identity.get("Name") != metadata.get("identity") or identity.get("Name", "").endswith(".Development")
+                or identity.get("Publisher") != metadata.get("publisher") or identity.get("Version") != numeric
+                or identity.get("ProcessorArchitecture") != "x64"):
+            raise ValueError("MSIX packed identity differs from its reviewed metadata")
+        display = tree.find("f:Properties/f:PublisherDisplayName", ns)
+        if display is None or display.text != metadata.get("publisher_display_name"):
+            raise ValueError("MSIX publisher display name mismatch")
+        contact = f"KoshaApp\nAuthor: {metadata.get('author_name')}\nPublisher: {metadata.get('publisher_display_name')}\nSupport: {metadata.get('support_email')}\nWebsite: {metadata.get('website')}\n"
+        if msix.read("CONTACT.txt").decode("utf-8") != contact:
+            raise ValueError("MSIX contact metadata mismatch")
+        capabilities = {e.get("Name") for e in tree.findall("f:Capabilities/rescap:Capability", ns)}
+        if capabilities != {"runFullTrust", "allowElevation", "unvirtualizedResources"}:
+            raise ValueError("MSIX restricted capability inventory mismatch")
+        apps = tree.findall("f:Applications/f:Application", ns)
+        if len(apps) != 2 or {app.get("Executable") for app in apps} != {"kosha.exe", "kosha-gui.exe"}:
+            raise ValueError("MSIX executable inventory mismatch")
+        if any(app.get("{" + ns["uap10"] + "}RuntimeBehavior") != "win32App"
+               or app.get("{" + ns["uap10"] + "}TrustLevel") != "mediumIL" for app in apps):
+            raise ValueError("MSIX runtime mismatch")
+        with zipfile.ZipFile(root / f"kosha-v{version}-x86_64-pc-windows-msvc.zip") as windows:
+            for binary in ["kosha.exe", "kosha-gui.exe"]:
+                original = windows.read(f"kosha-v{version}-x86_64-pc-windows-msvc/{binary}")
+                if msix.read(binary) != original:
+                    raise ValueError("MSIX and Windows ZIP binaries differ: " + binary)
+    return {metadata_name, name, name + ".sha256"}
 
 
 def validation_commands(root: Path) -> list[list[str]]:
@@ -301,12 +360,20 @@ def main() -> int:
     content.add_argument("--binary-only", action="store_true", help="Validate and package this host only; CI publishes shared source archives from Linux")
     parser.add_argument("--output-dir", type=Path, help="Fresh subdirectory within selected checkout's dist/")
     parser.add_argument("--target-dir", type=Path, help="Separate rebuildable Cargo target directory")
+    parser.add_argument("--msix-store", action="store_true", help="Windows only: also package an unsigned Partner Center upload MSIX from KOSHA_MSIX_* identity/contact variables")
     args = parser.parse_args()
     try:
         root = choose_repo(args.public, args.repo_path).resolve()
         if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
             raise ValueError("Select the repository root, not a nested directory")
         current = module(root / "xtask-version.py", "release_versions").validate(root)
+        if args.msix_store and (os.name != "nt" or args.source_only or args.prepare):
+            raise ValueError("--msix-store requires a Windows host binary candidate build")
+        if args.msix_store:
+            required = ["IDENTITY_NAME", "PUBLISHER", "PUBLISHER_DISPLAY_NAME", "AUTHOR_NAME", "SUPPORT_EMAIL", "WEBSITE"]
+            missing = ["KOSHA_MSIX_" + name for name in required if not os.environ.get("KOSHA_MSIX_" + name)]
+            if missing:
+                raise ValueError("Configure MSIX identity/contact variables before building: " + ", ".join(missing))
         state = git_state(root)
         version = args.version or current
         semver_key(version)
@@ -365,7 +432,7 @@ def main() -> int:
                 "dated_release_notes_ready": notes_ready,
                 "output": str(out), "cargo_target": str(target), "validations": checks,
                 "build": [] if args.source_only else ["cargo", "build", "--locked", "--release", "-p", "kosha-cli", "-p", "kosha-gui"],
-                "archives": ([] if args.binary_only else ["source.zip", "source.tar.gz"]) + ([] if args.source_only else ["host binary archive"]),
+                "archives": ([] if args.binary_only else ["source.zip", "source.tar.gz"]) + ([] if args.source_only else ["host binary archive"]) + (["Partner Center upload MSIX (unsigned)"] if args.msix_store else []),
                 "git_mutations": [], "remote_mutations": [],
                 "remaining_release_acceptance": "Linux/non-host, clean-machine GUI/Sandbox, agreement and hosted workflow checks remain separate evidence"}
         print(json.dumps(plan, indent=2), flush=True)
@@ -406,6 +473,12 @@ def main() -> int:
                 else:
                     os.environ["CARGO_TARGET_DIR"] = previous_target
         protected(root, before)
+        if args.msix_store:
+            msix_out = out / "msix-work"
+            run_command(root, [sys.executable, "xtask-msix.py", "--store-upload", "--allow-elevation", "--unvirtualized",
+                              "--binary-dir", str(target / "release"), "--output-dir", str(msix_out), "--execute"], environment, before)
+            for name in [f"kosha-v{version}-x64-store-upload.msix", f"kosha-v{version}-x64-store-upload.msix.sha256", "msix-store-upload.json"]:
+                (msix_out / name).rename(out / name)
         manifest = {"schema": "kosha.release-candidate.v1", "project": "kosha", "version": version,
                     "commit": state["head"], "target": package.target_triple(),
                     "publication_candidate": candidate, "validation": "selected host checks passed",
