@@ -28,6 +28,9 @@ may have different controls. Include your version when reporting a problem.
 
 ## About this manual
 
+Read the searchable [online manual](https://coolnew.github.io/kosha/manual/)
+or start at the [Kosha website](https://coolnew.github.io/kosha/).
+
 The pages are ordinary Markdown with relative links. This index defines their
 reading order for a website or combined PDF. Each page has its own title and
 can be read independently. Developer instructions live outside this folder.

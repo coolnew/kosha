@@ -146,6 +146,11 @@ jobs:
       - name: Public Markdown links
         run: python3 xtask-docs.py
 
+      - name: Build public manual website
+        run: |
+          python3 -m pip install -r website/requirements.txt
+          python3 xtask-website.py
+
       - name: Consistent versions
         run: |
           python3 xtask-version.py

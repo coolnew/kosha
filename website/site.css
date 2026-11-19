@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: MIT OR Apache-2.0 */
+/* SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors */
+:root { --kosha-accent: #17695d; --kosha-border: #cbd7d4; }
+body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.75; }
+[data-bs-theme="dark"] { --kosha-accent: #78dbb9; --kosha-border: #344744; }
+body::before { background: transparent; }
+.navbar { background: #132a28 !important; border-bottom: 1px solid #36514b; padding-block: .8rem; }
+.navbar-brand { font-size: 1.5rem; letter-spacing: -.05em; font-weight: 800; }
+a { color: var(--kosha-accent); text-underline-offset: .18em; }
+h1, h2, h3 { font-weight: 700; letter-spacing: -.035em; line-height: 1.15; }
+h1 { margin-block: 1.5rem; }
+h2 { margin-top: 3rem; }
+img { max-width: 100%; height: auto; border-radius: 12px; }
+article img, .col-md-9 img { border: 1px solid var(--kosha-border); box-shadow: 0 18px 55px #0002; margin-block: 1rem 2rem; }
+.hero { padding: 2.5rem 0 1.5rem; max-width: 960px; }
+.hero h1 { font-size: clamp(2.7rem, 5vw, 4.8rem); letter-spacing: -.065em; line-height: 1.02; }
+.hero > p { font-size: 1.15rem; max-width: 730px; }
+.hero .eyebrow { color: var(--kosha-accent); font-size: .78rem; letter-spacing: .2em; font-weight: 800; }
+.hero .platforms { font-size: .84rem; opacity: .75; }
+.button { display: inline-block; border: 1px solid var(--kosha-border); border-radius: 8px; padding: .65rem 1rem; margin: .5rem .45rem .5rem 0; font-size: .95rem; font-weight: 650; text-decoration: none; }
+.button.primary { background: #17695d; border-color: #17695d; color: white; }
+.button:hover { border-color: var(--kosha-accent); box-shadow: 0 3px 12px #0002; }
+.feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; margin-block: 1.5rem; }
+.feature-grid > div { border-top: 3px solid var(--kosha-accent); padding: 1.2rem 0; }
+.feature-grid h3 { font-size: 1.18rem; }
+.feature-grid p { font-size: .96rem; }
+.bs-sidebar { border-radius: 10px; border: 1px solid var(--kosha-border); }
+pre { border-radius: 9px; padding: 1rem; }
+table { display: block; max-width: 100%; overflow-x: auto; }
+footer { margin-top: 4rem; }
+@media (min-width: 1400px) { .container { max-width: 1320px; } }
+@media (max-width: 800px) { .feature-grid { grid-template-columns: 1fr; gap: 0; } .hero { padding-top: 1rem; } }

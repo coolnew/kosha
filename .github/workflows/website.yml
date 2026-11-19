@@ -1,0 +1,107 @@
+name: website
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [coverage]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+# One publisher owns the entire Pages site. A coverage run must never replace
+# the manual, and a documentation push must never discard measured coverage.
+concurrency:
+  group: kosha-website
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.repository == 'coolnew/kosha' &&
+      vars.KOSHA_COVERAGE_PAGES == 'true' &&
+      github.event.repository.visibility == 'public' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # Always build current main, even when an older coverage run completed.
+      # Never check out a workflow_run payload's contributor-controlled ref.
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Reviewed public checkout only
+        run: |
+          test ! -e publication/files.jsonl
+          test ! -e CLAUDE.md
+          test ! -e .env
+      - name: Select latest retained successful main coverage
+        id: coverage
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const {execFileSync} = require('node:child_process');
+            const repo = context.repo;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...repo, workflow_id: 'coverage.yml', branch: 'main', status: 'success', per_page: 100
+            });
+            for (const run of runs) {
+              if (run.head_repository?.full_name !== 'coolnew/kosha' ||
+                  !['push', 'workflow_dispatch', 'schedule'].includes(run.event) ||
+                  !/^[0-9a-f]{40}$/.test(run.head_sha)) continue;
+              try { execFileSync('git', ['merge-base', '--is-ancestor', run.head_sha, 'HEAD']); }
+              catch { continue; }
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
+                {...repo, run_id: run.id, per_page: 100});
+              const name = `coverage-linux-${run.head_sha}`;
+              if (!artifacts.some(a => a.name === name && !a.expired)) continue;
+              core.setOutput('run', String(run.id));
+              core.setOutput('name', name);
+              core.setOutput('sha', run.head_sha);
+              return;
+            }
+            core.notice('No retained successful coverage report; publish an explicit unavailable page.');
+      - uses: actions/download-artifact@v7
+        if: steps.coverage.outputs.run != ''
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.coverage.outputs.run }}
+          name: ${{ steps.coverage.outputs.name }}
+          path: target/website-coverage
+      - run: python -m pip install -r website/requirements.txt
+      - name: Build manual and compose coverage
+        env:
+          COVERAGE_SHA: ${{ steps.coverage.outputs.sha }}
+        run: |
+          if [ -n "$COVERAGE_SHA" ]; then
+            python xtask-website.py --coverage target/website-coverage/site --coverage-sha "$COVERAGE_SHA"
+          else
+            python xtask-website.py
+          fi
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: target/website/site
+
+  deploy:
+    name: Publish manual and coverage
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: false
+      - id: deploy
+        uses: actions/deploy-pages@v5

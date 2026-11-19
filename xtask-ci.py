@@ -27,6 +27,7 @@ PYTHON_ONLY = {
     "xtask-release.py", "xtask-llms.py", "xtask-marketplace.py",
     "test_xtask_version.py", "test_xtask_llms.py", "test_xtask_release.py",
     "test_xtask_marketplace.py",
+    "xtask-website.py", "test_xtask_website.py",
 }
 
 
@@ -41,6 +42,8 @@ def classify(paths, force=False, reason="changed paths"):
         elif name.startswith("docs/manual/") and p.suffix == ".md":
             continue
         elif name.startswith("docs/manual/images/") and p.suffix == ".png":
+            continue
+        elif name in {"website/index.md", "website/site.css", "website/mkdocs.yml", "website/requirements.txt"}:
             continue
         else:
             full = True

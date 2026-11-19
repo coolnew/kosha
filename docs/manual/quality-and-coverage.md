@@ -25,11 +25,18 @@ for an offline report and annotated source. It also contains LCOV and JSON total
 Artifacts are retained for 30 days; GitHub requires signing in to download them.
 Access to runs and artifacts follows the repository's visibility and permissions.
 
-When the maintainer enables Pages publication, the same report is available as
-a normal website: the site landing page links to `/coverage/html/index.html`, and
-`/coverage.svg` provides its badge. No hosted report URL is claimed until that
-deployment is enabled and verified. The Actions report remains available while
-Pages is disabled. No external coverage account is required.
+The [Kosha website](https://coolnew.github.io/kosha/) hosts this manual and a
+separate [coverage report](https://coolnew.github.io/kosha/coverage/). The report
+links to annotated source, measured totals and their source commit. The
+[Linux coverage badge](https://coolnew.github.io/kosha/coverage.svg) is also
+available for repository links. No external coverage account is required.
+
+Website updates reuse the latest retained successful main-branch measurement;
+editing ordinary documentation does not rerun Rust coverage. The manual follows
+current main, while coverage can describe an earlier commit: always check its
+commit and date. If no retained report is available, the website says so rather
+than presenting an invented percentage. Actions artifacts remain available
+independently of Pages publication.
 
 ## What the numbers mean
 

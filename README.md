@@ -160,7 +160,9 @@ dependencies; Linux prerequisites are in the [build guide](docs/manual/linux.md#
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
 
-See [test quality and coverage reports](docs/manual/quality-and-coverage.md),
+Read the [website and searchable manual](https://coolnew.github.io/kosha/),
+[measured coverage report](https://coolnew.github.io/kosha/coverage/),
+[test quality and coverage scope](docs/manual/quality-and-coverage.md),
 [coverage runs](https://github.com/coolnew/kosha/actions/workflows/coverage.yml),
 [Contributing](CONTRIBUTING.md), [Releasing](RELEASING.md), and
 [Changes](CHANGELOG.md). Include `kosha --version`, platform, scan method, and

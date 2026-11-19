@@ -89,31 +89,5 @@ jobs:
             target/coverage/llvm-summary.json
           if-no-files-found: error
           retention-days: 30
-      - name: Prepare optional Pages artifact
-        if: vars.KOSHA_COVERAGE_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event.repository.visibility == 'public'
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: target/coverage/site
-
-  pages:
-    name: Publish coverage Pages
-    needs: measure
-    if: vars.KOSHA_COVERAGE_PAGES == 'true' && github.ref == 'refs/heads/main' && github.event.repository.visibility == 'public'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    concurrency:
-      group: coverage-pages
-      cancel-in-progress: false
-    steps:
-      # Configure Pages in repository settings first. This does not enable it
-      # or change repository visibility, custom domains, or access settings.
-      - uses: actions/configure-pages@v6
-        with:
-          enablement: false
-      - id: deploy
-        uses: actions/deploy-pages@v5
+      # website.yml consumes this measured artifact and publishes it alongside
+      # the manual. Coverage never replaces the entire Pages site itself.
