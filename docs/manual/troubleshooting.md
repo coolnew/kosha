@@ -3,7 +3,7 @@
 ## macOS says the app is damaged or cannot be verified
 
 Some early DMGs, including 0.10.5, shipped without a complete app-bundle seal.
-Development packaging after 0.10.6 ad-hoc signs the fully assembled bundle and
+Starting with 0.10.7-rc.1, packaging ad-hoc signs the fully assembled bundle and
 checks its signature before and after DMG packaging. This is an integrity fix,
 not Developer ID signing or notarization; it does not guarantee Gatekeeper
 will accept a fresh download. Check your version and the release's macOS notes.

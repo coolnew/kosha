@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.10.7-rc.1] — 2026-11-20
+
+# macOS validation candidate
+
+This is the first release candidate for 0.10.7. Please test the fresh Apple
+Silicon DMG download and report results on the linked issues. It is a testing
+preview and does not replace the latest regular release.
+
+### What to validate
+
+- Refs #1: the complete macOS app bundle and companion CLI now receive ad-hoc
+  signatures, checked before packaging and after DMG extraction. Test opening
+  the downloaded DMG and copied application. These signatures verify integrity;
+  they are not Developer ID signing or Apple notarization. Gatekeeper may still
+  block a fresh download. Please report the exact message and macOS version;
+  this issue remains open until native download testing establishes the result.
+- Refs #2: test Command+Q from the main window, including after a scan.
+- Refs #3: test the native Kosha menu and Quit Kosha item. Both quit paths should
+  save window geometry before exiting.
+
+Native interactive macOS acceptance remains pending. Hosted packaging and
+signature checks do not prove that a browser-downloaded app passes Gatekeeper
+or that interactive shortcuts work. Issue #4 (context-menu deletion) is not
+included in this candidate.
+
+Windows ZIP, Linux archive, macOS DMG, sources and SHA-256 sidecars are included
+after successful hosted validation. Preview builds omit Microsoft Store MSIX.
+Please attach the version, operating system and steps/results to the relevant
+issue, avoiding personal paths or file names.
+
 - Added a public privacy policy covering local filesystem data, saved records,
   optional marketplace requests, website services and support. It is available
   from the website footer and included with offline release documentation.
@@ -191,7 +223,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.6...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.7-rc.1...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -204,3 +236,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.5]: https://github.com/coolnew/kosha/releases/tag/v0.10.5
 
 [0.10.6]: https://github.com/coolnew/kosha/releases/tag/v0.10.6
+
+[0.10.7-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.7-rc.1
