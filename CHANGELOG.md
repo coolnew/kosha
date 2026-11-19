@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.4] — 2026-11-19
+
+Kosha 0.10.4 is the first public release candidate incorporating the reviewed CLI feedback. It includes the desktop explorer, CLI, manual website and verified multi-platform release packaging.
+
+### Release preparation
+
+- Include the updated user manual and concise agent guide with the new CLI behavior.
+- Keep the release as a draft until platform checks, asset verification and final publication review are complete.
 
 - Classify draft release channels by the actual SemVer prerelease suffix;
   document optional public preview publication and reviewed promotion instead
@@ -125,10 +132,12 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.4...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
 [0.10.2]: https://github.com/coolnew/kosha/releases/tag/v0.10.2
 
 [0.10.3]: https://github.com/coolnew/kosha/releases/tag/v0.10.3
+
+[0.10.4]: https://github.com/coolnew/kosha/releases/tag/v0.10.4
