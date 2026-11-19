@@ -24,6 +24,13 @@ uses `xtask-release.py --execute` for each host. Workspace tests/clippy and
 repository/Python gates precede packaging; a build alone cannot create a draft.
 It retains source ZIP/TAR.GZ, host binary archives, SHA-256 sidecars and per-host
 manifests. Manual rehearsals need committed, dated candidate release notes too.
+Linux is the sole producer of the shared source ZIP/TAR.GZ. Windows and macOS
+use `--binary-only`, so their manifests list their own host archive only.
+Source archive compression and ZIP metadata can differ across host/toolchain
+environments; do not compare one producer's compressed archive against another
+producer's manifest. The draft step verifies the exact three host manifests,
+all five published archives, sizes, SHA-256 sidecars and source commit before
+uploading anything. No digest mismatch is ignored.
 Check downloaded SHA-256 sidecars with `sha256sum -c FILE.sha256` on Linux or
 compare `Get-FileHash FILE -Algorithm SHA256` on Windows. Hashes verify the bytes;
 they do not provide code signing or replace platform acceptance.
@@ -43,6 +50,9 @@ add `--execute` to make only those worktree edits. Review and commit them before
 building the candidate. Existing artifacts and unrelated edits are preserved.
 Source archives always contain selected public files, even when built from a
 private development checkout; private-built binaries are development candidates.
+For a standalone host-only package, add `--binary-only`; `--source-only` produces
+sources without host binaries. The two options are mutually exclusive. The
+default local plan continues to include both source and host archives.
 
 After reviewing the candidate, replace `X.Y.Z` with the exact workspace version:
 

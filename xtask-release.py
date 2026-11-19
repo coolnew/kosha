@@ -190,6 +190,7 @@ def write_sources(files: dict[str, bytes], out: Path, version: str, epoch: int) 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(f"{prefix}/{name}", (2026, 1, 1, 0, 0, 0))
+            info.create_system = 3  # Stable Unix metadata, even on a Windows producer.
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
             archive.writestr(info, data)
@@ -204,6 +205,56 @@ def write_sources(files: dict[str, bytes], out: Path, version: str, epoch: int) 
                 info.mtime = epoch
                 archive.addfile(info, io.BytesIO(data))
     return [zip_path, tar_path]
+
+
+RELEASE_TARGETS = {"x86_64-unknown-linux-gnu": ".tar.gz",
+                   "x86_64-pc-windows-msvc": ".zip", "aarch64-apple-darwin": ".tar.gz"}
+SOURCE_OWNER = "x86_64-unknown-linux-gnu"
+
+
+def verify_release_assets(root: Path, commit: str) -> None:
+    """Verify the exact published inventory, with one producer for shared sources."""
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Expected the full selected source commit")
+    files = list(root.iterdir())
+    if any(not p.is_file() or p.is_symlink() for p in files):
+        raise ValueError("Release assets must be regular files")
+    manifests = {p.name for p in files if p.name.startswith("release-manifest-") and p.suffix == ".json"}
+    if manifests != {f"release-manifest-{target}.json" for target in RELEASE_TARGETS}:
+        raise ValueError("Expected exactly the three named host manifests")
+    expected, version = set(manifests), None
+    for target, extension in RELEASE_TARGETS.items():
+        manifest = json.loads((root / f"release-manifest-{target}.json").read_text(encoding="utf-8"))
+        if (manifest.get("schema") != "kosha.release-candidate.v1" or manifest.get("project") != "kosha"
+                or manifest.get("publication_candidate") is not True or manifest.get("commit") != commit
+                or manifest.get("target") != target):
+            raise ValueError(f"Manifest is not from the selected public commit/host: {target}")
+        current = manifest.get("version", "")
+        semver_key(current)
+        if version is not None and current != version:
+            raise ValueError("Host manifest versions disagree")
+        version = current
+        prefix = f"kosha-v{version}"
+        names = {prefix + "-" + target + extension}
+        if target == SOURCE_OWNER:
+            names.update({prefix + "-source.zip", prefix + "-source.tar.gz"})
+        entries = manifest.get("artifacts", [])
+        if len(entries) != len(names) or {e.get("name") for e in entries} != names:
+            raise ValueError(f"Manifest inventory does not match its published files: {target}")
+        for entry in entries:
+            name = entry["name"]  # Membership above confines this to exact basenames.
+            archive, sidecar = root / name, root / (name + ".sha256")
+            if not archive.is_file() or not sidecar.is_file():
+                raise ValueError(f"Missing archive or SHA-256 sidecar: {name}")
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            if (entry.get("sha256") != digest or type(entry.get("bytes")) is not int
+                    or entry["bytes"] != archive.stat().st_size):
+                raise ValueError(f"Manifest/archive hash or size mismatch: {name}")
+            if sidecar.read_text(encoding="utf-8").strip() != f"{digest}  {name}":
+                raise ValueError(f"SHA-256 sidecar mismatch: {name}")
+            expected.update({name, name + ".sha256"})
+    if {p.name for p in files} != expected:
+        raise ValueError("Unexpected files in published release inventory")
 
 
 def validation_commands(root: Path) -> list[list[str]]:
@@ -239,7 +290,9 @@ def main() -> int:
     parser.add_argument("--prepare", action="store_true", help="Prepare version/changelog edits only; never commits them")
     parser.add_argument("--version", help="Prepared version, or the expected existing candidate version")
     parser.add_argument("--notes-file", type=Path, help="Reviewed public notes for --prepare")
-    parser.add_argument("--source-only", action="store_true", help="Validate and archive sources without building host binaries")
+    content = parser.add_mutually_exclusive_group()
+    content.add_argument("--source-only", action="store_true", help="Validate and archive sources without building host binaries")
+    content.add_argument("--binary-only", action="store_true", help="Validate and package this host only; CI publishes shared source archives from Linux")
     parser.add_argument("--output-dir", type=Path, help="Fresh subdirectory within selected checkout's dist/")
     parser.add_argument("--target-dir", type=Path, help="Separate rebuildable Cargo target directory")
     args = parser.parse_args()
@@ -254,8 +307,8 @@ def main() -> int:
         if git(root, "tag", "--list", f"v{version}") and (args.prepare or git(root, "rev-list", "-n", "1", f"v{version}") != state["head"]):
             raise ValueError("Candidate tag already points elsewhere; release tags are never moved")
         if args.prepare:
-            if not args.version or not args.notes_file or args.source_only:
-                raise ValueError("--prepare needs --version and --notes-file, without --source-only")
+            if not args.version or not args.notes_file or args.source_only or args.binary_only:
+                raise ValueError("--prepare needs --version and --notes-file, without source/binary-only selection")
             notes = args.notes_file.read_text(encoding="utf-8-sig")
             changes = preparation(root, version, notes, date.today().isoformat())
             print(json.dumps({"mode": "prepare", "execute": args.execute, "version": version,
@@ -306,7 +359,7 @@ def main() -> int:
                 "dated_release_notes_ready": notes_ready,
                 "output": str(out), "cargo_target": str(target), "validations": checks,
                 "build": [] if args.source_only else ["cargo", "build", "--locked", "--release", "-p", "kosha-cli", "-p", "kosha-gui"],
-                "archives": ["source.zip", "source.tar.gz"] + ([] if args.source_only else ["host binary archive"]),
+                "archives": ([] if args.binary_only else ["source.zip", "source.tar.gz"]) + ([] if args.source_only else ["host binary archive"]),
                 "git_mutations": [], "remote_mutations": [],
                 "remaining_release_acceptance": "Linux/non-host, clean-machine GUI/Sandbox, agreement and hosted workflow checks remain separate evidence"}
         print(json.dumps(plan, indent=2), flush=True)
@@ -328,7 +381,7 @@ def main() -> int:
             raise ValueError("Public source bytes changed during validation/build")
         out.mkdir(parents=True, exist_ok=True)
         epoch = int(git(root, "show", "-s", "--format=%ct", "HEAD"))
-        artifacts = write_sources(files, out, version, epoch)
+        artifacts = [] if args.binary_only else write_sources(files, out, version, epoch)
         if not args.source_only:
             package.ROOT, package.DIST = root, out
             previous_target = os.environ.get("CARGO_TARGET_DIR")

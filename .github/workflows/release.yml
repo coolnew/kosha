@@ -86,7 +86,11 @@ jobs:
         run: >-
           python -c "import os,runpy; actual=runpy.run_path('xtask-package.py')['target_triple'](); assert actual == os.environ['EXPECTED_TARGET'], 'Runner architecture changed: ' + actual"
       - name: Validate, build, package, and smoke-test clean candidate
+        if: runner.os == 'Linux'
         run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate
+      - name: Validate and package host binaries (shared sources are built on Linux)
+        if: runner.os != 'Linux'
+        run: python xtask-release.py --execute --binary-only --target-dir target --output-dir dist/candidate
       - name: Name host-specific release manifest
         env:
           RELEASE_TARGET: ${{ matrix.target }}
@@ -120,6 +124,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
         with:
           path: artifacts
@@ -127,27 +132,9 @@ jobs:
       - name: Verify downloaded archives and manifests
         run: |
           python3 - <<'PY'
-          import hashlib, json, os
+          import os, runpy
           from pathlib import Path
-          root = Path("artifacts")
-          archives = {p.name for p in root.iterdir() if p.name.endswith((".zip", ".tar.gz"))}
-          sidecars = {p.name.removesuffix(".sha256") for p in root.glob("*.sha256")}
-          if not archives or archives != sidecars:
-              raise SystemExit("Missing archive or SHA-256 sidecar")
-          hashes = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in archives}
-          for name, digest in hashes.items():
-              if (root / (name + ".sha256")).read_text().strip() != f"{digest}  {name}":
-                  raise SystemExit("SHA-256 mismatch: " + name)
-          manifests = list(root.glob("release-manifest-*.json"))
-          if len(manifests) != 3:
-              raise SystemExit("Expected all three host manifests")
-          for path in manifests:
-              manifest = json.loads(path.read_text())
-              if not manifest["publication_candidate"] or manifest["commit"] != os.environ["GITHUB_SHA"]:
-                  raise SystemExit("Manifest is not from the selected public commit")
-              for entry in manifest["artifacts"]:
-                  if hashes.get(entry["name"]) != entry["sha256"]:
-                      raise SystemExit("Manifest/archive hash mismatch: " + entry["name"])
+          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"])
           PY
       - uses: softprops/action-gh-release@v3
         with:

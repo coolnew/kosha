@@ -4,6 +4,7 @@
 import importlib.util
 from contextlib import redirect_stdout
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -94,6 +95,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(left.read_bytes(), right.read_bytes())
         with zipfile.ZipFile(outputs[0][0]) as archive:
             self.assertEqual(set(archive.namelist()), {"kosha-v0.9.1-source/" + p for p in files})
+            self.assertTrue(all(entry.create_system == 3 for entry in archive.infolist()))
         with tarfile.open(outputs[0][1]) as archive:
             for entry in archive.getmembers():
                 self.assertEqual(archive.extractfile(entry).read(), files[entry.name.removeprefix("kosha-v0.9.1-source/")])
@@ -254,7 +256,7 @@ class ReleaseTests(unittest.TestCase):
         before = {"head": "a" * 40, "index": "unchanged", "refs": "unchanged", "status": ""}
         def selected_git(root, *args):
             return str(getattr(self, "reported_git_root", self.root)) if args == ("rev-parse", "--show-toplevel") else ""
-        with patch.object(release.sys, "argv", ["xtask-release.py", "--repo-path", str(self.root)]), \
+        with patch.object(release.sys, "argv", ["xtask-release.py", "--repo-path", str(self.root), *getattr(self, "release_flags", [])]), \
              patch.object(release, "module", selected_module), patch.object(release, "git", selected_git), \
              patch.object(release, "git_state", return_value=before), \
              patch.object(release, "validation_commands", return_value=[["must-not-run"]]), \
@@ -262,7 +264,14 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(release.main(), 0)
         run.assert_not_called()
         self.assertFalse((self.root / "dist").exists())
-        self.assertFalse(json.loads(output.getvalue())["execute"])
+        plan = json.loads(output.getvalue())
+        self.assertFalse(plan["execute"])
+        if "--binary-only" in getattr(self, "release_flags", []):
+            self.assertEqual(plan["archives"], ["host binary archive"])
+
+    def test_binary_only_dry_run_omits_shared_sources(self):
+        self.release_flags = ["--binary-only"]
+        self.test_dry_run_never_builds_or_creates_output()
 
     def test_dry_run_accepts_equivalent_git_root_spelling(self):
         self.reported_git_root = self.root / ".." / self.root.name
@@ -291,6 +300,60 @@ class ReleaseTests(unittest.TestCase):
         self.root = folder.resolve()
         self.reported_git_root = alias
         self.test_dry_run_never_builds_or_creates_output()
+
+
+class ReleaseAssetTests(unittest.TestCase):
+    commit = "a" * 40
+
+    def seed(self, root):
+        for target, extension in release.RELEASE_TARGETS.items():
+            names = [f"kosha-v0.10.2-{target}{extension}"]
+            if target == release.SOURCE_OWNER:
+                names += ["kosha-v0.10.2-source.zip", "kosha-v0.10.2-source.tar.gz"]
+            entries = []
+            for name in names:
+                data = ("archive " + name).encode()
+                digest = hashlib.sha256(data).hexdigest()
+                (root / name).write_bytes(data)
+                (root / (name + ".sha256")).write_text(f"{digest}  {name}\n", encoding="utf-8")
+                entries.append({"name": name, "sha256": digest, "bytes": len(data)})
+            manifest = {"schema": "kosha.release-candidate.v1", "project": "kosha", "version": "0.10.2",
+                        "commit": self.commit, "target": target, "publication_candidate": True, "artifacts": entries}
+            (root / f"release-manifest-{target}.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    def test_three_hosts_and_one_shared_source_owner_verify_together(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.seed(root)
+            release.verify_release_assets(root, self.commit)
+
+    def test_integrity_provenance_and_exact_inventory_are_required(self):
+        for problem in ["archive", "sidecar", "missing", "commit", "target", "version", "private", "size", "extra", "unpublished-source"]:
+            with self.subTest(problem=problem), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                self.seed(root)
+                path = root / "release-manifest-x86_64-pc-windows-msvc.json"
+                manifest = json.loads(path.read_text())
+                source = root / "kosha-v0.10.2-source.zip"
+                if problem == "archive":
+                    source.write_bytes(b"changed")
+                elif problem == "sidecar":
+                    (root / (source.name + ".sha256")).write_text("bad digest")
+                elif problem == "missing":
+                    source.unlink()
+                elif problem == "extra":
+                    (root / "unreviewed.zip").write_bytes(b"extra")
+                elif problem == "unpublished-source":
+                    manifest["artifacts"].append({"name": source.name, "sha256": "b" * 64, "bytes": 1})
+                elif problem == "private":
+                    manifest["publication_candidate"] = False
+                elif problem == "size":
+                    manifest["artifacts"][0]["bytes"] += 1
+                else:
+                    manifest[problem] = {"commit": "b" * 40, "target": release.SOURCE_OWNER, "version": "0.10.3"}[problem]
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    release.verify_release_assets(root, self.commit)
 
 
 if __name__ == "__main__":
