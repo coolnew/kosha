@@ -1507,9 +1507,10 @@ fn a_name_windows_cannot_ask_for_is_refused_rather_than_swapped() {
         .unwrap();
 
         let tree = scan(dir.path());
-        let target = tree
-            .find(&dir.path().join("victim.bin "))
-            .expect("the scanner reads the name it cannot ask for");
+        // Look up the exact enumerated name below the canonical scan root.
+        // Resolving the leaf through Win32 would trim the space and name its
+        // neighbour; using the raw temp path can instead miss a short alias.
+        let target = node(&tree, "victim.bin ");
 
         let session = Session::new(dir.path().to_path_buf());
         let plan = ActionPlan::build(&tree, &[target], Action::Trash, &session);
@@ -1564,7 +1565,7 @@ fn a_file_named_after_a_device_is_acted_on_or_told_why_not() {
         .unwrap();
 
         let tree = scan(dir.path());
-        let id = tree.find(&dir.path().join(name)).expect("in the tree");
+        let id = node(&tree, name);
         let mut session = Session::new(dir.path().to_path_buf());
         session.enable_read_write(UserConfirmed::from_dialog_acceptance());
         let plan = ActionPlan::build(&tree, &[id], Action::DeletePermanently, &session);
@@ -1588,7 +1589,7 @@ fn a_file_named_after_a_device_is_acted_on_or_told_why_not() {
     )
     .unwrap();
     let tree = scan(dir.path());
-    let id = tree.find(&dir.path().join("NUL")).expect("NUL is scanned");
+    let id = node(&tree, "NUL");
     let session = Session::new(dir.path().to_path_buf());
     let plan = ActionPlan::build(&tree, &[id], Action::Trash, &session);
     assert!(plan.items().is_empty());

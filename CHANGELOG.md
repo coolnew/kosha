@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Update workflow actions to Node.js 24 runtimes. Resolve Windows safety-test
+  fixture entries by their exact scanned names, independent of short temp paths.
+
 - Use the recorded canonical root in absolute-path prefix query tests, including
   macOS temporary-directory aliases and Windows short paths.
 
