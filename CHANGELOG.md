@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.3] — 2026-11-19
+
+- Fix multi-platform release assembly by producing shared source archives once on Linux and keeping each host manifest limited to its published artifacts.
+- Verify the complete release inventory, SHA-256 digests, archive sizes, versions, host targets and source commit before creating a draft release.
+- Set consistent source ZIP producer metadata while retaining the existing Windows and macOS release-path fixes.
+
 ## [0.10.2] — 2026-11-19
 
 - Fix release validation for Windows short-path aliases and macOS canonical temporary-directory paths, while retaining repository and build-output confinement checks.
@@ -107,8 +113,10 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.3...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
 [0.10.2]: https://github.com/coolnew/kosha/releases/tag/v0.10.2
+
+[0.10.3]: https://github.com/coolnew/kosha/releases/tag/v0.10.3
