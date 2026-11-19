@@ -3517,6 +3517,11 @@ impl Render for KoshaApp {
             .relative()
             .track_focus(&self.focus)
             .key_context("Kosha")
+            .on_action(
+                cx.listener(|app, _: &crate::native_menu::Quit, window, cx| {
+                    app.run_command(commands::Action::Quit, window, cx);
+                }),
+            )
             .capture_key_down(cx.listener(Self::on_scan_key))
             .on_key_down(cx.listener(Self::on_key))
             .size_full()

@@ -19,7 +19,9 @@ offline manuals. Copy the CLI to a directory on your `PATH` if you want to use
 it from any terminal; dragging the app to Applications does not install the CLI.
 Copy any manuals you want to keep, then eject the disk image. Check the download
 in Terminal with `shasum -a 256 -c FILE.dmg.sha256` from the download directory.
-The app and disk image are unsigned and not notarized, so macOS Gatekeeper may
+The app has no Developer ID signature and is not notarized; the disk image is
+unsigned. Development packaging after 0.10.6 adds a verified ad-hoc bundle seal,
+which checks integrity but does not establish a trusted publisher. Gatekeeper may
 block them. Follow your organization's policy; see Apple's
 [guidance for opening apps safely](https://support.apple.com/en-us/102445).
 

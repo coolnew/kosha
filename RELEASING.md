@@ -33,8 +33,12 @@ automation or additional packaging dependency is required. Packaging verifies
 the image, mounts it read-only, copies its payload to a disposable directory,
 detaches it, then runs the same binary-stamp and CLI scan checks as other hosts.
 The DMG has a SHA-256 sidecar and appears in its host manifest and final asset
-verification. The image and app are unsigned and not notarized; this packaging
-change does not satisfy Gatekeeper or interactive macOS acceptance by itself.
+verification. After assembling Info.plist and resources, the app bundle and
+loose CLI receive ad-hoc signatures. Strict `codesign` verification must pass
+before creating the DMG and again on the extracted payload before smoke tests.
+These signatures seal the bundle but provide no Developer ID trust. The image
+is unsigned and neither app nor image is notarized; this does not satisfy
+Gatekeeper or interactive macOS acceptance by itself.
 Source archive compression and ZIP metadata can differ across host/toolchain
 environments; do not compare one producer's compressed archive against another
 producer's manifest. The draft step verifies the exact three host manifests,
@@ -188,7 +192,8 @@ Before any publication:
    window behavior. Record any platform-specific limitation rather than treating
    a successful compile as interactive validation.
 3. Review release notes, installation instructions, known issues and user-manual
-   accuracy. State unsigned Windows/macOS binaries and experimental macOS status.
+   accuracy. State Windows signing status, macOS ad-hoc versus Developer ID
+   signing and notarization status, and experimental macOS support.
 4. Obtain explicit maintainer approval for the selected release and channel.
    A commit/tag push is separate from approval to publish its draft.
 

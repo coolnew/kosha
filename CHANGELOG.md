@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Added a native macOS application menu and Command+Q quit binding. Native
+  interaction validation is pending (references issues #2 and #3).
+- Seal the complete macOS app bundle and CLI with ad-hoc signatures, verify
+  them before DMG creation and again after extraction. This addresses bundle
+  integrity, not Developer ID trust or notarization (references issue #1).
+
 - Redesigned the website homepage with a custom product layout, GUI and CLI
   showcases, clearer navigation, and copyright/license links.
 - Clarified marketplace ownership: production catalogs and packs are maintained

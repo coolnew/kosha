@@ -28,6 +28,7 @@ mod drive_history;
 mod elevate;
 mod geometry;
 mod icons;
+mod native_menu;
 mod owners;
 mod places;
 mod query_help;
@@ -287,6 +288,7 @@ fn main() -> std::process::ExitCode {
         .with_assets(icons::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            native_menu::init(cx);
             // The flag is handed to the window rather than applied here: the
             // saved preference is not known until the settings are read, and
             // deciding between the two in one place is the only way the flag

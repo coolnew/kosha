@@ -14,6 +14,11 @@ The shortcuts below use **Ctrl** on Windows and Linux. On macOS, substitute
 | Ctrl+/ or Ctrl+? | Open query help |
 | Ctrl+Shift+M | Request a change between Read-only and Read-write |
 
+On macOS, **Command+Q** quits Kosha. The macOS menu bar also provides
+**Kosha → Quit Kosha**, including when a search field or modal has focus.
+These controls are part of development after 0.10.6; older builds can use
+**Command+K**, type `Quit kosha`, and run that command instead.
+
 ## File list and search results
 
 These keys apply when focus is outside a text field.

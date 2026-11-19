@@ -204,6 +204,7 @@ def assemble(name: str) -> Path:
         (app / "PkgInfo").write_text("APPL????")
         (app / "Info.plist").write_text(plist(version()))
         shutil.copy2(cli, out / cli.name)
+        sign_mac_payload(out)
     else:
         shutil.copy2(gui, out / gui.name)
         shutil.copy2(cli, out / cli.name)
@@ -236,6 +237,32 @@ def plist(number: str) -> str:
 </dict>
 </plist>
 """
+
+
+def verify_mac_payload(folder: Path) -> None:
+    """Validate the complete bundle seal and CLI, not just a linker's signature.
+
+    This is an integrity check, not a Gatekeeper/notarization acceptance test.
+    """
+    if not MACOS:
+        raise ValueError("macOS signature verification requires codesign on macOS")
+    for target in (folder / "Kosha.app", folder / "kosha"):
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", "--verbose=2",
+                        str(target)], check=True)
+
+
+def sign_mac_payload(folder: Path) -> None:
+    """Ad-hoc seal assembled artifacts before archiving; no signing credentials.
+
+    The app has no nested executable helpers/frameworks. Sign the complete
+    bundle after Info.plist/resources exist, and sign the separately shipped
+    CLI explicitly. Never modify bundle contents after this point.
+    """
+    if not MACOS:
+        raise ValueError("macOS signing requires codesign on macOS")
+    for target in (folder / "Kosha.app", folder / "kosha"):
+        subprocess.run(["codesign", "--force", "--sign", "-", str(target)], check=True)
+    verify_mac_payload(folder)
 
 
 def archive(folder: Path) -> Path:
@@ -336,6 +363,9 @@ def verify(path: Path, folder_name: str) -> list:
             tf.extractall(sandbox)
 
     unpacked = sandbox / folder_name
+    if MACOS:
+        # The shipped/mounted payload must still verify before executing it.
+        verify_mac_payload(unpacked)
     # Verify the archive, not only the staging directory. A working scanner
     # with a README pointing at missing installation/manual files is incomplete.
     required_docs = [Path(p) for p in documentation_payloads()]

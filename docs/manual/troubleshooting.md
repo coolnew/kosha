@@ -1,5 +1,26 @@
 # Troubleshooting
 
+## macOS says the app is damaged or cannot be verified
+
+Some early DMGs, including 0.10.5, shipped without a complete app-bundle seal.
+Development packaging after 0.10.6 ad-hoc signs the fully assembled bundle and
+checks its signature before and after DMG packaging. This is an integrity fix,
+not Developer ID signing or notarization; it does not guarantee Gatekeeper
+will accept a fresh download. Check your version and the release's macOS notes.
+
+Download only from the official release page, compare the archive's SHA-256
+with its published sidecar, and report persistent launch failures with your
+macOS version and exact message. A matching digest alone does not establish
+publisher trust. Avoid disabling system security or treating an unexplained
+“damaged” message as proof the app is safe. See [installation](getting-started.md).
+
+## macOS has no Quit menu or Command+Q does not work
+
+Development after 0.10.6 adds **Kosha → Quit Kosha** and **Command+Q**.
+For older builds, open the command palette with **Command+K**, type
+`Quit kosha`, and run it. If the updated controls still fail, include whether
+focus was in the file list, a text field, or a modal in your report.
+
 ## The Linux desktop app or file picker does not open
 
 See [Linux dependencies and launch diagnostics](linux.md#if-launch-or-a-dialog-fails)

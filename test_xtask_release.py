@@ -312,6 +312,50 @@ class ReleaseTests(unittest.TestCase):
 
 
 class MacDmgTests(unittest.TestCase):
+    def test_mac_payload_signs_complete_bundle_and_cli_then_verifies_both(self):
+        folder = Path("candidate")
+        with patch.object(package, "MACOS", True), patch.object(package.subprocess, "run") as run:
+            package.sign_mac_payload(folder)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands, [
+            ["codesign", "--force", "--sign", "-", str(folder / "Kosha.app")],
+            ["codesign", "--force", "--sign", "-", str(folder / "kosha")],
+            ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(folder / "Kosha.app")],
+            ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(folder / "kosha")],
+        ])
+        self.assertTrue(all(call.kwargs["check"] for call in run.call_args_list))
+
+    def test_invalid_mac_signature_stops_packaging(self):
+        with patch.object(package, "MACOS", True), patch.object(package.subprocess, "run",
+             side_effect=subprocess.CalledProcessError(1, "codesign")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                package.sign_mac_payload(Path("candidate"))
+        self.assertEqual(run.call_count, 1)
+
+    @unittest.skipUnless(package.MACOS, "Native macOS bundle signing and DMG integrity")
+    def test_native_mac_bundle_seal_survives_dmg_and_detects_changed_resources(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            folder = root / "kosha-signing-test"
+            app = folder / "Kosha.app/Contents"
+            (app / "MacOS").mkdir(parents=True)
+            (app / "Resources").mkdir()
+            source = root / "main.c"
+            source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+            subprocess.run(["cc", str(source), "-o", str(folder / "kosha")], check=True)
+            package.shutil.copy2(folder / "kosha", app / "MacOS/kosha-gui")
+            (app / "Info.plist").write_text(package.plist("0.10.6"), encoding="utf-8")
+            (app / "Resources/fixture.txt").write_text("original", encoding="utf-8")
+            package.sign_mac_payload(folder)
+            self.assertTrue((app / "_CodeSignature/CodeResources").is_file())
+            image = package.archive(folder)
+            unpacked = root / "unpacked"
+            package.unpack_dmg(image, unpacked)
+            package.verify_mac_payload(unpacked)
+            (unpacked / "Kosha.app/Contents/Resources/fixture.txt").write_text("changed", encoding="utf-8")
+            with self.assertRaises(subprocess.CalledProcessError):
+                package.verify_mac_payload(unpacked)
+
     def test_mac_archive_creates_compressed_dmg_without_changing_payload(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp) / "kosha-v0.10.4-aarch64-apple-darwin"
