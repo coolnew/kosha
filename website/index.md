@@ -1,26 +1,141 @@
+---
+title: Understand your disk
+---
+
 <div class="hero" markdown="1">
 
-<p class="eyebrow">YOUR DISK, UNDERSTOOD.</p>
+<div class="hero-copy" markdown="1">
 
-# Find the space.<br>Keep what matters.
+<p class="eyebrow"><span class="status-dot"></span> DISK EXPLORER · DESKTOP + CLI</p>
 
-Kosha turns a crowded drive into a clear picture. Explore a visual map of your
-files, search in plain language, and compare snapshots to see what changed.
-One fast disk explorer. A desktop app for you. A CLI for your tools and agents.
+# Less disk mystery.<br>More room for<br><span class="accent-text">what matters.</span>
 
-[Download Kosha](https://github.com/coolnew/kosha/releases){ .button .primary }
-[Get started](../docs/manual/getting-started.md){ .button }
+See what’s filling your drive. Find the files you meant to find.
+Know what changed. Kosha brings a visual disk explorer, plain-language
+search, and a scriptable CLI into one fast, local toolkit.
+{ .hero-description }
 
-Windows · Linux · Experimental macOS · Open source · MIT / Apache 2.0
+[Download Kosha ↗](https://github.com/coolnew/kosha/releases/latest){ .button .primary }
+[Take a look ↓](#a-clearer-picture-in-one-scan){ .button .secondary }
+
+Windows · Linux · Experimental macOS
 { .platforms }
+
+Open source · Read-only scanning · No model required
+{ .hero-assurance }
 
 </div>
 
-![Kosha desktop showing a visual map of disk usage and ranked findings](../docs/manual/images/gui-overview-dark.png)
+<div class="hero-preview" markdown="1">
 
-## Millions of entries. A clearer picture.
+<div class="window-label"><span></span><span></span><span></span><span class="window-title">Your disk, understood.</span></div>
 
-<p class="eyebrow">WINDOWS REFERENCE RUNS · KOSHA 0.10.3</p>
+![Kosha desktop with disk usage treemap, file list and ranked findings](../docs/manual/images/gui-overview-dark.png)
+
+<div class="preview-caption"><span class="status-dot"></span> One scan. A map, searchable files, and useful findings.</div>
+
+</div>
+
+</div>
+
+<div class="value-strip" markdown="1">
+
+**A map for your files.** A memory for your disk. A CLI for your workflow.
+
+[Explore the manual →](../docs/manual/README.md)
+
+</div>
+
+<section class="home-section" markdown="1">
+
+<p class="eyebrow">FROM “WHERE DID IT GO?” TO “THERE IT IS.”</p>
+
+## A clearer picture, in one scan.
+
+Big files are only part of the story. See the space they occupy, understand
+the findings, and narrow the view to what matters to you.
+{ .section-intro }
+
+<div class="feature-grid" markdown="1">
+
+<div class="feature-card" markdown="1">
+
+<span class="feature-number">01 / EXPLORE</span>
+
+### Follow the space.
+
+Go from a whole drive to a single folder in the treemap. Review ranked
+findings beside your files, with explanations to guide the next step.
+
+[Meet the desktop →](../docs/manual/desktop-tour.md)
+
+</div>
+<div class="feature-card" markdown="1">
+
+<span class="feature-number">02 / FIND</span>
+
+### Search like you think.
+
+“Images larger than 10 MB.” “Files created last week.” See the interpretation,
+edit the query, and export the matching paths as TXT, CSV, or JSONL.
+
+[Explore smart search →](../docs/manual/results-and-search.md)
+
+</div>
+<div class="feature-card" markdown="1">
+
+<span class="feature-number">03 / COMPARE</span>
+
+### Remember what changed.
+
+Keep snapshots and compare them to see where space grew. Return to a saved
+drive scan with its age visible, then rescan when you want a fresh view.
+
+[Work with snapshots →](../docs/manual/snapshots.md)
+
+</div>
+
+</div>
+
+</section>
+
+<section class="workflow-panel" markdown="1">
+
+<div markdown="1">
+
+<p class="eyebrow">YOUR FILES. YOUR CALL.</p>
+
+## Start with understanding.
+
+Scanning is read-only. In the desktop app, cleanup needs an explicit mode
+change and review. The CLI has no delete command.
+
+[How Kosha protects your files →](../docs/manual/safety.md)
+
+</div>
+<ol class="workflow-steps">
+<li><span>1</span><div><strong>Scan a drive or folder</strong><p>Build a picture of what’s there.</p></div></li>
+<li><span>2</span><div><strong>Explore, search, compare</strong><p>Find the files behind the numbers.</p></div></li>
+<li><span>3</span><div><strong>Decide what to keep</strong><p>Review findings before taking action.</p></div></li>
+</ol>
+
+</section>
+
+<section class="home-section" markdown="1">
+
+<div class="section-heading" markdown="1">
+
+<div markdown="1">
+
+<p class="eyebrow">BUILT FOR REAL DRIVES</p>
+
+## Millions of entries.<br>Seconds to perspective.
+
+</div>
+
+[Performance details and hardware →](../docs/manual/performance.md)
+
+</div>
 
 <div class="performance-grid" markdown="1">
 
@@ -30,7 +145,7 @@ Windows · Linux · Experimental macOS · Open source · MIT / Apache 2.0
 
 **2.86 million entries · NVMe SSD**
 
-Crucial P3 1 TB · NTFS MFT · Administrator
+Crucial P3 1 TB · Windows NTFS MFT · Administrator
 
 </div>
 <div class="performance-card" markdown="1">
@@ -39,95 +154,92 @@ Crucial P3 1 TB · NTFS MFT · Administrator
 
 **4.09 million entries · HDD**
 
-Ultrastar DC HC550 16 TB · NTFS MFT · Administrator
+Ultrastar DC HC550 16 TB · Windows NTFS MFT · Administrator
 
 </div>
 
 </div>
 
-The complete set of supplied observations:
+Reference observations from Kosha 0.10.3, **not a controlled benchmark**.
+Cache state and repetitions were not recorded. These are filesystem metadata
+scan times; results vary. NTFS MFT scanning requires administrator access.
+{ .fine-print }
 
-| Storage | Method / privilege | Entries | Scan time | Reported coverage |
-| --- | --- | ---: | ---: | --- |
-| NVMe SSD | Directory walk, standard user | 2,849,859 | 15.3 s | 10 unreadable; lower-bound totals |
-| NVMe SSD | NTFS MFT, administrator | 2,855,411 | 11.4 s | All files accessed, as reported |
-| HDD | Directory walk, standard user | 4,088,836 | 12m 32s | 22 unreadable; lower-bound totals |
-| HDD | NTFS MFT, administrator | 4,089,362 | 20.1 s | All files accessed, as reported |
+</section>
 
-**Reference observations, not a controlled benchmark.** Cache state and
-repetitions were not recorded, and entry counts and size totals differ.
-These are filesystem metadata timings; reported disk usage is not file-content
-throughput. Results describe these supplied 0.10.3 runs, not a speedup guarantee.
+<section class="cli-section" markdown="1">
 
-[Read the full observations and hardware context](../docs/manual/performance.md){ .button }
+<div class="cli-copy" markdown="1">
 
-## Less digging. More understanding.
+<p class="eyebrow">FOR HUMANS. FOR SCRIPTS. FOR AGENTS.</p>
 
-<div class="feature-grid" markdown="1">
+## Your terminal.<br>Your workflow.
+
+Scan, search, compare snapshots, and export structured results. Use the same
+toolkit interactively or give your coding agent a concise CLI guide.
+
+[Explore the CLI →](../docs/manual/command-line.md){ .button .primary }
+[Read the agent guide](../LLMS.md){ .button .secondary }
+
+</div>
+<div class="cli-preview" markdown="1">
+
+![Kosha CLI showing disk analysis and structured output for automation](../docs/manual/images/cli-agent-dark.png)
+
+</div>
+
+</section>
+
+<section class="recipe-panel" markdown="1">
 
 <div markdown="1">
 
-### See the whole picture
+<p class="eyebrow">MAKE IT SPEAK YOUR LANGUAGE</p>
 
-Follow the treemap from a drive to the files taking up space. Review findings
-alongside the file list, with explanations that help you decide what to keep.
+## A search toolkit that grows with you.
 
-[Explore the desktop](../docs/manual/desktop-tour.md)
+Install optional marketplace packs or author your own phrases, typed templates,
+and extraction rules. Translation runs locally without an ML model. Inspect
+the query before relying on the results.
 
-</div>
-<div markdown="1">
-
-### Ask for what you need
-
-Try “images larger than 10 MB” or “files created last week.” Inspect the query
-interpretation, refine it, and export your results.
-
-[Learn smart search](../docs/manual/results-and-search.md)
+[Discover the marketplace ↗](https://github.com/coolnew/kosha-marketplace){ .button .secondary }
+[Create a recipe →](../docs/manual/recipe-authoring.md)
 
 </div>
-<div markdown="1">
-
-### Know what changed
-
-Keep snapshots, compare scans, and follow growth over time. Saved drive scans
-let you return to the last result with its age clearly shown.
-
-[Work with snapshots](../docs/manual/snapshots.md)
-
+<div class="recipe-examples" aria-label="Example search phrases">
+<span>files created last week</span>
+<span>images larger than 10 MB</span>
+<span>Your phrase → a query you can inspect</span>
 </div>
 
+</section>
+
+<section class="download-panel" markdown="1">
+
+<p class="eyebrow">MAKE SPACE FOR WHAT’S NEXT</p>
+
+## Get to know your disk.
+
+A visual explorer when you want to look around. A CLI when you want to get things done.
+
+[Download Kosha ↗](https://github.com/coolnew/kosha/releases/latest){ .button .primary }
+[Installation guide](../docs/manual/getting-started.md){ .button .secondary }
+
+Windows · Linux · Experimental macOS · MIT OR Apache-2.0
+{ .platforms }
+
+</section>
+
+<div class="trust-links" markdown="1">
+
+[Safety and privacy](../docs/manual/safety.md) ·
+[Tests and quality](../docs/manual/quality-and-coverage.md) ·
+[Measured coverage](https://coolnew.github.io/kosha/coverage/) ·
+[Source on GitHub](https://github.com/coolnew/kosha)
+
+Under active development. The manual follows current source; check your installed
+version. Built with assistance from large language models, with maintainer review
+and testing.
+{ .fine-print }
+
 </div>
-
-## Your terminal. Your workflow.
-
-Scan, search, compare, and export from the command line. Structured output and a
-concise agent guide make Kosha useful in scripts and coding-agent workflows too.
-
-![Kosha CLI showing structured disk analysis for agents](../docs/manual/images/cli-agent-dark.png)
-
-[Read the CLI guide](../docs/manual/command-line.md){ .button }
-[Guide for coding agents](../LLMS.md){ .button }
-
-## Powerful search, made yours.
-
-Create your own recipes and explore marketplace packs. Deterministic translation
-keeps search local without a model or cloud service. See what a phrase means
-before relying on its results.
-
-[Use custom recipes](../docs/manual/search-recipes.md) ·
-[Author a recipe pack](../docs/manual/recipe-authoring.md)
-
-## Confidence comes from visibility.
-
-Scanning is read-only by default. Desktop cleanup requires an explicit mode
-change and review; the CLI has no delete command. Understand the boundaries,
-then check the evidence: tests, measured coverage, source commit, and report age.
-
-[Safety and privacy](../docs/manual/safety.md){ .button }
-[Test quality and coverage](../docs/manual/quality-and-coverage.md){ .button }
-[View coverage report](https://coolnew.github.io/kosha/coverage/){ .button }
-
-Kosha is under active development. These guides describe the current source;
-check your installed version when following them. The project was developed
-with assistance from large language models; changes remain subject to maintainer
-review and testing.

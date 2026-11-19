@@ -164,12 +164,6 @@ jobs:
       - name: Release and publication script tests
         run: python3 -m unittest discover -p 'test_*.py'
 
-      - name: Generated marketplace seed
-        run: |
-          if [ -d marketplace ]; then
-            python3 xtask-marketplace.py --root marketplace --check
-          fi
-
       # CONTRIBUTING.md says the DCO is enforced here. Until
       # this step existed they were describing something that did not happen,
       # and an unsigned commit would have merged with the build green.

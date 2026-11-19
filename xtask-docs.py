@@ -8,7 +8,6 @@ import importlib.util
 from pathlib import Path
 import posixpath
 import re
-import subprocess
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -38,8 +37,7 @@ def main():
     package = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(package)
     files = package.public_payloads()
-    names = subprocess.check_output(["git", "ls-files", "-z"], cwd=ROOT).decode().split("\0")
-    problems = broken_links(files, [n for n in names if n.startswith("marketplace/")])
+    problems = broken_links(files)
     for source, target in problems:
         print(f"{source}: missing public link target {target}")
     if not problems:

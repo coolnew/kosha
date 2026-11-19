@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
-Nothing yet.
+- Redesigned the website homepage with a custom product layout, GUI and CLI
+  showcases, clearer navigation, and copyright/license links.
+- Clarified marketplace ownership: production catalogs and packs are maintained
+  in `coolnew/kosha-marketplace`; Kosha keeps reusable validation and offline tests.
 
 ## [0.10.6] — 2026-11-19
 

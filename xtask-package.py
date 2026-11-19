@@ -51,6 +51,8 @@ MACOS = sys.platform == "darwin"
 
 
 def git_only_data(name: str) -> bool:
+    # Retired production seed: never let a stale checkout bundle optional packs.
+    # Production catalog/pack ownership lives in coolnew/kosha-marketplace.
     return name.startswith("marketplace/")
 
 

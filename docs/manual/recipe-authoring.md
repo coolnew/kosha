@@ -313,7 +313,9 @@ accept `input`, exactly one of `dsl`/`error:true`, and optional `os`.
    ```
 
    The first command generates indexes; the second verifies they are fresh.
-   In the application's Git checkout use `--root marketplace` instead. Include
+   From the application's Git checkout pass `--root ../kosha-marketplace` (or
+   the actual path to your standalone marketplace checkout). Kosha does not
+   carry production packs or a second catalog. Include
    `--cli`: without it, generation validates structure/metadata and corpus shape,
    but does not execute recipe translations or expected DSL checks. Neither
    mode publishes, commits, bumps versions or scans user files.

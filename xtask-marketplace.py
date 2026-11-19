@@ -176,7 +176,8 @@ def generated(root, cli=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=ROOT / "marketplace" if (ROOT / "marketplace").exists() else ROOT)
+    parser.add_argument("--root", type=Path, default=ROOT,
+                        help="Standalone marketplace checkout (default: this script's directory)")
     parser.add_argument("--check", action="store_true", help="Refuse stale/missing generated indexes without writing")
     parser.add_argument("--cli", type=Path, help="Also validate recipe artifacts with this built kosha executable")
     args = parser.parse_args()

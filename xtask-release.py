@@ -353,8 +353,6 @@ def validation_commands(root: Path) -> list[list[str]]:
             raise ValueError(f"Missing required release validation: {script}")
         commands.append([sys.executable, script, *args])
     commands.append([sys.executable, "-m", "unittest", "discover", "-p", "test_*.py"])
-    if (root / "marketplace/catalog.json").exists():
-        commands.append([sys.executable, "xtask-marketplace.py", "--root", "marketplace", "--check"])
     if (root / "scripts/github/test_kosha_github.py").exists():
         commands.append([sys.executable, "-m", "unittest", "discover", "-s", "scripts/github", "-p", "test_*.py"])
     return commands

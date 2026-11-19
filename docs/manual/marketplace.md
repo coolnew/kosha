@@ -1,5 +1,9 @@
 # Marketplace formats and extended search recipes
 
+The [standalone Kosha marketplace](https://github.com/coolnew/kosha-marketplace)
+is the source of maintained catalogs and optional declarative search packs.
+`kosha marketplace sync` reads that repository, not the application source tree.
+
 The marketplace supplies optional declarative search packs. Sync/discovery and
 downloads are explicit; loaded recipes work offline and do not execute scripts.
 Plugins and other future package kinds may appear as **unavailable** metadata.
@@ -54,8 +58,10 @@ package versions 1.0.0. After publication, changing a package's contents should
 use a new package version; adding a package does not require an app version bump.
 Legacy inline catalogs and personal recipe arrays remain readable.
 
-The maintained seed is only `marketplace/`; there is no top-level `recipes/`
-mirror. Its small `catalog.json` is an index manifest, not a flat package list.
+The standalone marketplace owns `catalog.json`, `indexes/`, and `packages/`
+at its repository root. The application repository does not maintain a second
+production catalog. The small `catalog.json` is an index manifest, not a flat
+package list.
 Growing catalog records live in `indexes/*.jsonl`. Individual versioned
 `manifest.json`/`pack.json` documents remain bounded JSON objects. JSONL is for
 the catalog shards and test cases, not a requirement to stream every small file.
@@ -188,15 +194,20 @@ not enabled by adding catalog metadata.
 
 ## Author and validate packages
 
-The public Git source includes a `marketplace/` seed and `xtask-marketplace.py`.
-Maintain per-package manifests and artifacts, then generate/check the indexes:
+Maintain packages in a checkout of
+[kosha-marketplace](https://github.com/coolnew/kosha-marketplace).
+The application source retains the reusable `xtask-marketplace.py` validator and
+synthetic tests, not a production pack mirror. Pass the marketplace checkout
+explicitly when running that tool from the application repository:
 
 ```sh
-python xtask-marketplace.py --root marketplace
-python xtask-marketplace.py --root marketplace --check --cli /path/to/kosha
+python xtask-marketplace.py --root ../kosha-marketplace
+python xtask-marketplace.py --root ../kosha-marketplace --check --cli /path/to/kosha
 ```
 
-In a standalone marketplace checkout use `--root .` instead. The generator writes
+When running the script stored in a standalone marketplace checkout, use
+`--root .` instead (also its default). The chosen root must contain `packages/`.
+The generator writes
 only the indexed layout; it does not recreate retired flat compatibility files.
 The tool never bumps versions, performs Git operations, publishes, or deletes
 old indexes. Review and remove retired indexes deliberately. `listed:false` in
@@ -207,7 +218,8 @@ An optional manifest `cases` path refers to a package-local UTF-8 JSONL corpus.
 Each line has `input` and either an exact expected `dsl` or `error:true`, with
 optional `os`. `--cli` checks applicable cases via describe without scanning.
 Include ordinary examples, boundary values, malformed captures, injection-like
-text, ambiguous rules and typos. The Search Power Tools seed includes examples.
-Optional seed data is available from Git/marketplace, not bundled in application
+text, ambiguous rules and typos. The marketplace's Search Power Tools package
+includes examples. Optional packs are available from the standalone marketplace,
+not bundled in application
 release archives. See [custom recipes](search-recipes.md) and
 [stored files](settings-and-files.md).

@@ -63,9 +63,10 @@ and [vLLM](https://docs.vllm.ai/en/latest/configuration/env_vars/).
 ## Copy a recipe pack from Git
 
 Copy the Linux or Windows recipe pack from the
-[versioned recipe packages in Git](https://github.com/coolnew/kosha/tree/main/marketplace/packages/recipes/coolnew).
-Choose the package/version folder and copy its `pack.json`. The top-level
-`recipes/` mirror has been retired; the package folder is the maintained source.
+[versioned recipe packages in Git](https://github.com/coolnew/kosha-marketplace/tree/main/packages/recipes/coolnew).
+Choose the package/version folder and copy its `pack.json`. The standalone
+marketplace is the maintained source; the application repository
+does not carry a duplicate catalog or production packs.
 The downloadable archives omit these optional packs. Use a pack directly
 with the CLI, or copy entries into your shared `search-recipes.json` and
 restart the GUI. You can add, edit, or remove entries with any text editor.
@@ -79,8 +80,12 @@ the pack's `recipes` array into your own file. Older Kosha versions can
 read arrays limited to their supported entry types; richer rules require a
 current executable.
 
+Run these local-file examples from the directory containing your
+`kosha-marketplace` checkout. Adjust the path to your downloaded file, or use
+`kosha marketplace sync` and `kosha marketplace get` below instead.
+
 ```sh
-kosha search --list-recipes --recipes marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json --filter "postgresql wal"
+kosha search --list-recipes --recipes kosha-marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json --filter "postgresql wal"
 ```
 
 The listing shows the pack metadata. It filters active recipes against their
@@ -119,12 +124,12 @@ trim entries you do not use before adding many of your own. The 256-entry
 limit applies to the entire file, including entries for other platforms.
 
 ```sh
-kosha search --describe --recipes marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json "large rotated system logs"
-kosha search --path . --recipes marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json "davinci resolve project archives"
+kosha search --describe --recipes kosha-marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json "large rotated system logs"
+kosha search --path . --recipes kosha-marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json "davinci resolve project archives"
 ```
 
 ```powershell
-kosha search --describe --recipes marketplace/packages/recipes/coolnew/windows-essentials/1.0.0/pack.json "windows update logs"
+kosha search --describe --recipes kosha-marketplace/packages/recipes/coolnew/windows-essentials/1.0.0/pack.json "windows update logs"
 ```
 
 ## Find packs in the public marketplace
@@ -158,7 +163,7 @@ Install a versioned pack from a local JSON file. Use the pack ID shown by
 `list` to remove it.
 
 ```sh
-kosha marketplace install marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json
+kosha marketplace install kosha-marketplace/packages/recipes/coolnew/linux-essentials/1.0.0/pack.json
 kosha marketplace list
 kosha marketplace uninstall linux-essentials
 ```

@@ -1,0 +1,42 @@
+{# SPDX-License-Identifier: MIT OR Apache-2.0 #}
+{# SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors #}
+{% extends "base.html" %}
+
+{% block site_nav %}
+  <ul class="nav navbar-nav">
+    <li class="nav-item"><a class="nav-link" href="{{ 'manual/desktop-tour/'|url }}">Desktop</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ 'manual/command-line/'|url }}">CLI</a></li>
+    <li class="nav-item"><a class="nav-link" href="{{ 'manual/'|url }}">Manual</a></li>
+    <li class="nav-item"><a class="nav-link" href="https://github.com/coolnew/kosha-marketplace">Marketplace</a></li>
+    <li class="nav-item"><a class="nav-link nav-download" href="https://github.com/coolnew/kosha/releases/latest">Download ↗</a></li>
+  </ul>
+{% endblock %}
+
+{% block content %}
+  {% if page and page.is_homepage %}
+    <main class="kosha-home col-12" id="main-content">{{ page.content }}</main>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
+{% block next_prev %}{% if not (page and page.is_homepage) %}{{ super() }}{% endif %}{% endblock %}
+
+{% block footer %}
+  <div class="container kosha-footer">
+    <div>
+      <a class="footer-brand" href="{{ nav.homepage.url|url }}">Kosha</a>
+      <p>Understand your disk. Keep what matters.</p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="{{ 'manual/'|url }}">Manual</a>
+      <a href="https://github.com/coolnew/kosha-marketplace">Marketplace</a>
+      <a href="{{ 'coverage/'|url }}">Coverage</a>
+      <a href="{{ config.repo_url }}">GitHub</a>
+    </nav>
+    <p class="footer-credit">© 2026 <a href="https://github.com/neeraj9">Neeraj Sharma</a> and the Kosha contributors.
+      Licensed under <a href="https://github.com/coolnew/kosha/blob/main/LICENSE-MIT">MIT</a> OR
+      <a href="https://github.com/coolnew/kosha/blob/main/LICENSE-APACHE">Apache-2.0</a>.
+      Built with <a href="https://www.mkdocs.org/">MkDocs</a>.</p>
+  </div>
+{% endblock %}
