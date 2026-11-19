@@ -4,6 +4,25 @@
 
 Nothing yet.
 
+## [0.10.7-rc.2] — 2026-11-20
+
+### Release candidate publication correction
+
+This candidate includes the macOS changes from rc.1 and fixes the final preview
+publication step. All three rc.1 host builds passed, but its draft was not
+published because the verifier used a tag lookup for an unpublished draft.
+Draft verification and publication now use the upload action's release ID,
+while retaining exact tag, channel, inventory and server SHA-256 checks.
+
+For native validation, test the fresh Apple Silicon DMG download, application
+launch (Refs #1), Command+Q (Refs #2), and Kosha → Quit Kosha (Refs #3).
+The application is ad-hoc signed for integrity, not Developer ID signed or
+notarized; Gatekeeper may still block downloaded apps. Please report your
+macOS version and exact result. These issues remain open pending validation.
+Issue #4 is not included. See the rc.1 notes for the complete test focus.
+
+This is a testing pre-release, does not replace Latest, and omits Store MSIX.
+
 ## [0.10.7-rc.1] — 2026-11-20
 
 # macOS validation candidate
@@ -223,7 +242,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.7-rc.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.7-rc.2...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -238,3 +257,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.6]: https://github.com/coolnew/kosha/releases/tag/v0.10.6
 
 [0.10.7-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.7-rc.1
+
+[0.10.7-rc.2]: https://github.com/coolnew/kosha/releases/tag/v0.10.7-rc.2

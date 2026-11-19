@@ -101,6 +101,27 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "selected tag"):
                 release.github_release("v0.10.7-rc.1")
 
+    def test_draft_lookup_uses_upload_id_and_still_checks_tag_and_id(self):
+        environment = {"GITHUB_REPOSITORY": "coolnew/kosha", "GH_TOKEN": "fake-workflow-token"}
+        with patch.dict(release.os.environ, environment, clear=True), patch.object(release, "build_opener") as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            info = {"id": 123, "tag_name": "v0.10.7-rc.2", "draft": True, "prerelease": True}
+            response.read.return_value = json.dumps(info).encode()
+            self.assertEqual(release.github_release("v0.10.7-rc.2", "123"), info)
+            self.assertEqual(opener.return_value.open.call_args.args[0].full_url,
+                             "https://api.github.com/repos/coolnew/kosha/releases/123")
+            for bad in [dict(info, id=124), dict(info, id=True), dict(info, tag_name="v0.10.7-rc.1")]:
+                response.read.return_value = json.dumps(bad).encode()
+                with self.assertRaises(ValueError):
+                    release.github_release("v0.10.7-rc.2", "123")
+            for bad_id in ["", "0", "01", "../tags/v0.10.7-rc.2", "123?token=secret"]:
+                with self.assertRaisesRegex(ValueError, "positive integer"):
+                    release.github_release("v0.10.7-rc.2", bad_id)
+            opener.return_value.open.side_effect = HTTPError("https://api.github.com/", 404, "missing", {}, None)
+            self.assertIsNone(release.github_release("v0.10.7-rc.2", "123"))
+            with self.assertRaises(ValueError):
+                release.verify_uploaded_release(self.root, None, "v0.10.7-rc.2")
+
     def test_published_releases_are_never_reopened_or_overwritten(self):
         with patch.object(release, "github_release", return_value={"draft": False}):
             with self.assertRaisesRegex(ValueError, "already published"):

@@ -195,6 +195,7 @@ jobs:
           runpy.run_path("xtask-release.py")["require_unpublished_release"](os.environ["GITHUB_REF_NAME"])
           PY
       - uses: softprops/action-gh-release@v3
+        id: upload
         with:
           draft: true
           prerelease: ${{ needs.public-source.outputs.prerelease == 'true' }}
@@ -221,19 +222,21 @@ jobs:
             may still be pending; a pre-release is for testing, not proof of resolution.
             Suffix-free releases remain drafts for maintainer review.
       - name: Verify uploaded inventory before publication
+        env:
+          RELEASE_ID: ${{ steps.upload.outputs.id }}
         run: |
           python - <<'PY'
           import os, runpy
           from pathlib import Path
           release = runpy.run_path("xtask-release.py")
           tag = os.environ["GITHUB_REF_NAME"]
-          release["verify_uploaded_release"](Path("artifacts"), release["github_release"](tag), tag)
+          release["verify_uploaded_release"](Path("artifacts"), release["github_release"](tag, os.environ["RELEASE_ID"]), tag)
           PY
       - name: Publish numbered preview (keep regular releases as drafts)
         if: needs.public-source.outputs.publish_preview == 'true'
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false --verify-tag
+          RELEASE_ID: ${{ steps.upload.outputs.id }}
+        run: gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -F prerelease=true -f make_latest=false
       - name: Verify preview is publicly published
         if: needs.public-source.outputs.publish_preview == 'true'
         run: |

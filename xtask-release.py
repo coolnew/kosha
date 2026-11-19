@@ -126,7 +126,7 @@ class _NoGitHubRedirect(HTTPRedirectHandler):
         return None
 
 
-def github_release(tag: str) -> dict | None:
+def github_release(tag: str, release_id: str | None = None) -> dict | None:
     """CI-only read of one fixed repository's release; never reads private .env.
 
     Treat only HTTP 404 as absence. Errors/redirects fail closed and never expose
@@ -135,10 +135,15 @@ def github_release(tag: str) -> dict | None:
     if os.environ.get("GITHUB_REPOSITORY") != "coolnew/kosha" or not tag.startswith("v"):
         raise ValueError("Release lookup requires the public upstream and a version tag")
     github_release_policy(tag[1:])
+    if release_id is not None and not re.fullmatch(r"[1-9][0-9]*", release_id):
+        raise ValueError("Release ID must be a positive integer")
     token = os.environ.get("GH_TOKEN")
     if not token:
         raise ValueError("Release lookup needs the workflow GH_TOKEN")
-    request = Request("https://api.github.com/repos/coolnew/kosha/releases/tags/" + quote(tag, safe=""),
+    # GitHub's tag endpoint returns published releases. A newly uploaded draft
+    # must be read by the ID returned by the upload action, not treated as absent.
+    route = release_id if release_id is not None else "tags/" + quote(tag, safe="")
+    request = Request("https://api.github.com/repos/coolnew/kosha/releases/" + route,
                       headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
                                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "kosha-release-workflow"})
     try:
@@ -149,6 +154,8 @@ def github_release(tag: str) -> dict | None:
         result = json.loads(body)
         if not isinstance(result, dict) or result.get("tag_name") != tag or type(result.get("draft")) is not bool:
             raise ValueError("Release metadata does not match the selected tag")
+        if release_id is not None and (type(result.get("id")) is not int or result["id"] != int(release_id)):
+            raise ValueError("Release metadata does not match the selected ID")
         return result
     except HTTPError as error:
         if error.code == 404:
