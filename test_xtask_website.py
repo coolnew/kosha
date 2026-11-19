@@ -13,6 +13,17 @@ spec.loader.exec_module(website)
 
 
 class WebsiteTests(unittest.TestCase):
+    def test_privacy_has_one_root_route_and_portable_manual_links(self):
+        files = {"PRIVACY.md": b"[stored files](docs/manual/settings-and-files.md)",
+                 "docs/manual/settings-and-files.md": b"[privacy](../../PRIVACY.md)",
+                 "website/site.css": b"css", "llms.txt": b"guide"}
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            website.stage(files, out)
+            self.assertEqual((out / 'privacy.md').read_text(), '[stored files](manual/settings-and-files.md)')
+            self.assertIn('(../privacy.md)', (out / 'manual/settings-and-files.md').read_text())
+            self.assertFalse((out / 'manual/privacy.md').exists())
+
     def test_manual_links_images_and_external_references_remain_portable(self):
         files = {"docs/manual/README.md": b"", "docs/manual/a.md": b"",
                  "docs/manual/images/a.png": b"", "assets/README.md": b""}

@@ -21,6 +21,8 @@ REPOSITORY = "https://github.com/coolnew/kosha"
 
 
 def destination(name):
+    if name == "PRIVACY.md":
+        return "privacy.md"
     if name == "website/index.md":
         return "index.md"
     if name.startswith("docs/manual/"):
@@ -54,7 +56,7 @@ def stage(files, docs):
         dest = destination(name)
         if dest is None:
             continue
-        # Only Markdown and reviewed PNGs from the manual, plus the homepage.
+        # Only manual Markdown/reviewed PNGs, the homepage and public privacy policy.
         if not name.endswith((".md", ".png")):
             raise ValueError(f"Unexpected website payload: {name}")
         path = docs / dest

@@ -1,5 +1,8 @@
 # Cleaning up safely
 
+For data access, local records and optional network services, see the
+[privacy policy](../../PRIVACY.md).
+
 ## Modes and permissions
 
 kosha starts in **Read-only** mode. Scanning, searching, and reviewing findings

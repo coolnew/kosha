@@ -1,5 +1,8 @@
 # Settings, stored files, and privacy
 
+The [privacy policy](../../PRIVACY.md) explains local filesystem information,
+optional marketplace requests, website services, and support information.
+
 ## Preferences
 
 Open the gear control or find **Settings** in the palette. Preferences include

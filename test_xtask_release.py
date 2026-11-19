@@ -304,6 +304,14 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unclassified"):
             package.public_payloads(self.root)
 
+    def test_public_privacy_policy_is_kept_in_source_and_offline_documentation(self):
+        git(self.root, "init")
+        for name in ["README.md", "PRIVACY.md"]:
+            (self.root / name).write_text("# Public document\n", encoding="utf-8")
+        git(self.root, "add", "README.md", "PRIVACY.md")
+        self.assertIn("PRIVACY.md", package.public_payloads(self.root))
+        self.assertIn("PRIVACY.md", package.documentation_payloads(self.root))
+
     def test_git_recipe_packs_are_omitted_from_archive_payloads(self):
         git(self.root, "init")
         (self.root / "README.md").write_text("# Public\n", encoding="utf-8")

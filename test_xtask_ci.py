@@ -44,7 +44,7 @@ class SelectionTests(unittest.TestCase):
             ci.require_selected(jobs)
 
     def test_prose_and_images_skip_rust(self):
-        r = ci.classify(["README.md", "docs/manual/images/gui-search-dark.png", "docs/manual/linux.md"])
+        r = ci.classify(["README.md", "PRIVACY.md", "docs/manual/images/gui-search-dark.png", "docs/manual/linux.md"])
         self.assertFalse(r["full"] or r["reference"] or r["coverage"])
 
     def test_embedded_and_executable_manuals_run_reference_tests(self):

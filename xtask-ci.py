@@ -17,7 +17,7 @@ REFERENCE_DOCS = {
     "docs/manual/recipe-authoring.md",
 }
 PROSE_ROOTS = {
-    "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md",
+    "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md", "PRIVACY.md",
     "SECURITY.md", "TRADEMARKS.md", "LLMS.md", "llms.txt", "DCO",
     "LICENSE-MIT", "LICENSE-APACHE", "docs/README.md", "assets/README.md",
 }

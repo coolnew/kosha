@@ -48,6 +48,7 @@ nav:
       - Performance reference: manual/performance.md
       - Coverage report: https://coolnew.github.io/kosha/coverage/
   - Download: https://github.com/coolnew/kosha/releases
+  - Privacy policy: privacy.md
 validation:
   links:
     not_found: warn

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Added a public privacy policy covering local filesystem data, saved records,
+  optional marketplace requests, website services and support. It is available
+  from the website footer and included with offline release documentation.
+
 - Added numbered alpha/beta/rc pre-releases that publish after verified host
   builds and uploaded SHA-256 checks, without replacing Latest. Regular releases
   remain drafts; previews retain the Windows ZIP and omit Store-upload MSIX.

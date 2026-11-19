@@ -186,6 +186,7 @@ dependencies; Linux prerequisites are in the [build guide](docs/manual/linux.md#
 Read the [website and searchable manual](https://coolnew.github.io/kosha/),
 [measured coverage report](https://coolnew.github.io/kosha/coverage/),
 [test quality and coverage scope](docs/manual/quality-and-coverage.md),
+[privacy policy](PRIVACY.md),
 [coverage runs](https://github.com/coolnew/kosha/actions/workflows/coverage.yml),
 [Contributing](CONTRIBUTING.md), [Releasing](RELEASING.md), and
 [Changes](CHANGELOG.md). Include `kosha --version`, platform, scan method, and

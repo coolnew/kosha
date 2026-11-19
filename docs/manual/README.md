@@ -23,6 +23,7 @@ scanning, queries, exports, and comparisons.
 14. [Author and test recipe packs](recipe-authoring.md)
 15. [Install and build on Linux](linux.md)
 16. [Performance reference runs](performance.md)
+17. [Privacy policy](../../PRIVACY.md)
 
 These pages describe the current source version. An older installed release
 may have different controls. Include your version when reporting a problem.
