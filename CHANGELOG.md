@@ -2,12 +2,13 @@
 
 ## [0.10.4] — 2026-11-19
 
-Kosha 0.10.4 is the first public release candidate incorporating the reviewed CLI feedback. It includes the desktop explorer, CLI, manual website and verified multi-platform release packaging.
+Kosha 0.10.4 is the first public release, incorporating the reviewed CLI feedback.
+It includes the desktop explorer, CLI, manual website and verified multi-platform
+release packaging.
 
-### Release preparation
+### CLI and release highlights
 
-- Include the updated user manual and concise agent guide with the new CLI behavior.
-- Keep the release as a draft until platform checks, asset verification and final publication review are complete.
+- Ship the updated user manual and concise agent guide with the new CLI behavior.
 
 - Classify draft release channels by the actual SemVer prerelease suffix;
   document optional public preview publication and reviewed promotion instead
@@ -18,6 +19,9 @@ Kosha 0.10.4 is the first public release candidate incorporating the reviewed CL
 - Open exact saved snapshot filenames in browsing, comparison and search;
   existing local paths take precedence and selected-file diagnostics identify
   the historical observation. Expand help examples for comparisons and duplicates.
+
+Windows/macOS binaries are unsigned, and macOS remains experimental. Read the
+installation guide and release notes for platform prerequisites and limitations.
 
 ## [0.10.3] — 2026-11-19
 
