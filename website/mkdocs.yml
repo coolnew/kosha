@@ -44,6 +44,7 @@ nav:
       - Author recipe packs: manual/recipe-authoring.md
   - Quality:
       - Tests and scope: manual/quality-and-coverage.md
+      - Performance reference: manual/performance.md
       - Coverage report: https://coolnew.github.io/kosha/coverage/
   - Download: https://github.com/coolnew/kosha/releases
 validation:

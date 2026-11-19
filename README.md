@@ -19,6 +19,27 @@ Windows · Linux · Experimental macOS · Written in Rust · MIT OR Apache-2.0
 stay together. This synthetic workspace includes models, media, downloads,
 and build output; the app is read-only.*
 
+## Windows reference runs
+
+**2.86 million entries in 11.4 s on NVMe; 4.09 million in 20.1 s on HDD**, using
+administrator NTFS MFT scans in supplied Kosha **0.10.3** observations.
+
+| Storage | Method / privilege | Entries | Scan time | Reported coverage |
+| --- | --- | ---: | ---: | --- |
+| NVMe SSD | Directory walk, standard user | 2,849,859 | 15.3 s | 10 unreadable; lower-bound totals |
+| NVMe SSD | NTFS MFT, administrator | 2,855,411 | 11.4 s | All files accessed, as reported |
+| HDD | Directory walk, standard user | 4,088,836 | 12m 32s | 22 unreadable; lower-bound totals |
+| HDD | NTFS MFT, administrator | 4,089,362 | 20.1 s | All files accessed, as reported |
+
+Hardware identified as a Crucial P3 1 TB NVMe SSD and WD Ultrastar DC HC550
+16 TB HDD, both NTFS. These are **reference observations, not a controlled
+benchmark**. Cache state and repetitions were not recorded; entry counts and
+size totals differ between runs. The timings measure filesystem metadata
+scanning, not reading the reported GiB/TiB of file contents. No fixed speedup
+or hardware-throughput claim follows from these excerpts.
+
+[Full observations, hardware specifications and measurement context](docs/manual/performance.md).
+
 ## Find it. Understand it. Decide what to do.
 
 **“What’s filling my disk?”** Follow the largest rectangles, sort the table,
