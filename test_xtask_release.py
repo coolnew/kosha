@@ -444,12 +444,12 @@ class ReleaseAssetTests(unittest.TestCase):
                 release.verify_release_assets(root, self.commit)
 
     def test_msix_integrity_private_provenance_and_development_artifacts_are_rejected(self):
-        for problem in ["private", "identity", "publisher", "runtime", "signature", "probe", "binary", "contact", "hash", "sidecar", "missing"]:
+        for problem in ["private", "identity", "publisher", "runtime", "signature", "probe", "binary", "contact", "headless", "device", "alias", "hash", "sidecar", "missing"]:
             with self.subTest(problem=problem), tempfile.TemporaryDirectory() as d:
                 root = Path(d)
                 metadata = self.seed_msix(root)
                 path = root / metadata["package"]
-                if problem in {"signature", "probe", "binary", "contact"}:
+                if problem in {"signature", "probe", "binary", "contact", "headless", "device", "alias"}:
                     with zipfile.ZipFile(path) as archive:
                         files = {name: archive.read(name) for name in archive.namelist()}
                     if problem == "signature":
@@ -458,6 +458,18 @@ class ReleaseAssetTests(unittest.TestCase):
                         files["kosha-msix-probe.exe"] = b"private probe"
                     elif problem == "contact":
                         files["CONTACT.txt"] = b"wrong contact metadata"
+                    elif problem in {"headless", "device", "alias"}:
+                        import xml.etree.ElementTree as ET
+                        msix_module = load("xtask-msix")
+                        ns = {"f": msix_module.FOUNDATION, **msix_module.NS}
+                        xml = ET.fromstring(files["AppxManifest.xml"])
+                        if problem == "headless":
+                            xml.find(".//uap:VisualElements", ns).set("AppListEntry", "none")
+                        elif problem == "device":
+                            xml.find("f:Dependencies/f:TargetDeviceFamily", ns).set("Name", "Windows.Universal")
+                        else:
+                            xml.find(".//uap5:Extension", ns).set("Executable", "wrong.exe")
+                        files["AppxManifest.xml"] = ET.tostring(xml, encoding="utf-8", xml_declaration=True)
                     else:
                         files["kosha.exe"] = b"different binary"
                     with zipfile.ZipFile(path, "w") as archive:

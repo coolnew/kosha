@@ -46,11 +46,13 @@ class MsixTests(unittest.TestCase):
             self.assertEqual(identity.attrib["Publisher"], "CN=Example & Co")
             namespaces = {"f": msix.FOUNDATION, **msix.NS}
             apps = root.findall("f:Applications/f:Application", namespaces)
-            self.assertEqual({a.attrib["Executable"] for a in apps}, {"kosha.exe", "kosha-gui.exe"})
+            self.assertEqual(len(apps), 1)
+            self.assertEqual(apps[0].attrib["Executable"], "kosha-gui.exe")
+            self.assertFalse(any(v.get("AppListEntry") == "none" for v in root.findall(".//uap:VisualElements", namespaces)))
             for app in apps:
                 self.assertEqual(app.attrib[f"{{{msix.NS['uap10']}}}TrustLevel"], "mediumIL")
             aliases = {alias.attrib["Alias"] for alias in root.findall(".//uap5:ExecutionAlias", namespaces)}
-            self.assertEqual(aliases, {"kosha-msix-dev.exe", "kosha-gui-msix-dev.exe"})
+            self.assertEqual(aliases, {"kosha-msix-dev.exe"})
             capabilities = {e.attrib["Name"] for e in root.findall("f:Capabilities/rescap:Capability", namespaces)}
             self.assertEqual(capabilities, {"runFullTrust", "allowElevation"} if elevation else {"runFullTrust"})
 
@@ -74,7 +76,11 @@ class MsixTests(unittest.TestCase):
         self.assertEqual(root.find("f:Identity", namespaces).get("Name"), "Example.Kosha")
         self.assertEqual(root.find("f:Properties/f:PublisherDisplayName", namespaces).text, "Assigned Publisher")
         self.assertEqual(root.find("f:Properties/f:DisplayName", namespaces).text, "KoshaApp")
-        self.assertEqual({a.get("Alias") for a in root.findall(".//uap5:ExecutionAlias", namespaces)}, {"kosha.exe", "kosha-gui.exe"})
+        self.assertEqual({a.get("Alias") for a in root.findall(".//uap5:ExecutionAlias", namespaces)}, {"kosha.exe"})
+        targets = {e.find("uap5:AppExecutionAlias/uap5:ExecutionAlias", namespaces).get("Alias"):
+                   (e.get("Executable"), e.find("uap5:AppExecutionAlias", namespaces).get("{" + msix.NS["desktop4"] + "}Subsystem"))
+                   for e in root.findall(".//uap5:Extension", namespaces)}
+        self.assertEqual(targets, {"kosha.exe": ("kosha.exe", "console")})
         for probe, identity in [(True, "Example.Kosha"), (False, "Example.Kosha.Development")]:
             with self.assertRaises(ValueError):
                 msix.manifest(identity, "CN=Example", "Assigned", "0.10.4", True, probe, True, True)

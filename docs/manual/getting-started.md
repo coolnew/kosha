@@ -39,6 +39,8 @@ An asset ending in `-x64-store-upload.msix`, when present, is for the maintainer
 to submit to Microsoft Partner Center. It is unsigned and is not a directly
 installable alternative to the Windows ZIP. Use the ZIP for ordinary Windows
 downloads until a Store-distributed or separately trusted MSIX is available.
+The Store package declares a visible **KoshaApp** entry for the GUI and a
+`kosha` execution alias for Terminal. It targets Windows desktops only.
 On Linux, see [install and build on Linux](linux.md) for archive verification,
 desktop dependencies, and source builds.
 

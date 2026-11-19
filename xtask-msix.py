@@ -86,27 +86,31 @@ def manifest(identity, publisher, display, version, elevation, probe=False, unvi
     child(dependencies, "TargetDeviceFamily", {"Name": "Windows.Desktop", "MinVersion": "10.0.19041.0",
                                                "MaxVersionTested": "10.0.26100.0"})
     applications = child(root, "Applications")
-    entries = [("Kosha", "kosha-gui.exe"), ("Cli", "kosha.exe")]
+    # One visible application. A hidden second CLI Application triggers Store
+    # headless-app acceptance rules even though the package also has a GUI.
+    entries = [("Kosha", "kosha-gui.exe")]
     if probe:
         entries.append(("Probe", "kosha-msix-probe.exe"))
     for app_id, executable in entries:
         attrs = {"Id": app_id, "Executable": executable, f"{{{NS['uap10']}}}RuntimeBehavior": "win32App" if unvirtualized else "packagedClassicApp",
                  f"{{{NS['uap10']}}}TrustLevel": "mediumIL"}
-        if app_id != "Kosha":
-            attrs[f"{{{NS['desktop4']}}}Subsystem"] = "console"
-            attrs[f"{{{NS['desktop4']}}}SupportsMultipleInstances"] = "true"
+        attrs[f"{{{NS['desktop4']}}}SupportsMultipleInstances"] = "true"
         app = child(applications, "Application", attrs)
         visual = {"DisplayName": app_name, "Description": "Kosha disk usage explorer",
                   "Square150x150Logo": "Assets/Square150x150Logo.png",
                   "Square44x44Logo": "Assets/Square44x44Logo.png", "BackgroundColor": "transparent"}
-        if app_id != "Kosha":
-            visual["AppListEntry"] = "none"
         child(app, "uap:VisualElements", visual)
         extensions = child(app, "Extensions")
-        extension = child(extensions, "uap5:Extension", {"Category": "windows.appExecutionAlias"})
-        alias = child(extension, "uap5:AppExecutionAlias")
-        aliases = {"Cli": "kosha.exe", "Kosha": "kosha-gui.exe"} if store else {"Cli": "kosha-msix-dev.exe", "Kosha": "kosha-gui-msix-dev.exe", "Probe": "kosha-msix-probe.exe"}
-        child(alias, "uap5:ExecutionAlias", {"Alias": aliases[app_id]})
+        aliases = {"Cli": "kosha.exe"} if store else {"Cli": "kosha-msix-dev.exe", "Probe": "kosha-msix-probe.exe"}
+        # MSIX permits only one appExecutionAlias extension per Application.
+        # Start launches the GUI; the extension explicitly activates the CLI.
+        targets = [("Cli", "kosha.exe", "console")] if app_id == "Kosha" else [("Probe", "kosha-msix-probe.exe", "console")]
+        for target_id, executable, subsystem in targets:
+            extension = child(extensions, "uap5:Extension", {"Category": "windows.appExecutionAlias", "Executable": executable,
+                f"{{{NS['uap10']}}}RuntimeBehavior": "win32App" if unvirtualized else "packagedClassicApp",
+                f"{{{NS['uap10']}}}TrustLevel": "mediumIL"})
+            alias = child(extension, "uap5:AppExecutionAlias", {f"{{{NS['desktop4']}}}Subsystem": subsystem})
+            child(alias, "uap5:ExecutionAlias", {"Alias": aliases[target_id]})
     capabilities = child(root, "Capabilities")
     child(capabilities, "rescap:Capability", {"Name": "runFullTrust"})
     if elevation:

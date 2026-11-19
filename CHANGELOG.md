@@ -1,8 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.6] — 2026-11-19
 
-Nothing yet.
+### Windows Store package acceptance
+
+Correct the MSIX application layout that triggered Partner Center's headless-app
+waiver requirement. The package has one visible KoshaApp desktop entry and a
+console execution alias for the companion CLI.
+
+Microsoft approval of runFullTrust, allowElevation and unvirtualizedResources
+remains a separate certification requirement. Submit for Windows 10/11 Desktop
+only. The unsigned Store-upload MSIX is not a consumer sideload installer.
+
+- Fix Store MSIX acceptance by declaring one visible desktop app and routing
+  the terminal alias directly to the companion CLI, without a hidden app entry.
+- Check desktop-only targeting and execution alias routing before release;
+  document Partner Center device-family selection and capability approval.
 
 ## [0.10.5] — 2026-11-19
 
@@ -157,7 +170,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.5...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.6...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -168,3 +181,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.4]: https://github.com/coolnew/kosha/releases/tag/v0.10.4
 
 [0.10.5]: https://github.com/coolnew/kosha/releases/tag/v0.10.5
+
+[0.10.6]: https://github.com/coolnew/kosha/releases/tag/v0.10.6

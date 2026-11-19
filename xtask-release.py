@@ -285,6 +285,9 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
         raise ValueError("MSIX upload digest, size or sidecar mismatch")
     ns = {"f": "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
           "uap10": "http://schemas.microsoft.com/appx/manifest/uap/windows10/10",
+          "uap": "http://schemas.microsoft.com/appx/manifest/uap/windows10",
+          "uap5": "http://schemas.microsoft.com/appx/manifest/uap/windows10/5",
+          "desktop4": "http://schemas.microsoft.com/appx/manifest/desktop/windows10/4",
           "rescap": "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"}
     numeric = module(ROOT / "xtask-msix.py", "verify_msix").numeric_version(version)
     with zipfile.ZipFile(package) as msix:
@@ -309,8 +312,27 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
         if capabilities != {"runFullTrust", "allowElevation", "unvirtualizedResources"}:
             raise ValueError("MSIX restricted capability inventory mismatch")
         apps = tree.findall("f:Applications/f:Application", ns)
-        if len(apps) != 2 or {app.get("Executable") for app in apps} != {"kosha.exe", "kosha-gui.exe"}:
-            raise ValueError("MSIX executable inventory mismatch")
+        if len(apps) != 1 or apps[0].get("Id") != "Kosha" or apps[0].get("Executable") != "kosha-gui.exe":
+            raise ValueError("MSIX must advertise one visible desktop application")
+        visual = apps[0].find("uap:VisualElements", ns)
+        if visual is None or visual.get("AppListEntry", "default") != "default":
+            raise ValueError("MSIX must not declare a hidden/headless application")
+        families = tree.findall("f:Dependencies/f:TargetDeviceFamily", ns)
+        if len(families) != 1 or families[0].get("Name") != "Windows.Desktop":
+            raise ValueError("MSIX supports Windows.Desktop only")
+        extensions = apps[0].findall("f:Extensions/uap5:Extension", ns)
+        aliases = {}
+        for extension in extensions:
+            alias = extension.find("uap5:AppExecutionAlias", ns)
+            entries = [] if alias is None else alias.findall("uap5:ExecutionAlias", ns)
+            if extension.get("Category") != "windows.appExecutionAlias" or len(entries) != 1:
+                raise ValueError("MSIX execution alias inventory mismatch")
+            alias_name = entries[0].get("Alias")
+            if alias_name in aliases:
+                raise ValueError("Duplicate MSIX execution alias")
+            aliases[alias_name] = (extension.get("Executable"), alias.get("{" + ns["desktop4"] + "}Subsystem"))
+        if aliases != {"kosha.exe": ("kosha.exe", "console")}:
+            raise ValueError("MSIX execution alias targets/subsystems differ")
         if any(app.get("{" + ns["uap10"] + "}RuntimeBehavior") != "win32App"
                or app.get("{" + ns["uap10"] + "}TrustLevel") != "mediumIL" for app in apps):
             raise ValueError("MSIX runtime mismatch")

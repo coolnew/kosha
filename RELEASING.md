@@ -67,7 +67,7 @@ MSIX for preview tags until a separate flight/version policy is implemented.
 
 The Windows pipeline invokes `xtask-release.py --msix-store` after the same
 host validations and builds used for the ZIP. It uses the exact registered
-identity, `KoshaApp` display name, normal CLI/GUI aliases and the experimentally
+identity, `KoshaApp` display name, terminal CLI alias and the experimentally
 tested unvirtualized/elevation capabilities. `CONTACT.txt` holds the reviewed
 author, publisher, support email and website. Publisher identity remains the
 Partner Center-assigned value; personal authorship does not replace it.
@@ -79,6 +79,24 @@ are rejected. The selected mode must match the exact final release inventory.
 The workflow still creates a draft; nothing is submitted to Microsoft or
 published automatically. Existing release tags are not changed to add this
 workflow; prepare a reviewed new candidate for the first hosted MSIX output.
+
+Store packages advertise one visible **KoshaApp** desktop entry. The companion
+`kosha.exe` console alias is an extension of that application with an explicit
+CLI executable and console subsystem. A separate hidden CLI application
+(`AppListEntry="none"`) triggers Partner Center's headless-app waiver gate and
+must not be included. Windows permits only one appExecutionAlias extension per
+application, so the GUI is launched from Start; there is no additional GUI alias.
+Release verification enforces the visible app, desktop-only targeting and CLI
+alias routing. Local SDK validation does not replace Partner Center acceptance.
+
+On Partner Center's Packages page, select **Windows 10/11 Desktop** only;
+uncheck other device families if selected. This x64 package targets
+`Windows.Desktop`, not Xbox, Mobile, Team or Holographic. An acceptance failure
+can also produce a generic device-family message before availability is resolved.
+The restricted-capability warning requires certification explanations/approval
+for runFullTrust, allowElevation and unvirtualizedResources. Keep these declared
+for the tested full-featured runtime; removing them changes execution/MFT
+behavior. Store approval remains Microsoft's decision.
 
 ### Development MSIX rehearsal on Windows
 
