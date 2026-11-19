@@ -27,7 +27,8 @@ USAGE:
 
     --describe       Show the canonical DSL, entities, and date boundaries;
                      opens no source and scans no path
-    --load FILE      Search an existing snapshot without rescanning its root
+    --load FILE      Search a snapshot path or exact saved NAME.kosha; local
+                     paths take precedence; never rescans its original root
     --path DIRECTORY Scan this directory once, then search the resulting tree
     --cache          With --path, read its last completed GUI record instead;
                      missing/corrupt records error without a fallback scan
@@ -301,8 +302,10 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let document_stdout = args.export.is_some() && args.out.is_none();
     let tree = match args.source.as_ref().expect("validated source") {
         Source::Snapshot(path) => {
-            let (meta, tree) = snapshot::store::open(path)
+            let path = super::snapshots::resolve(path)?;
+            let (meta, tree) = snapshot::store::open(&path)
                 .map_err(|e| format!("could not load {}: {e}", path.display()))?;
+            super::snapshots::report_source(&path, &meta);
             if !document_stdout {
                 super::print_snapshot_header(&meta);
             }

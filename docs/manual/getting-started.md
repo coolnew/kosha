@@ -11,6 +11,14 @@ running the application. On Windows, open `kosha-gui.exe`; on Linux, run
 `kosha-gui`. The companion terminal program is `kosha.exe` on Windows and `kosha`
 on Linux. On macOS, the desktop distribution is `Kosha.app`.
 
+Use the recommended regular release for ordinary use, or choose a release marked
+**Pre-release** when you want to try a preview and provide feedback. Versions
+with a suffix such as `-rc.1` or `-beta.2` are previews; a suffix-free version may
+also be marked as a preview while gathering field feedback. `0.x` indicates
+initial development and possible compatibility changes, but does not by itself
+mean the GitHub release is a preview. Read the selected release's known issues
+and platform notes, and include `kosha --version` when reporting a problem.
+
 The binaries are not code-signed. Follow your organization's software policy
 when deciding whether to run downloaded software. Release archives have a
 companion `.sha256` checksum. See the distribution's installation notes for

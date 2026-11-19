@@ -23,14 +23,16 @@ use kosha_core::{say, sayln};
 mod cache;
 mod marketplace;
 mod search;
+mod snapshots;
 
 const USAGE: &str = "\
 kosha — scan a directory tree and report what is in it
 
 USAGE:
     kosha <PATH> [OPTIONS]
-    kosha <SNAPSHOT.kosha> [OPTIONS]   browse a snapshot instead of a disk
+    kosha <SNAPSHOT.kosha> [OPTIONS]   full/relative path, or exact saved filename
     kosha --snapshots
+    kosha --caches [--cache-dir DIR] [--export json|jsonl]
     kosha search --describe \"files larger than ten megabytes\"
     kosha search --load SAVED.kosha \"folders created last week\"
     kosha search --path PATH \"files ending with md\"
@@ -56,13 +58,15 @@ OPTIONS:
     --label TEXT     Name the snapshot (optional; the date and path already
                      describe it)
     --snapshots      List the snapshots kept, and what they occupy
+    --caches         List cached drives (implicit snapshots), age and record paths;
+                     reads headers only; no scan, refresh or tree decompression
     --since FILE     Compare against a snapshot or a CSV export and report
                      what changed
     --since-min N    Ignore changes smaller than N bytes (default 1 MiB)
     --depth N        Stop descending below depth N
     --cache          Read the GUI's last completed record for this exact root;
                      missing/corrupt cache is an error, never a fallback scan
-    --cache-dir DIR  Use this cache directory instead; requires --cache
+    --cache-dir DIR  Use this cache directory instead; requires --cache or --caches
     --cross-fs       Descend into mounted filesystems (never into links)
     --exact          Query exact on-disk sizes, even where it costs a syscall
     --mft            Read NTFS' Master File Table instead of walking directories
@@ -105,12 +109,30 @@ AUTOMATION / LLM USE:
     metadata/diagnostics. Output file writes are explicit; no files are deleted.
 
 EXAMPLES:
+    kosha . --snapshot --label \"Before cleanup\"
+    kosha --snapshots
+    kosha saved-scan.kosha --stats
+    kosha . --since saved-scan.kosha --since-min 0
+    kosha newer.kosha --since older.kosha
+    kosha . --duplicates --dupe-min 1048576
+    kosha . --hardlinks --stats
+    kosha --caches
+    kosha --caches --export json
+    kosha --caches --cache-dir ./drive-cache --export jsonl
     kosha . --query \"file and size > 10mb\" --export jsonl
     kosha . --export txt --out paths.txt
     kosha C:\\ --cache --export json
     kosha search --describe --json \"files created last week\"
     kosha search --path . --export csv \"documents except pdf\"
     kosha search --help
+
+SNAPSHOT INPUT:
+    Existing local files/directories take precedence. A missing bare NAME.kosha
+    is looked up by exact filename in the shared saved-snapshot directory.
+    Full paths and ./NAME.kosha always select that path. The same lookup works
+    for --since and search --load. Labels are descriptive, not lookup names.
+    --duplicates reports identical contents; it does not delete or deduplicate
+    files. --hardlinks counts shared hardlinked storage once during a scan.
 ";
 
 #[derive(Debug)]
@@ -186,7 +208,8 @@ impl Args {
 
 fn main() -> ExitCode {
     let result = match parse() {
-        Ok(Parsed::Run(args)) => run(&args),
+        Ok(Parsed::Run(args)) => run(*args),
+        Ok(Parsed::Caches(args)) => cache::list(&args),
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
         Ok(Parsed::SearchRecipes(Some(path), filter)) => {
@@ -341,7 +364,14 @@ fn refuse_before_scanning(args: &Args) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    if !args.cache.enabled {
+        args.path = snapshots::resolve(&args.path)?;
+    }
+    if let Some(path) = &args.since {
+        args.since = Some(snapshots::resolve(path)?);
+    }
+    let args = &args;
     refuse_before_scanning(args)?;
 
     // Ctrl-C stops the scan and still prints what was found, rather than
@@ -425,6 +455,7 @@ fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         }
         let (meta, tree) = snapshot::store::open(&args.path)
             .map_err(|e| format!("{}: {e}", args.path.display()))?;
+        snapshots::report_source(&args.path, &meta);
         if !args.document_on_stdout() {
             print_snapshot_header(&meta);
         }
@@ -726,6 +757,7 @@ fn print_changes(
     let baseline = if snapshot::is_snapshot(baseline_path) {
         let (meta, past) = snapshot::store::open(baseline_path)
             .map_err(|e| format!("{}: {e}", baseline_path.display()))?;
+        snapshots::report_source(baseline_path, &meta);
         taken_at = Some(meta.taken);
         // A snapshot knows which folder it is of, so a comparison against
         // another folder can be *said* rather than merely performed. Comparing
@@ -1515,6 +1547,7 @@ enum Parsed {
     /// List the snapshots kept. Needs no path, which is why it is its own arm
     /// rather than a flag on `Args`.
     Snapshots,
+    Caches(cache::ListArgs),
 }
 
 /// Read the process's own arguments.
@@ -1532,7 +1565,8 @@ fn parse_from<I>(argv: I) -> Result<Parsed, String>
 where
     I: IntoIterator<Item = String>,
 {
-    let mut argv = argv.into_iter().peekable();
+    let original: Vec<_> = argv.into_iter().collect();
+    let mut argv = original.clone().into_iter().peekable();
     if argv.peek().is_some_and(|arg| arg == "marketplace") {
         argv.next();
         return Ok(Parsed::Marketplace(argv.collect()));
@@ -1569,6 +1603,7 @@ where
 
     let mut iter = argv;
     let mut positional = false;
+    let mut list_caches = false;
     while let Some(arg) = iter.next() {
         if !positional && arg == "--" {
             positional = true;
@@ -1637,6 +1672,7 @@ where
             }
             "--depth" => args.scan.max_depth = Some(value("--depth")?.min(255) as u8),
             "--cache" => args.cache.enabled = true,
+            "--caches" => list_caches = true,
             "--absolute-paths" => args.absolute_paths = true,
             "--cache-dir" => {
                 args.cache.dir = Some(
@@ -1695,6 +1731,10 @@ where
         }
     }
 
+    if list_caches {
+        return cache::parse_list(original.into_iter().filter(|arg| arg != "--caches"))
+            .map(Parsed::Caches);
+    }
     args.path = path.ok_or("a path is required — a directory, or a snapshot to browse")?;
     args.cache.validate()?;
     if args.absolute_paths {

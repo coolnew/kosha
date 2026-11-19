@@ -2,7 +2,15 @@
 
 ## [Unreleased]
 
-Nothing yet.
+- Classify draft release channels by the actual SemVer prerelease suffix;
+  document optional public preview publication and reviewed promotion instead
+  of treating every `0.x` release as a pre-release.
+
+- List implicit drive snapshots with `kosha --caches`, including age, source
+  root, record paths, partial/incomplete indicators and JSON/JSONL inventory.
+- Open exact saved snapshot filenames in browsing, comparison and search;
+  existing local paths take precedence and selected-file diagnostics identify
+  the historical observation. Expand help examples for comparisons and duplicates.
 
 ## [0.10.3] — 2026-11-19
 

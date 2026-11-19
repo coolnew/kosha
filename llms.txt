@@ -14,6 +14,8 @@ kosha --help
 kosha search --help
 kosha marketplace --help
 kosha --query-help
+kosha --snapshots
+kosha --caches --export json
 ```
 
 Replace `PATH` with the folder or drive to inspect. Pass paths and complete
@@ -38,6 +40,13 @@ kosha search --load "saved.kosha" "documents" --export jsonl --absolute-paths
 - Scans are fresh and full-depth by default. GUI cache use requires explicit
   `--cache`; `--cache-dir DIR` selects a custom cache. Cached reads are historical
   and fail on a missing/invalid record without silently scanning. Age is on stderr.
+- `--caches --export json` inventories implicit drive records; add `--cache-dir`
+  for a custom store. It reads headers only: inspect each record's `status` and
+  open with `--cache` to validate its tree. Explicit records use `--snapshots`.
+- Snapshot inputs, `--since`, and search `--load` accept paths or exact saved
+  `NAME.kosha` filenames. Existing local paths win; only missing bare filenames
+  fall back to the explicit store. Use `./NAME.kosha` to forbid fallback or a
+  full store path to select that copy. Source file/date diagnostics go to stderr.
 - Ordinary scans do not follow symbolic links or cross mount boundaries.
   `--depth N` explicitly limits coverage. Snapshots store metadata, not file contents.
 - Natural search translates supported phrases deterministically into DSL.

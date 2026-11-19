@@ -43,7 +43,8 @@ pub fn dir() -> Option<PathBuf> {
 }
 
 /// Automatic drive records are deliberately outside the explicit snapshot
-/// directory: neither the GUI rail nor CLI listings enumerate this cache.
+/// directory: explicit snapshot listings do not enumerate this cache. The CLI
+/// has a separate --caches inventory for automatic drive records.
 pub fn automatic_dir() -> Option<PathBuf> {
     Some(crate::dirs::data_dir()?.join("drive-cache"))
 }

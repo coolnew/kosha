@@ -69,7 +69,62 @@ The three successful builds attach archives and SHA-256 checksums to a **draft**
 GitHub release. Review the downloads and release notes before publishing.
 Never move a published tag to a new commit; use a new version for fixes.
 
-A `v0.*` tag or a version with a SemVer prerelease suffix is marked pre-release. Unsigned Windows/macOS binaries and the
-experimental macOS status must be stated in release notes. Repository rules
-and required status checks must be configured in GitHub before launch; a tag
-trigger alone does not prove that CI or platform acceptance passed.
+## Review, preview publication, and promotion
+
+Draft status and the pre-release label are independent. Every tag build creates
+a draft for review; it never publishes automatically. The default audience is
+determined by the validated SemVer version, not by major version zero:
+
+| Version/tag | Default release label |
+| --- | --- |
+| `v0.10.4` or `v1.0.0` | Regular release, initially a draft |
+| `v0.10.4-rc.1`, `v1.0.0-beta.2` | Pre-release, initially a draft |
+| `v0.10.4+build-7` | Regular release; build metadata does not select the channel |
+
+A regular `0.x` release remains initial-development software: it does not
+promise the API compatibility associated with 1.0. The GitHub label describes
+the intended audience for this particular build.
+
+Before any publication:
+
+1. Review the exact tag and commit, successful native jobs and final assembly
+   verification. Confirm all archives, SHA-256 sidecars and host manifests are
+   uploaded and match the reviewed release inventory.
+2. Test downloaded CLI/GUI packages on the supported systems. Cover scanning,
+   search, snapshots/comparison, exports, partial/incomplete results and essential
+   window behavior. Record any platform-specific limitation rather than treating
+   a successful compile as interactive validation.
+3. Review release notes, installation instructions, known issues and user-manual
+   accuracy. State unsigned Windows/macOS binaries and experimental macOS status.
+4. Obtain explicit maintainer approval for the selected release and channel.
+   A commit/tag push is separate from approval to publish its draft.
+
+After review, choose either path:
+
+- **Public preview:** publish the draft with **This is a pre-release** enabled.
+  Users can download it for wider testing. Do not mark it as Latest. A version
+  without a suffix may also be deliberately published this way when more field
+  feedback is wanted; explain that decision in the release notes.
+- **Regular release:** for a version without a prerelease suffix, publish with
+  the pre-release label cleared. Set Latest when this is the recommended current
+  release; a maintenance release for an older line need not replace Latest.
+
+A publicly tested preview whose version has no suffix can later be promoted
+by clearing its GitHub pre-release label and, when appropriate, setting Latest.
+Recheck known issues and obtain approval for promotion. Preserve the exact tag,
+commit, archives and digests; metadata promotion alone needs no rebuild.
+
+A version containing `-rc`, `-beta` or another prerelease identifier retains that
+label. Moving to the final `X.Y.Z` version requires new version metadata, a new
+tag, build and full validation so the binaries report the final version. Never
+rename a candidate's tag or relabel candidate binaries as final-version binaries.
+Any source or asset correction also requires a new version; do not replace a
+published build silently.
+
+After publication or promotion, verify anonymous release/download access, the
+pre-release/Latest state, version stamps and hashes, and website links. Keep
+Unreleased open for development. Repository rules and required status checks
+must remain configured; tag creation alone does not establish release acceptance.
+
+See [GitHub release management](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+and [Semantic Versioning](https://semver.org/).

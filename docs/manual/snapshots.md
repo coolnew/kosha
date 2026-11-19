@@ -12,6 +12,11 @@ invent missing dates. Older kosha builds cannot open format 2 records.
 | Automatic drive scan | Finished drive-root scan in the desktop app | No | One replaceable slot per drive root |
 | Explicit snapshot | **Keep a snapshot**, or CLI `--snapshot` | Yes | Kept until removed |
 
+The CLI lists these separately: `kosha --snapshots` shows explicit snapshots;
+`kosha --caches` shows automatic drive records and their age without rescanning.
+Cache listings read headers only. See the [command-line guide](command-line.md#explicitly-use-the-gui-cache)
+for JSON/JSONL inventory and error statuses.
+
 ## Automatic drive scans
 
 A finished drive scan is written in the background. Selecting that drive again
@@ -36,6 +41,13 @@ the age and choose **Scan again** before relying on it.
 After a fresh scan, choose **Keep a snapshot**. It appears in the sidebar with
 its root, age, and storage size. Explicit snapshots do not overwrite one another.
 You can also open a `.kosha` snapshot directly.
+
+In the CLI, use its full/relative path or exact stored filename, including
+`.kosha`. Existing local files take precedence over a stored copy with the same
+name. `./NAME.kosha` requires that local path; the full store path printed by
+`--snapshots` selects the stored copy explicitly. The same rules apply to
+`--since` and search `--load`. Corrupt local files fail without substituting a
+different saved record; labels and partial filenames are not shortcuts.
 
 While viewing an automatic **Saved scan**, choose **Keep saved scan as snapshot**
 to keep that historical observation without rescanning. The note under the

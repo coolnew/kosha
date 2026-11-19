@@ -35,6 +35,15 @@ def git(root, *args):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_release_channel_uses_semver_suffix_not_major_zero_or_build_metadata(self):
+        for version, expected in [("0.10.3", False), ("1.0.0", False),
+                                  ("0.10.4-rc.1", True), ("1.0.0-beta.2+build.7", True),
+                                  ("0.10.4+build-with-hyphens", False)]:
+            with self.subTest(version=version):
+                self.assertEqual(release.is_prerelease(version), expected)
+        with self.assertRaises(ValueError):
+            release.is_prerelease("v0.10.3")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

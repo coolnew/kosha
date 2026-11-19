@@ -85,6 +85,12 @@ def semver_key(value: str):
     return tuple(map(int, core.split("."))), not bool(pre), tuple((0, int(p)) if p.isdigit() else (1, p) for p in pre.split(".") if p)
 
 
+def is_prerelease(version: str) -> bool:
+    """SemVer prerelease identifiers determine the default channel, not major 0."""
+    semver_key(version)
+    return "-" in version.split("+", 1)[0]
+
+
 def updated_manifest(text: str, old: str, new: str) -> str:
     section = ""
     result = []

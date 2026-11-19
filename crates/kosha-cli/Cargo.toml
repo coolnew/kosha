@@ -24,8 +24,8 @@ kosha-query.workspace = true
 kosha-search.workspace = true
 kosha-marketplace.workspace = true
 ctrlc = "3"
+serde_json.workspace = true
 
 # For the temporary tree the broken-pipe test exports; see tests/pipe.rs.
 [dev-dependencies]
 tempfile = "3"
-serde_json.workspace = true

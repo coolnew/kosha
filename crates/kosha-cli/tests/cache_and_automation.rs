@@ -50,6 +50,170 @@ fn config_dir(home: &Path) -> std::path::PathBuf {
 }
 
 #[test]
+fn cache_inventory_lists_shared_and_custom_records_without_reading_the_source() {
+    let home = tempfile::tempdir().unwrap();
+    let source = home.path().join("offline-drive");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("remembered.md"), b"recorded").unwrap();
+    let tree = Scanner::new(ScanOptions::default()).scan(&source).unwrap();
+    let dir = data_dir(home.path()).join("drive-cache");
+    let record = snapshot::store::save_automatic_in(
+        &dir,
+        &tree,
+        UNIX_EPOCH + std::time::Duration::from_secs(1000),
+    )
+    .unwrap();
+    let before = std::fs::read(&record).unwrap();
+    std::fs::write(dir.join("drive-0000000000000000.kosha"), b"broken").unwrap();
+    std::fs::write(dir.join("pending.writing"), b"staged").unwrap();
+    snapshot::store::save_in(
+        &data_dir(home.path()).join("snapshots"),
+        &tree,
+        "Explicit",
+        UNIX_EPOCH,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&source).unwrap();
+
+    let output = run(&["--caches", "--export", "json"], home.path());
+    assert!(output.status.success(), "{}", err(&output));
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(doc["schema"], "kosha.cache.list.v1");
+    assert_eq!(doc["header_only"], true);
+    let rows = doc["records"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let good = rows.iter().find(|r| r["status"] == "recorded").unwrap();
+    assert_eq!(good["root"], tree.root_path().to_string_lossy().as_ref());
+    assert_eq!(good["taken_unix"], 1000);
+    assert_eq!(good["incomplete"], false);
+    assert!(rows.iter().any(|r| r["status"] == "unreadable"));
+    assert!(err(&output).is_empty());
+    let output = run(
+        &[
+            "--caches",
+            "--cache-dir",
+            dir.to_str().unwrap(),
+            "--export",
+            "jsonl",
+        ],
+        home.path(),
+    );
+    assert!(output.status.success(), "{}", err(&output));
+    assert_eq!(
+        out(&output)
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .collect::<Vec<_>>()
+            .len(),
+        2
+    );
+    let output = run(&["--caches"], home.path());
+    assert!(output.status.success());
+    assert!(out(&output).contains("Headers only") && out(&output).contains("offline-drive"));
+    assert_eq!(std::fs::read(&record).unwrap(), before);
+    assert!(!source.exists());
+}
+
+#[test]
+fn absent_cache_inventory_is_empty_and_does_not_create_directories() {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("missing-cache");
+    let output = run(
+        &[
+            "--caches",
+            "--cache-dir",
+            dir.to_str().unwrap(),
+            "--export",
+            "json",
+        ],
+        home.path(),
+    );
+    assert!(output.status.success(), "{}", err(&output));
+    let doc: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(doc["records"].as_array().unwrap().len(), 0);
+    assert!(!dir.exists());
+    let reordered = run(
+        &[
+            "--cache-dir",
+            dir.to_str().unwrap(),
+            "--export",
+            "json",
+            "--caches",
+        ],
+        home.path(),
+    );
+    assert!(reordered.status.success(), "{}", err(&reordered));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&reordered.stdout).unwrap()["records"],
+        doc["records"]
+    );
+    for args in [
+        vec!["--caches", "--cache"],
+        vec!["--caches", "--export", "csv"],
+        vec!["--caches", "--cache-dir"],
+    ] {
+        assert!(!run(&args, home.path()).status.success(), "{args:?}");
+    }
+}
+
+#[test]
+fn saved_snapshot_names_work_for_browsing_search_and_comparison_with_local_precedence() {
+    let home = tempfile::tempdir().unwrap();
+    let source = home.path().join("source");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("stored-only.md"), b"saved").unwrap();
+    let tree = Scanner::new(ScanOptions::default()).scan(&source).unwrap();
+    let stored = snapshot::store::save_in(
+        &data_dir(home.path()).join("snapshots"),
+        &tree,
+        "Stored",
+        UNIX_EPOCH,
+    )
+    .unwrap();
+    let name = stored.file_name().unwrap().to_str().unwrap();
+    let baseline = run(&[name, "--since", name, "--since-min", "0"], home.path());
+    assert!(baseline.status.success(), "{}", err(&baseline));
+    for args in [
+        vec![name, "--export", "txt"],
+        vec!["search", "--load", name, "files", "--export", "txt"],
+    ] {
+        let output = run(&args, home.path());
+        assert!(output.status.success(), "{}", err(&output));
+        assert!(out(&output).contains("stored-only.md"));
+        assert!(err(&output).contains("source: snapshot; taken_unix=0"));
+    }
+    let explicit_local = format!("./{name}");
+    assert!(
+        !run(&[&explicit_local], home.path()).status.success(),
+        "explicit missing local path must not fall back"
+    );
+    std::fs::remove_file(source.join("stored-only.md")).unwrap();
+    std::fs::write(source.join("cwd-only.md"), b"local").unwrap();
+    let local = Scanner::new(ScanOptions::default()).scan(&source).unwrap();
+    let saved_local =
+        snapshot::store::save_in(&home.path().join("stage"), &local, "Local", UNIX_EPOCH).unwrap();
+    let local_path = home.path().join(name);
+    std::fs::copy(saved_local, &local_path).unwrap();
+    for args in [
+        vec![name, "--export", "txt"],
+        vec!["search", "--load", name, "files", "--export", "txt"],
+    ] {
+        let output = run(&args, home.path());
+        assert!(output.status.success(), "{}", err(&output));
+        assert!(out(&output).contains("cwd-only.md") && !out(&output).contains("stored-only.md"));
+    }
+    let absolute = run(&[stored.to_str().unwrap(), "--export", "txt"], home.path());
+    assert!(absolute.status.success());
+    assert!(out(&absolute).contains("stored-only.md"));
+    std::fs::write(local_path, b"corrupt local file").unwrap();
+    for args in [vec![name], vec!["search", "--load", name, "files"]] {
+        let output = run(&args, home.path());
+        assert!(!output.status.success());
+        assert!(!out(&output).contains("stored-only.md"));
+    }
+}
+
+#[test]
 fn fresh_scan_ignores_shared_cache_and_explicit_cache_reads_the_old_record() {
     let home = tempfile::tempdir().unwrap();
     let source = home.path().join("source");

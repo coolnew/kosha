@@ -126,6 +126,9 @@ query. **Index memory** measures the search index separately from the tree.
 ### Explicitly use the GUI cache
 
 ```powershell
+kosha --caches
+kosha --caches --export json
+kosha --caches --cache-dir ./my-drive-cache --export jsonl
 kosha C:\ --cache --export json
 kosha search --path C:\ --cache "files over 1 GB" --export txt
 kosha C:\ --cache --cache-dir ./my-drive-cache --export json
@@ -135,10 +138,26 @@ On Linux, use the same mount path you scanned in the desktop app. For example,
 use `kosha /mnt/archive --cache --export json` after the GUI has saved a
 completed scan of `/mnt/archive`.
 
+`--caches` inventories automatic drive records without scanning the original
+drives, creating a cache directory, or decompressing their trees. It shows the
+recorded root, original UTC timestamp, age, entry count, partial/incomplete
+indicators, record size and cache-file path. Damaged headers are listed as
+unreadable rather than disappearing. Explicit snapshots remain in `--snapshots`.
+
+The JSON document uses schema `kosha.cache.list.v1` with `directory`,
+`header_only: true` and a `records` array. JSONL writes one
+`kosha.cache.entry.v1` object per record; an empty cache produces zero JSONL
+lines. Inspect `status`: `recorded`, `incomplete`, `root-mismatch`, or
+`unreadable`. Unreadable records carry an error and may lack root/date fields.
+Successful enumeration can include unreadable records. A readable header does
+not validate the compressed body; opening with `--cache` performs the full check.
+Missing cache directories list as empty; other directory-access errors fail.
+
 `--cache` reads the same last completed drive record as the GUI. Its age and
 source path are reported on stderr. It does not scan, refresh, or write the
 cache. A missing, corrupt, or mismatched record is an error; omit `--cache` to
-request a fresh scan. `--cache-dir` requires `--cache` and selects a custom
+request a fresh scan. `--cache-dir` requires `--cache` or the standalone
+`--caches` listing and selects a custom
 directory using the same record naming/layout. Folder roots only work if an
 automatic record exists for that exact root; normal GUI automatic records are
 for drive roots. Scan-only options and duplicate-content checks cannot be
@@ -152,7 +171,21 @@ kosha "/path/to/folder" --snapshot --label "Before cleanup"
 kosha --snapshots
 kosha "saved-scan.kosha" --stats
 kosha "/path/to/folder" --since "saved-scan.kosha"
+kosha "newer.kosha" --since "older.kosha" --since-min 0
 ```
+
+Snapshot inputs accept a full path, a relative path, or an exact filename from
+the shared explicit-snapshot store (including `.kosha`). This works for ordinary
+snapshot browsing, comparison `--since`, and search `--load`.
+
+**Local paths take precedence.** If `saved-scan.kosha` exists in the current
+directory, it is opened there, even when the store has a snapshot with the same
+name. If that local file is corrupt, the command fails rather than silently
+opening another record. Only a missing bare filename falls back to the store.
+Use `./saved-scan.kosha` (or `.\saved-scan.kosha` on Windows) to require a local
+path without fallback; use the full store path printed by `--snapshots` to
+select the stored copy explicitly. Labels and partial filenames are not lookup
+keys. The selected file and original observation timestamp are printed on stderr.
 
 CLI snapshots are explicit. Automatic desktop drive history is separate and
 does not appear in `--snapshots`. Snapshots cannot restore file contents. Use

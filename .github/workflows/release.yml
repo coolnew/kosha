@@ -136,10 +136,21 @@ jobs:
           from pathlib import Path
           runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"])
           PY
+      - name: Classify release channel from the validated version
+        id: channel
+        run: |
+          python3 - <<'PY'
+          import os, runpy
+          from pathlib import Path
+          version = runpy.run_path("xtask-version.py")["validate"](Path.cwd(), os.environ["GITHUB_REF_NAME"])
+          preview = runpy.run_path("xtask-release.py")["is_prerelease"](version)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"prerelease={str(preview).lower()}\n")
+          PY
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
-          prerelease: ${{ startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-') }}
+          prerelease: ${{ steps.channel.outputs.prerelease == 'true' }}
           files: artifacts/*
           generate_release_notes: true
           body: |
