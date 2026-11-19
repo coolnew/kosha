@@ -311,6 +311,69 @@ class ReleaseTests(unittest.TestCase):
         self.test_dry_run_never_builds_or_creates_output()
 
 
+class MacDmgTests(unittest.TestCase):
+    def test_mac_archive_creates_compressed_dmg_without_changing_payload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "kosha-v0.10.4-aarch64-apple-darwin"
+            folder.mkdir()
+            with patch.object(package, "MACOS", True), patch.object(package.shutil, "copytree"), \
+                 patch.object(Path, "symlink_to") as link, patch.object(package.subprocess, "run") as run:
+                path = package.archive(folder)
+            self.assertEqual(path, folder.parent / (folder.name + ".dmg"))
+            link.assert_called_once_with("/Applications", target_is_directory=True)
+            command = run.call_args.args[0]
+            self.assertEqual(command[:4], ["hdiutil", "create", "-volname", folder.name])
+            self.assertEqual(command[-5:], ["-fs", "HFS+", "-format", "UDZO", str(path)])
+            self.assertTrue(run.call_args.kwargs["check"])
+            self.assertFalse((folder / "Applications").exists())
+            path.write_bytes(b"preserve existing image")
+            with patch.object(package, "MACOS", True), self.assertRaises(ValueError):
+                package.archive(folder)
+            self.assertEqual(path.read_bytes(), b"preserve existing image")
+
+    def test_dmg_detaches_when_payload_copy_fails(self):
+        with tempfile.TemporaryDirectory() as temp, patch.object(package, "MACOS", True), \
+             patch.object(package.subprocess, "run") as run, patch.object(Path, "is_symlink", return_value=True), \
+             patch.object(package.os, "readlink", return_value="/Applications"), \
+             patch.object(package.shutil, "copytree", side_effect=OSError("copy failed")):
+            with self.assertRaisesRegex(OSError, "copy failed"):
+                package.unpack_dmg(Path(temp) / "test.dmg", Path(temp) / "payload")
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual([c[:2] for c in commands],
+                             [["hdiutil", "verify"], ["hdiutil", "attach"], ["hdiutil", "detach"]])
+            self.assertIn("-readonly", commands[1])
+            self.assertIn("-nobrowse", commands[1])
+            self.assertEqual(commands[1][-1], commands[2][-1])
+
+    def test_invalid_dmg_is_never_mounted(self):
+        with patch.object(package, "MACOS", True), \
+             patch.object(package.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "hdiutil verify")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                package.unpack_dmg(Path("bad.dmg"), Path("unused"))
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0][:2], ["hdiutil", "verify"])
+
+    @unittest.skipUnless(package.MACOS, "Native macOS hdiutil round trip")
+    def test_native_dmg_preserves_bundle_cli_and_manual(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "kosha-dmg-test"
+            binary = folder / "Kosha.app/Contents/MacOS/kosha-gui"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"#!/bin/sh\nexit 0\n")
+            binary.chmod(0o755)
+            (folder / "kosha").write_bytes(binary.read_bytes())
+            (folder / "kosha").chmod(0o755)
+            (folder / "README.md").write_text("Offline manual\n", encoding="utf-8")
+            image = package.archive(folder)
+            unpacked = Path(temp) / "extracted"
+            package.unpack_dmg(image, unpacked)
+            self.assertEqual((unpacked / "README.md").read_text(), "Offline manual\n")
+            for relative in ["kosha", "Kosha.app/Contents/MacOS/kosha-gui"]:
+                self.assertTrue(os.access(unpacked / relative, os.X_OK))
+                subprocess.run([str(unpacked / relative)], check=True)
+            self.assertFalse((unpacked / "Applications").exists())
+
+
 class ReleaseAssetTests(unittest.TestCase):
     commit = "a" * 40
 
@@ -335,6 +398,19 @@ class ReleaseAssetTests(unittest.TestCase):
             root = Path(d)
             self.seed(root)
             release.verify_release_assets(root, self.commit)
+
+    def test_mac_host_requires_dmg_instead_of_legacy_tar(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            self.seed(root)
+            manifest_path = root / "release-manifest-aarch64-apple-darwin.json"
+            manifest = json.loads(manifest_path.read_text())
+            entry = manifest["artifacts"][0]
+            self.assertTrue(entry["name"].endswith(".dmg"))
+            entry["name"] = entry["name"].removesuffix(".dmg") + ".tar.gz"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "inventory"):
+                release.verify_release_assets(root, self.commit)
 
     def test_integrity_provenance_and_exact_inventory_are_required(self):
         for problem in ["archive", "sidecar", "missing", "commit", "target", "version", "private", "size", "extra", "unpublished-source"]:

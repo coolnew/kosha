@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 import zipfile
 from pathlib import Path
@@ -235,7 +236,21 @@ def plist(number: str) -> str:
 
 
 def archive(folder: Path) -> Path:
-    """Zip on Windows, tar.gz everywhere else — as the workflow does."""
+    """ZIP on Windows, DMG on macOS, TAR.GZ on Linux."""
+    if MACOS:
+        path = folder.parent / (folder.name + ".dmg")
+        if path.exists():
+            raise ValueError(f"DMG already exists: {path}")
+        # A private staging copy keeps the Applications link out of other
+        # packages. No Finder/AppleScript, credentials or third-party tools.
+        with tempfile.TemporaryDirectory(prefix="kosha-dmg-") as temp:
+            source = Path(temp) / "volume"
+            shutil.copytree(folder, source, symlinks=True)
+            (source / "Applications").symlink_to("/Applications", target_is_directory=True)
+            subprocess.run(["hdiutil", "create", "-volname", folder.name,
+                            "-srcfolder", str(source), "-fs", "HFS+",
+                            "-format", "UDZO", str(path)], check=True)
+        return path
     if WINDOWS:
         # Concatenated, never `with_suffix`: the folder name has dots in it —
         # `kosha-v0.9.0-x86_64-pc-windows-msvc` — and `with_suffix` replaces
@@ -253,6 +268,27 @@ def archive(folder: Path) -> Path:
         # carry an executable bit that a zip would drop.
         tf.add(folder, arcname=folder.name)
     return path
+
+
+def unpack_dmg(path: Path, destination: Path) -> None:
+    """Verify, mount read-only, copy the payload, and always detach before tests."""
+    if not MACOS:
+        raise ValueError("DMG verification requires macOS and hdiutil")
+    subprocess.run(["hdiutil", "verify", str(path)], check=True)
+    with tempfile.TemporaryDirectory(prefix="kosha-dmg-mount-") as temp:
+        mount = Path(temp) / "volume"
+        mount.mkdir()
+        subprocess.run(["hdiutil", "attach", str(path), "-readonly", "-nobrowse",
+                        "-mountpoint", str(mount)], check=True)
+        try:
+            link = mount / "Applications"
+            if not link.is_symlink() or os.readlink(link) != "/Applications":
+                raise ValueError("DMG is missing its Applications shortcut")
+            # Never follow the Applications link into the host filesystem.
+            shutil.copytree(mount, destination, symlinks=True,
+                            ignore=shutil.ignore_patterns("Applications", ".Trashes", ".fseventsd", ".Spotlight-V100"))
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=True)
 
 
 def checksum(path: Path) -> str:
@@ -287,7 +323,9 @@ def verify(path: Path, folder_name: str) -> list:
         remove_unpack_directory(sandbox)
     sandbox.mkdir(parents=True)
 
-    if path.suffix == ".zip":
+    if path.suffix == ".dmg":
+        unpack_dmg(path, sandbox / folder_name)
+    elif path.suffix == ".zip":
         with zipfile.ZipFile(path) as zf:
             zf.extractall(sandbox)
     else:

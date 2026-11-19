@@ -214,7 +214,7 @@ def write_sources(files: dict[str, bytes], out: Path, version: str, epoch: int) 
 
 
 RELEASE_TARGETS = {"x86_64-unknown-linux-gnu": ".tar.gz",
-                   "x86_64-pc-windows-msvc": ".zip", "aarch64-apple-darwin": ".tar.gz"}
+                   "x86_64-pc-windows-msvc": ".zip", "aarch64-apple-darwin": ".dmg"}
 SOURCE_OWNER = "x86_64-unknown-linux-gnu"
 
 

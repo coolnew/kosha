@@ -155,8 +155,9 @@ offline [manual](docs/manual/README.md). Source builds are available below.
   from a terminal for the CLI.
 - **Linux:** follow the [installation guide](docs/manual/linux.md) for desktop
   prerequisites and integration.
-- **macOS:** use the experimental app bundle and companion CLI; interactive
-  validation is more limited.
+- **macOS:** open the DMG and drag `Kosha.app` to Applications; the image also
+  includes the companion CLI and offline manuals. Builds are unsigned and
+  not notarized. macOS support is experimental; interactive validation is limited.
 
 Pre-release builds and unsigned binaries may trigger operating-system warnings.
 Check the supplied SHA-256 files when downloading release archives.

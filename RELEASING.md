@@ -26,6 +26,15 @@ It retains source ZIP/TAR.GZ, host binary archives, SHA-256 sidecars and per-hos
 manifests. Manual rehearsals need committed, dated candidate release notes too.
 Linux is the sole producer of the shared source ZIP/TAR.GZ. Windows and macOS
 use `--binary-only`, so their manifests list their own host archive only.
+Host packages are Windows ZIP, Linux TAR.GZ and macOS DMG. On macOS, the native
+`hdiutil` tool creates a compressed, read-only HFS+ image containing `Kosha.app`,
+an Applications shortcut, the companion CLI and offline manuals. No Finder
+automation or additional packaging dependency is required. Packaging verifies
+the image, mounts it read-only, copies its payload to a disposable directory,
+detaches it, then runs the same binary-stamp and CLI scan checks as other hosts.
+The DMG has a SHA-256 sidecar and appears in its host manifest and final asset
+verification. The image and app are unsigned and not notarized; this packaging
+change does not satisfy Gatekeeper or interactive macOS acceptance by itself.
 Source archive compression and ZIP metadata can differ across host/toolchain
 environments; do not compare one producer's compressed archive against another
 producer's manifest. The draft step verifies the exact three host manifests,

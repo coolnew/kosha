@@ -9,7 +9,19 @@ Download the archive for your operating system from the project's
 [release page](https://github.com/coolnew/kosha/releases). Extract it before
 running the application. On Windows, open `kosha-gui.exe`; on Linux, run
 `kosha-gui`. The companion terminal program is `kosha.exe` on Windows and `kosha`
-on Linux. On macOS, the desktop distribution is `Kosha.app`.
+on Linux. On macOS, download the `.dmg` for your architecture and open it.
+Drag `Kosha.app` onto the **Applications** shortcut, then launch it from
+Applications. The current hosted macOS build is for Apple Silicon (ARM64).
+Older releases may supply a `.tar.gz` instead; extract that to find the app.
+
+The macOS disk image also contains the companion `kosha` terminal program and
+offline manuals. Copy the CLI to a directory on your `PATH` if you want to use
+it from any terminal; dragging the app to Applications does not install the CLI.
+Copy any manuals you want to keep, then eject the disk image. Check the download
+in Terminal with `shasum -a 256 -c FILE.dmg.sha256` from the download directory.
+The app and disk image are unsigned and not notarized, so macOS Gatekeeper may
+block them. Follow your organization's policy; see Apple's
+[guidance for opening apps safely](https://support.apple.com/en-us/102445).
 
 Use the recommended regular release for ordinary use, or choose a release marked
 **Pre-release** when you want to try a preview and provide feedback. Versions

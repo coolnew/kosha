@@ -2,7 +2,8 @@
 
 ## [Unreleased]
 
-Nothing yet.
+- Package macOS downloads as a compressed DMG with an Applications shortcut,
+  companion CLI, offline manuals and verified SHA-256 sidecar.
 
 ## [0.10.4] — 2026-11-19
 
