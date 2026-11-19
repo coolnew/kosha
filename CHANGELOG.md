@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Conservative CI job selection, a stable final check, cumulative PR detection,
+  weekly full validation and removal of duplicate Rust test runs. Linux Rust
+  coverage produces offline HTML, LCOV, provenance and an informational badge;
+  public Pages deployment is opt-in.
+
 - Update workflow actions to Node.js 24 runtimes. Resolve Windows safety-test
   fixture entries by their exact scanned names, independent of short temp paths.
 

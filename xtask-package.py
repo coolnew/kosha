@@ -70,6 +70,8 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
     names = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().strip("\0").split("\0")
     roots = {".gitattributes", ".gitignore", "Cargo.toml", "Cargo.lock", "DCO", "LICENSE-MIT", "LICENSE-APACHE", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md", "SECURITY.md", "TRADEMARKS.md", "LLMS.md", "llms.txt", "clippy.toml", "rust-toolchain.toml", "rustfmt.toml", "xtask-dco.py", "xtask-eol.py", "xtask-spdx.py", "xtask-gaps.py", "xtask-mutations.py", "xtask-version.py", "xtask-package.py", "xtask-release.py", "xtask-llms.py", "test_xtask_version.py", "test_xtask_llms.py", "test_xtask_release.py"}
     roots.update({"xtask-marketplace.py", "test_xtask_marketplace.py"})
+    roots.update({"xtask-ci.py", "test_xtask_ci.py", "xtask-coverage.py",
+                  "test_xtask_coverage.py", "xtask-docs.py", "test_xtask_docs.py"})
     files = {}
     for name in names:
         if not name:

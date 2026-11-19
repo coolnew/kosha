@@ -31,3 +31,5 @@ may have different controls. Include your version when reporting a problem.
 The pages are ordinary Markdown with relative links. This index defines their
 reading order for a website or combined PDF. Each page has its own title and
 can be read independently. Developer instructions live outside this folder.
+
+[Test quality and coverage reports](quality-and-coverage.md) explain CI checks, measured scope and public report access.

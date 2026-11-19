@@ -4,13 +4,43 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 0"
+
+permissions:
+  contents: read
+
+# PR ranges are cumulative; never cancel main code checks with a later docs push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
 jobs:
+  changes:
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.select.outputs.full }}
+      reference: ${{ steps.select.outputs.reference }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - id: select
+        run: python xtask-ci.py
+
   test:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -38,28 +68,30 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
+        if: runner.os == 'Linux'
         run: cargo fmt --all --check
 
-      # Everything but the GUI is where the logic lives, and it builds in
-      # seconds. Check it on its own first so a trivial mistake does not cost a
-      # full GPUI compile before it is reported. The query language and the CLI
-      # belong in this list too: they are logic, they are fast, and leaving them
-      # to the workspace step only delayed the report.
+      # Fail early on logic; the GUI is tested separately below, once.
       - name: Check core crates
         run: >
-          cargo clippy -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          cargo clippy --locked -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
           -p kosha-fsops -p kosha-cli --all-targets
 
       - name: Test core crates
         run: >
-          cargo test -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
-          -p kosha-fsops -p kosha-cli
+          cargo test --locked --workspace --exclude kosha-gui
 
       - name: Build everything
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --locked --workspace --all-targets
 
-      - name: Test everything
-        run: cargo test --workspace
+      - name: Test GUI
+        run: cargo test --locked -p kosha-gui
+
+      - name: Executable recipe authoring manual
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --locked -p kosha-cli
+          python scripts/check-recipe-authoring-manual.py --cli target/debug/kosha
 
   # A different libc, not a different kernel. `statvfs` field widths differ
   # between musl and glibc, and a numeric conversion that is a no-op on one can
@@ -70,6 +102,8 @@ jobs:
   # `cargo check` stops before Rust linking, but ring's build script still
   # compiles native C code and needs a musl C compiler.
   musl:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     name: musl (libc portability)
     runs-on: ubuntu-latest
     steps:
@@ -91,7 +125,7 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
         run: >
-          cargo check --target x86_64-unknown-linux-musl --all-targets
+          cargo check --locked --target x86_64-unknown-linux-musl --all-targets
           -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
           -p kosha-fsops -p kosha-cli
 
@@ -108,6 +142,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      - name: Public Markdown links
+        run: python3 xtask-docs.py
 
       - name: Consistent versions
         run: |
@@ -167,3 +204,36 @@ jobs:
 
       - name: Licenses present
         run: test -f LICENSE-MIT && test -f LICENSE-APACHE && test -f DCO
+
+  reference:
+    name: Executable manual references
+    needs: changes
+    if: needs.changes.outputs.reference == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked -p kosha-query -p kosha-search
+      - run: cargo build --locked -p kosha-cli
+      - run: python scripts/check-recipe-authoring-manual.py --cli target/debug/kosha
+
+  gate:
+    name: CI gate
+    if: ${{ always() }}
+    needs: [changes, hygiene, test, musl, reference]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Require every selected check to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: python xtask-ci.py --gate
