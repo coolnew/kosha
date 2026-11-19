@@ -220,6 +220,21 @@ def assemble(name: str) -> Path:
 
 
 def plist(number: str) -> str:
+    # Apple requires numeric bundle fields. Reserve ordered slots within each
+    # patch for alpha, beta, rc and final builds; the full SemVer stays visible
+    # through --version, filenames and the informational bundle keys below.
+    match = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.([1-9][0-9]*))?(?:\+[0-9A-Za-z.-]+)?", number)
+    if not match:
+        raise ValueError("Mac bundle version must be numeric or a numbered alpha/beta/rc")
+    major, minor, patch = map(int, match.groups()[:3])
+    stage, counter = match[4], int(match[5] or 0)
+    if counter > 99_999:
+        raise ValueError("Preview counter exceeds the Mac bundle slot limit (99999)")
+    build_patch = patch * 1_000_000 + {"alpha": 1, "beta": 2, "rc": 3, None: 9}[stage] * 100_000 + counter
+    if max(major, minor, build_patch) > 2**32 - 1:
+        raise ValueError("Version exceeds the numeric Mac bundle version range")
+    display = f"{major}.{minor}.{patch}"
+    build = f"{major}.{minor}.{build_patch}"
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -228,8 +243,10 @@ def plist(number: str) -> str:
   <key>CFBundleDisplayName</key><string>kosha</string>
   <key>CFBundleExecutable</key><string>kosha-gui</string>
   <key>CFBundleIdentifier</key><string>app.coolnew.kosha</string>
-  <key>CFBundleShortVersionString</key><string>{number}</string>
-  <key>CFBundleVersion</key><string>{number}</string>
+  <key>CFBundleShortVersionString</key><string>{display}</string>
+  <key>CFBundleVersion</key><string>{build}</string>
+  <key>CFBundleGetInfoString</key><string>Kosha {number}</string>
+  <key>KoshaVersion</key><string>{number}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>kosha.icns</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>

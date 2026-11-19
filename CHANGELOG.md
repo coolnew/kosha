@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Added numbered alpha/beta/rc pre-releases that publish after verified host
+  builds and uploaded SHA-256 checks, without replacing Latest. Regular releases
+  remain drafts; previews retain the Windows ZIP and omit Store-upload MSIX.
+
 - Added a native macOS application menu and Command+Q quit binding. Native
   interaction validation is pending (references issues #2 and #3).
 - Seal the complete macOS app bundle and CLI with ad-hoc signatures, verify

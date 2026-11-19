@@ -27,7 +27,11 @@ block them. Follow your organization's policy; see Apple's
 
 Use the recommended regular release for ordinary use, or choose a release marked
 **Pre-release** when you want to try a preview and provide feedback. Versions
-with a suffix such as `-rc.1` or `-beta.2` are previews; a suffix-free version may
+with a numbered suffix such as `-rc.1`, `-rc.2` or `-beta.2` are previews of an
+upcoming final version. On macOS, Finder can show just the target numeric
+version; use `kosha --version` or `kosha-gui --version` for the exact preview ID.
+Find previews on the full Releases page; the recommended
+Download/Latest link stays on the regular release. A suffix-free version may
 also be marked as a preview while gathering field feedback. `0.x` indicates
 initial development and possible compatibility changes, but does not by itself
 mean the GitHub release is a preview. Read the selected release's known issues

@@ -66,8 +66,9 @@ Enable the repository Actions variable `KOSHA_MSIX_STORE_UPLOAD=true` and set
 identity/contact values. No production PFX or Microsoft API key is needed to
 build an upload package. Missing fields fail before the Windows build. With
 the switch absent/false, release packaging continues without an MSIX. The
-current numeric package-version policy supports suffix-free releases; disable
-MSIX for preview tags until a separate flight/version policy is implemented.
+current numeric package-version policy supports suffix-free releases. The workflow
+automatically omits MSIX for preview tags, even when the switch is enabled; the
+portable Windows ZIP is still built. No Store flight/version mapping is implied.
 
 The Windows pipeline invokes `xtask-release.py --msix-store` after the same
 host validations and builds used for the ZIP. It uses the exact registered
@@ -80,9 +81,9 @@ Final assembly verifies MSIX identity/runtime/capabilities, source commit,
 SHA-256 and size, and byte-for-byte agreement of both executables with the
 Windows ZIP. Development identities, diagnostic probes and test signatures
 are rejected. The selected mode must match the exact final release inventory.
-The workflow still creates a draft; nothing is submitted to Microsoft or
-published automatically. Existing release tags are not changed to add this
-workflow; prepare a reviewed new candidate for the first hosted MSIX output.
+Regular releases remain drafts for review; numbered previews publish after the
+checks below. Nothing is submitted to Microsoft automatically. Existing release
+tags/workflows are unchanged; these rules apply to newly prepared tagged source.
 
 Store packages advertise one visible **KoshaApp** desktop entry. The companion
 `kosha.exe` console alias is an extension of that application with an explicit
@@ -162,27 +163,48 @@ git push origin vX.Y.Z
 
 Push tags only from the public repository. The release workflow checks that
 the tag matches Cargo before building Windows x64, Linux x64, and macOS ARM64.
-The three successful builds attach archives and SHA-256 checksums to a **draft**
-GitHub release. Review the downloads and release notes before publishing.
+The three successful builds stage archives and SHA-256 checksums in a draft,
+then verify the uploaded inventory and server SHA-256 digests. A numbered preview
+is published automatically as a pre-release; a final version stays a draft for
+review. Only tag pushes can publish; manual workflow dispatch retains artifacts.
 Never move a published tag to a new commit; use a new version for fixes.
 
 ## Review, preview publication, and promotion
 
-Draft status and the pre-release label are independent. Every tag build creates
-a draft for review; it never publishes automatically. The default audience is
-determined by the validated SemVer version, not by major version zero:
+Draft status and the pre-release label are independent. The validated SemVer
+version determines the channel, not major version zero:
 
 | Version/tag | Default release label |
 | --- | --- |
-| `v0.10.4` or `v1.0.0` | Regular release, initially a draft |
-| `v0.10.4-rc.1`, `v1.0.0-beta.2` | Pre-release, initially a draft |
+| `v0.10.7` or `v1.0.0` | Regular release, stays a draft for review |
+| `v0.10.7-rc.1`, `v1.0.0-beta.2` | Published pre-release after verified uploads, never Latest |
 | `v0.10.4+build-7` | Regular release; build metadata does not select the channel |
 
 A regular `0.x` release remains initial-development software: it does not
 promise the API compatibility associated with 1.0. The GitHub label describes
 the intended audience for this particular build.
 
-Before any publication:
+Use `X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, or preferably `X.Y.Z-rc.N`, where N is a
+positive integer up to 99,999 without leading zeroes. Multiple previews can precede the same
+final version: `v0.10.7-rc.1`, `v0.10.7-rc.2`, then a separately built `v0.10.7`.
+Unnumbered/custom preview suffixes and preview build metadata are refused.
+Mac bundle version fields use ordered numeric values; the full preview SemVer
+remains in `KoshaVersion`, informational metadata and `--version`. Finder can
+show the target numeric version, so use `--version` for an exact bug-report ID.
+Plan the next counter from fetched public tags using
+`python xtask-release.py --next-preview 0.10.7` in the public checkout; it never
+creates a tag or edits source. Prepare matching workspace/lockfile versions and
+dated notes using `--prepare`. Never reuse or move a preview tag.
+
+Pushing a reviewed numbered preview tag opts into public preview publication.
+All host checks, local artifact verification, and uploaded names/sizes/SHA-256
+checks must succeed first. A temporary draft hides incomplete uploads; failures
+leave it unpublished for inspection. Already-published releases are never
+overwritten by reruns. Previews omit Store MSIX automatically. They exist for
+field testing and may still need native interaction/issue confirmation. Plain
+`Refs #N` references keep issues open; do not use closing keywords prematurely.
+
+Before publishing a regular draft or manually promoting a release:
 
 1. Review the exact tag and commit, successful native jobs and final assembly
    verification. Confirm all archives, SHA-256 sidecars and host manifests are
@@ -195,11 +217,12 @@ Before any publication:
    accuracy. State Windows signing status, macOS ad-hoc versus Developer ID
    signing and notarization status, and experimental macOS support.
 4. Obtain explicit maintainer approval for the selected release and channel.
-   A commit/tag push is separate from approval to publish its draft.
+   A regular-release commit/tag push is separate from approval to publish its
+   draft. Numbered preview tags use the explicit automatic-preview policy above.
 
 After review, choose either path:
 
-- **Public preview:** publish the draft with **This is a pre-release** enabled.
+- **Manual public preview:** publish the draft with **This is a pre-release** enabled.
   Users can download it for wider testing. Do not mark it as Latest. A version
   without a suffix may also be deliberately published this way when more field
   feedback is wanted; explain that decision in the release notes.

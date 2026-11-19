@@ -1,4 +1,5 @@
-# Public candidate validation and draft release. Manual runs only retain artifacts.
+# Numbered previews publish after verified uploads; final releases stay drafts.
+# Manual runs retain artifacts only, even when dispatched on a tag.
 name: release
 
 on:
@@ -9,14 +10,21 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
-  KOSHA_MSIX_STORE_UPLOAD: ${{ vars.KOSHA_MSIX_STORE_UPLOAD }}
 
 jobs:
   public-source:
     name: Reviewed public source only
     runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+      publish_preview: ${{ steps.channel.outputs.publish_preview }}
+      msix_store: ${{ steps.channel.outputs.msix_store }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,12 +53,37 @@ jobs:
             python xtask-version.py
           fi
           python xtask-llms.py --check
+      - name: Classify numbered preview and effective Store packaging
+        id: channel
+        env:
+          STORE_ENABLED: ${{ vars.KOSHA_MSIX_STORE_UPLOAD }}
+        run: |
+          python - <<'PY'
+          import os, runpy
+          from pathlib import Path
+          version = runpy.run_path("xtask-version.py")["validate"](Path.cwd())
+          policy = runpy.run_path("xtask-release.py")["github_release_policy"](version)
+          policy["msix_store"] = policy["msix_store"] and os.environ.get("STORE_ENABLED") == "true"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key in ("prerelease", "publish_preview", "msix_store"):
+                  output.write(f"{key}={str(policy[key]).lower()}\n")
+          PY
+      - name: Preserve already-published releases
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, runpy
+          runpy.run_path("xtask-release.py")["require_unpublished_release"](os.environ["GITHUB_REF_NAME"])
+          PY
 
   build:
     name: ${{ matrix.target }}
     needs: public-source
     runs-on: ${{ matrix.os }}
     env:
+      KOSHA_MSIX_STORE_UPLOAD: ${{ needs.public-source.outputs.msix_store }}
       KOSHA_MSIX_IDENTITY_NAME: ${{ vars.KOSHA_MSIX_IDENTITY_NAME }}
       KOSHA_MSIX_PUBLISHER: ${{ vars.KOSHA_MSIX_PUBLISHER }}
       KOSHA_MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.KOSHA_MSIX_PUBLISHER_DISPLAY_NAME }}
@@ -132,11 +165,14 @@ jobs:
             dist/candidate/kosha-v*-source.tar.gz.sha256
           if-no-files-found: error
 
-  draft:
-    name: Draft GitHub release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Assemble release and publish numbered preview
+    needs: [public-source, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    env:
+      KOSHA_MSIX_STORE_UPLOAD: ${{ needs.public-source.outputs.msix_store }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: write
     steps:
@@ -152,21 +188,18 @@ jobs:
           from pathlib import Path
           runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true")
           PY
-      - name: Classify release channel from the validated version
-        id: channel
+      - name: Recheck publication state before uploading
         run: |
           python3 - <<'PY'
           import os, runpy
-          from pathlib import Path
-          version = runpy.run_path("xtask-version.py")["validate"](Path.cwd(), os.environ["GITHUB_REF_NAME"])
-          preview = runpy.run_path("xtask-release.py")["is_prerelease"](version)
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"prerelease={str(preview).lower()}\n")
+          runpy.run_path("xtask-release.py")["require_unpublished_release"](os.environ["GITHUB_REF_NAME"])
           PY
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
-          prerelease: ${{ steps.channel.outputs.prerelease == 'true' }}
+          prerelease: ${{ needs.public-source.outputs.prerelease == 'true' }}
+          make_latest: 'false'
+          fail_on_unmatched_files: true
           files: artifacts/*
           generate_release_notes: true
           body: |
@@ -179,7 +212,35 @@ jobs:
             It retains the registered Store identity and restricted capabilities;
             Microsoft certification/approval is separate from this build.
 
-            Windows/macOS binaries are unsigned. Windows SmartScreen may warn;
-            macOS is experimental and may require opening the app from its context menu.
+            Windows binaries are unsigned and SmartScreen may warn. The macOS app
+            has an ad-hoc bundle seal, but no Developer ID signature or notarization;
+            macOS is experimental and Gatekeeper may block downloaded apps.
             Linux desktop prerequisites and integration are described in `assets/README.md`.
-            Review platform acceptance and downloaded hashes before publishing this draft.
+            Numbered alpha/beta/rc previews publish after automated checks, never as Latest.
+            Preview builds omit Store MSIX. Native interaction and issue confirmation
+            may still be pending; a pre-release is for testing, not proof of resolution.
+            Suffix-free releases remain drafts for maintainer review.
+      - name: Verify uploaded inventory before publication
+        run: |
+          python - <<'PY'
+          import os, runpy
+          from pathlib import Path
+          release = runpy.run_path("xtask-release.py")
+          tag = os.environ["GITHUB_REF_NAME"]
+          release["verify_uploaded_release"](Path("artifacts"), release["github_release"](tag), tag)
+          PY
+      - name: Publish numbered preview (keep regular releases as drafts)
+        if: needs.public-source.outputs.publish_preview == 'true'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false --verify-tag
+      - name: Verify preview is publicly published
+        if: needs.public-source.outputs.publish_preview == 'true'
+        run: |
+          python - <<'PY'
+          import os, runpy
+          info = runpy.run_path("xtask-release.py")["github_release"](os.environ["GITHUB_REF_NAME"])
+          if info is None or info["draft"] or info.get("prerelease") is not True:
+              raise SystemExit("Preview publication did not reach the expected state; inspect before retrying")
+          print(info["html_url"])
+          PY

@@ -26,6 +26,9 @@ import tarfile
 import tomllib
 import zipfile
 import xml.etree.ElementTree as ET
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
 
@@ -78,8 +81,10 @@ def unchanged_preflight(initial: dict[str, str], before: dict[str, str]) -> None
 
 
 def semver_key(value: str):
-    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value):
+    if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value):
         raise ValueError("Version must be a SemVer number without the v prefix")
+    if "+" in value and any(not part for part in value.split("+", 1)[1].split(".")):
+        raise ValueError("Invalid SemVer build identifiers")
     core, _, pre = value.split("+", 1)[0].partition("-")
     if pre and any(not part or (part.isdigit() and len(part) > 1 and part[0] == "0") for part in pre.split(".")):
         raise ValueError("Invalid SemVer prerelease identifiers")
@@ -90,6 +95,92 @@ def is_prerelease(version: str) -> bool:
     """SemVer prerelease identifiers determine the default channel, not major 0."""
     semver_key(version)
     return "-" in version.split("+", 1)[0]
+
+
+def github_release_policy(version: str) -> dict:
+    """Only numbered alpha/beta/rc tags opt into automatic preview publication."""
+    preview = is_prerelease(version)
+    if preview and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+-(?:alpha|beta|rc)\.[1-9][0-9]*", version):
+        raise ValueError("Preview releases require X.Y.Z-alpha.N, -beta.N or -rc.N with a positive counter and no build metadata")
+    if preview and int(version.rsplit(".", 1)[1]) > 99_999:
+        raise ValueError("Preview counter exceeds the Mac bundle slot limit (99999)")
+    return {"prerelease": preview, "publish_preview": preview, "make_latest": "false",
+            "msix_store": not preview and "+" not in version}
+
+
+def next_preview_version(target: str, tags: list[str], stage: str = "rc") -> str:
+    """Plan a fresh numbered preview using locally fetched public tags; no writes."""
+    if semver_key(target)[1] is not True or "+" in target or stage not in {"alpha", "beta", "rc"}:
+        raise ValueError("Preview target must be a suffix-free X.Y.Z and stage alpha, beta or rc")
+    if f"v{target}" in tags:
+        raise ValueError("Final target tag already exists; choose the next unreleased version")
+    pattern = re.compile(r"v" + re.escape(target) + "-" + stage + r"\.([1-9][0-9]*)")
+    counters = [int(match[1]) for tag in tags if (match := pattern.fullmatch(tag))]
+    version = f"{target}-{stage}.{max(counters, default=0) + 1}"
+    github_release_policy(version)
+    return version
+
+
+class _NoGitHubRedirect(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def github_release(tag: str) -> dict | None:
+    """CI-only read of one fixed repository's release; never reads private .env.
+
+    Treat only HTTP 404 as absence. Errors/redirects fail closed and never expose
+    token values or API response bodies in logs.
+    """
+    if os.environ.get("GITHUB_REPOSITORY") != "coolnew/kosha" or not tag.startswith("v"):
+        raise ValueError("Release lookup requires the public upstream and a version tag")
+    github_release_policy(tag[1:])
+    token = os.environ.get("GH_TOKEN")
+    if not token:
+        raise ValueError("Release lookup needs the workflow GH_TOKEN")
+    request = Request("https://api.github.com/repos/coolnew/kosha/releases/tags/" + quote(tag, safe=""),
+                      headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "kosha-release-workflow"})
+    try:
+        with build_opener(_NoGitHubRedirect()).open(request, timeout=30) as response:
+            body = response.read(1024 * 1024 + 1)
+        if len(body) > 1024 * 1024:
+            raise ValueError("Release metadata exceeds limit")
+        result = json.loads(body)
+        if not isinstance(result, dict) or result.get("tag_name") != tag or type(result.get("draft")) is not bool:
+            raise ValueError("Release metadata does not match the selected tag")
+        return result
+    except HTTPError as error:
+        if error.code == 404:
+            return None
+        raise ValueError(f"GitHub release lookup failed (HTTP {error.code})") from None
+    except (URLError, OSError, json.JSONDecodeError):
+        raise ValueError("GitHub release lookup failed; no publication attempted") from None
+
+
+def require_unpublished_release(tag: str) -> None:
+    existing = github_release(tag)
+    if existing is not None and existing["draft"] is not True:
+        raise ValueError("Release is already published; preserve its assets and use the next preview number")
+
+
+def verify_uploaded_release(folder: Path, release: dict, tag: str) -> None:
+    """Check uploaded names, sizes and server SHA-256 before a draft is published."""
+    policy = github_release_policy(tag.removeprefix("v"))
+    if (release is None or release.get("tag_name") != tag or release.get("draft") is not True
+            or release.get("prerelease") is not policy["prerelease"]):
+        raise ValueError("Uploaded release is not the expected draft/channel")
+    expected = {p.name: p for p in folder.iterdir() if p.is_file()}
+    assets = release.get("assets", [])
+    if not expected or not isinstance(assets, list) or any(not isinstance(a, dict) for a in assets):
+        raise ValueError("Missing uploaded asset inventory")
+    if len(assets) != len(expected) or {a.get("name") for a in assets} != set(expected):
+        raise ValueError("Uploaded asset inventory differs from the verified local inventory")
+    for asset in assets:
+        path = expected[asset["name"]]
+        if (asset.get("state") != "uploaded" or asset.get("size") != path.stat().st_size
+                or asset.get("digest") != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()):
+            raise ValueError("Uploaded asset hash/size/state mismatch: " + path.name)
 
 
 def updated_manifest(text: str, old: str, new: str) -> str:
@@ -375,6 +466,8 @@ def main() -> int:
     parser.add_argument("--prepare", action="store_true", help="Prepare version/changelog edits only; never commits them")
     parser.add_argument("--version", help="Prepared version, or the expected existing candidate version")
     parser.add_argument("--notes-file", type=Path, help="Reviewed public notes for --prepare")
+    parser.add_argument("--next-preview", metavar="X.Y.Z", help="Read-only next numbered preview plan from locally fetched tags")
+    parser.add_argument("--preview-stage", choices=["alpha", "beta", "rc"], default="rc", help="Stage for --next-preview (default: rc)")
     content = parser.add_mutually_exclusive_group()
     content.add_argument("--source-only", action="store_true", help="Validate and archive sources without building host binaries")
     content.add_argument("--binary-only", action="store_true", help="Validate and package this host only; CI publishes shared source archives from Linux")
@@ -387,9 +480,22 @@ def main() -> int:
         if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
             raise ValueError("Select the repository root, not a nested directory")
         current = module(root / "xtask-version.py", "release_versions").validate(root)
+        if args.next_preview:
+            if any((args.execute, args.prepare, args.version, args.notes_file, args.source_only,
+                    args.binary_only, args.msix_store, args.output_dir, args.target_dir)):
+                raise ValueError("--next-preview is a read-only plan; do not combine it with build/preparation flags")
+            version = next_preview_version(args.next_preview, git(root, "tag", "--list").splitlines(), args.preview_stage)
+            if semver_key(version) <= semver_key(current):
+                raise ValueError("Planned preview must be newer than the current workspace version")
+            print(json.dumps({"mode": "next-preview", "version": version, "tag": "v" + version,
+                              "policy": github_release_policy(version), "git_mutations": [], "remote_mutations": [],
+                              "next": "Fetch public tags first; review this plan, then prepare matching versions and notes"}, indent=2))
+            return 0
         if args.msix_store and (os.name != "nt" or args.source_only or args.prepare):
             raise ValueError("--msix-store requires a Windows host binary candidate build")
         if args.msix_store:
+            if not github_release_policy(current)["msix_store"]:
+                raise ValueError("Store MSIX needs a suffix-free numeric version; preview releases use the Windows ZIP")
             required = ["IDENTITY_NAME", "PUBLISHER", "PUBLISHER_DISPLAY_NAME", "AUTHOR_NAME", "SUPPORT_EMAIL", "WEBSITE"]
             missing = ["KOSHA_MSIX_" + name for name in required if not os.environ.get("KOSHA_MSIX_" + name)]
             if missing:

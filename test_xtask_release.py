@@ -7,6 +7,7 @@ import io
 import hashlib
 import json
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import tarfile
@@ -14,6 +15,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from urllib.error import HTTPError, URLError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -35,6 +37,93 @@ def git(root, *args):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_numbered_previews_publish_without_latest_or_store_packages(self):
+        for version in ["0.10.7-alpha.1", "0.10.7-beta.12", "0.10.7-rc.2"]:
+            self.assertEqual(release.github_release_policy(version),
+                             {"prerelease": True, "publish_preview": True, "make_latest": "false", "msix_store": False})
+        self.assertEqual(release.github_release_policy("0.10.7"),
+                         {"prerelease": False, "publish_preview": False, "make_latest": "false", "msix_store": True})
+        self.assertFalse(release.github_release_policy("0.10.7+build-7")["msix_store"])
+        for version in ["0.10.7-rc", "0.10.7-rc.0", "0.10.7-rc.01", "0.10.7-preview.1", "0.10.7-rc.1+build.2", "0.10.7-rc.100000"]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                release.github_release_policy(version)
+
+    def test_preview_counter_uses_numeric_order_and_does_not_reuse_final_targets(self):
+        tags = ["v0.10.7-rc.1", "v0.10.7-rc.9", "v0.10.7-rc.10", "v0.10.7-beta.15", "v0.10.8-rc.90"]
+        self.assertEqual(release.next_preview_version("0.10.7", tags), "0.10.7-rc.11")
+        self.assertEqual(release.next_preview_version("0.10.7", tags, "beta"), "0.10.7-beta.16")
+        self.assertEqual(release.next_preview_version("0.10.7", [], "alpha"), "0.10.7-alpha.1")
+        for target in ["0.10.7-rc.1", "0.10.7+build.1", "v0.10.7"]:
+            with self.assertRaises(ValueError):
+                release.next_preview_version(target, [])
+        with self.assertRaisesRegex(ValueError, "Final target"):
+            release.next_preview_version("0.10.7", ["v0.10.7"])
+
+    def test_preview_preparation_updates_versions_through_multiple_candidates_and_final(self):
+        self.project()
+        for version in ["0.10.0-rc.1", "0.10.0-rc.2", "0.10.0-rc.10", "0.10.0"]:
+            updates = release.preparation(self.root, version, "Candidate notes", "2026-11-19")
+            for name, data in updates.items():
+                (self.root / name).write_bytes(data)
+            self.assertEqual(load("xtask-version").validate(self.root, "v" + version), version)
+
+    def test_release_lookup_treats_only_404_as_absent_and_refuses_redirects(self):
+        environment = {"GITHUB_REPOSITORY": "coolnew/kosha", "GH_TOKEN": "fake-workflow-token"}
+        with patch.dict(release.os.environ, environment, clear=True), patch.object(release, "build_opener") as opener:
+            for code in [404, 403, 500, 302]:
+                opener.return_value.open.side_effect = HTTPError("https://api.github.com/", code, "failed", {}, None)
+                if code == 404:
+                    self.assertIsNone(release.github_release("v0.10.7-rc.1"))
+                else:
+                    with self.assertRaisesRegex(ValueError, "HTTP " + str(code)):
+                        release.github_release("v0.10.7-rc.1")
+            opener.return_value.open.side_effect = URLError("fake-workflow-token")
+            with self.assertRaises(ValueError) as failure:
+                release.github_release("v0.10.7-rc.1")
+            self.assertNotIn("fake-workflow-token", str(failure.exception))
+        handler = release._NoGitHubRedirect()
+        self.assertIsNone(handler.redirect_request(None, None, 302, "redirect", {}, "https://elsewhere.invalid"))
+
+    def test_release_lookup_confines_credentials_and_checks_tag_identity(self):
+        with patch.dict(release.os.environ, {"GITHUB_REPOSITORY": "other/repo", "GH_TOKEN": "fake"}), \
+             patch.object(release, "build_opener") as opener:
+            with self.assertRaises(ValueError):
+                release.github_release("v0.10.7-rc.1")
+            opener.assert_not_called()
+        with patch.dict(release.os.environ, {"GITHUB_REPOSITORY": "coolnew/kosha", "GH_TOKEN": "fake"}), \
+             patch.object(release, "build_opener") as opener:
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.read.return_value = b'{"tag_name":"v0.10.7-rc.1","draft":true}'
+            self.assertTrue(release.github_release("v0.10.7-rc.1")["draft"])
+            self.assertEqual(opener.return_value.open.call_args.args[0].full_url,
+                             "https://api.github.com/repos/coolnew/kosha/releases/tags/v0.10.7-rc.1")
+            response.read.return_value = b'{"tag_name":"v0.10.7-rc.2","draft":true}'
+            with self.assertRaisesRegex(ValueError, "selected tag"):
+                release.github_release("v0.10.7-rc.1")
+
+    def test_published_releases_are_never_reopened_or_overwritten(self):
+        with patch.object(release, "github_release", return_value={"draft": False}):
+            with self.assertRaisesRegex(ValueError, "already published"):
+                release.require_unpublished_release("v0.10.7-rc.1")
+        for existing in [None, {"draft": True}]:
+            with patch.object(release, "github_release", return_value=existing):
+                release.require_unpublished_release("v0.10.7-rc.1")
+
+    def test_uploaded_assets_must_match_names_sizes_and_github_sha256_before_publish(self):
+        (self.root / "archive.zip").write_bytes(b"candidate")
+        info = {"tag_name": "v0.10.7-rc.1", "draft": True, "prerelease": True,
+                "assets": [{"name": "archive.zip", "size": 9, "state": "uploaded",
+                            "digest": "sha256:" + hashlib.sha256(b"candidate").hexdigest()}]}
+        release.verify_uploaded_release(self.root, info, "v0.10.7-rc.1")
+        for field, value in [("size", 10), ("digest", None), ("state", "starter"), ("name", "unexpected.zip")]:
+            broken = dict(info, assets=[dict(info["assets"][0], **{field: value})])
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                release.verify_uploaded_release(self.root, broken, "v0.10.7-rc.1")
+        for broken in [dict(info, draft=False), dict(info, prerelease=False), dict(info, assets=[]),
+                       dict(info, assets=info["assets"] * 2), dict(info, tag_name="v0.10.7-rc.2")]:
+            with self.assertRaises(ValueError):
+                release.verify_uploaded_release(self.root, broken, "v0.10.7-rc.1")
+
     def test_release_channel_uses_semver_suffix_not_major_zero_or_build_metadata(self):
         for version, expected in [("0.10.3", False), ("1.0.0", False),
                                   ("0.10.4-rc.1", True), ("1.0.0-beta.2+build.7", True),
@@ -312,6 +401,21 @@ class ReleaseTests(unittest.TestCase):
 
 
 class MacDmgTests(unittest.TestCase):
+    def test_mac_bundle_fields_are_numeric_ordered_and_retain_full_preview_version(self):
+        versions = ["0.10.7-alpha.1", "0.10.7-alpha.99999", "0.10.7-beta.1",
+                    "0.10.7-rc.1", "0.10.7-rc.10", "0.10.7", "0.10.8-alpha.1"]
+        builds = []
+        for version in versions:
+            info = plistlib.loads(package.plist(version).encode())
+            self.assertEqual(info["CFBundleShortVersionString"], version.split('-')[0])
+            builds.append(tuple(map(int, info["CFBundleVersion"].split('.'))))
+            self.assertEqual(info["KoshaVersion"], version)
+            self.assertEqual(info["CFBundleGetInfoString"], "Kosha " + version)
+        self.assertEqual(builds, sorted(set(builds)))
+        for version in ["0.10.7-rc", "0.10.7-rc.100000", "0.10.99999", "0.10.7-unknown.1"]:
+            with self.assertRaises(ValueError):
+                package.plist(version)
+
     def test_mac_payload_signs_complete_bundle_and_cli_then_verifies_both(self):
         folder = Path("candidate")
         with patch.object(package, "MACOS", True), patch.object(package.subprocess, "run") as run:
