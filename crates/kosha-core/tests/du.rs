@@ -18,6 +18,10 @@
 //! | `du -x -s -B1` | `total_allocated` — `st_blocks × 512`, the bytes on disk |
 //! | `du -x -s -b` | `total_logical` — the lengths files report |
 //!
+//! On macOS the allocated comparison uses `/usr/bin/du -x -s` with
+//! `BLOCKSIZE=512`, then converts its block count to bytes. BSD `-B` controls
+//! allocation rounding, not the output units as GNU `-B` does.
+//!
 //! The fixture is built out of the cases where the two quantities come apart: a
 //! sparse file, a hardlink pair, a symlink, an empty directory, and enough small
 //! files that block rounding is a large fraction of the total. Both tools count a
@@ -35,12 +39,17 @@ use std::process::Command;
 
 use kosha_core::{ScanOptions, Scanner, SizeTree};
 
-/// `du`'s answer, in bytes, or `None` where there is no `du` to ask.
+/// `du`'s answer in bytes, or `None` if absent or its requested mode is unsupported.
 fn du(root: &Path, apparent: bool) -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = Command::new("/usr/bin/du");
+    #[cfg(not(target_os = "macos"))]
     let mut cmd = Command::new("du");
     cmd.arg("-x").arg("-s");
     if apparent {
         cmd.arg("-b");
+    } else if cfg!(target_os = "macos") {
+        cmd.env("BLOCKSIZE", "512");
     } else {
         cmd.arg("-B1");
     }
@@ -49,7 +58,13 @@ fn du(root: &Path, apparent: bool) -> Option<u64> {
         return None;
     }
     let text = String::from_utf8(out.stdout).ok()?;
-    text.split_whitespace().next()?.parse().ok()
+    let value: u64 = text.split_whitespace().next()?.parse().ok()?;
+    let unit = if cfg!(target_os = "macos") && !apparent {
+        512
+    } else {
+        1
+    };
+    value.checked_mul(unit)
 }
 
 /// A tree of the cases where on-disk and apparent size disagree.
@@ -97,13 +112,13 @@ fn on_disk_bytes_agree_with_du() {
     let tree = scan(dir.path());
 
     let Some(theirs) = du(dir.path(), false) else {
-        eprintln!("no `du` on this machine; nothing to compare against");
+        eprintln!("`du` allocated-byte comparison unavailable on this machine");
         return;
     };
     assert_eq!(
         tree.total_allocated(),
         theirs,
-        "kosha says {} bytes on disk and `du -B1` says {theirs}",
+        "kosha says {} bytes on disk and platform `du` reports {theirs} bytes",
         tree.total_allocated()
     );
 }
@@ -114,7 +129,7 @@ fn apparent_bytes_agree_with_du() {
     let tree = scan(dir.path());
 
     let Some(theirs) = du(dir.path(), true) else {
-        eprintln!("no `du` on this machine; nothing to compare against");
+        eprintln!("`du` apparent-byte mode unavailable on this platform");
         return;
     };
     // Exactly, with nothing adjusted. `scan.rs` leaves a directory's own

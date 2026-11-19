@@ -488,9 +488,34 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_scan_does_not_divide_by_zero() {
+    fn an_empty_directory_accounts_for_its_own_storage() {
         let dir = tempfile::tempdir().unwrap();
         let tree = scan(dir.path());
+        // An empty directory may still own blocks (for example on ext4).
+        let expected = if tree.total_allocated() == 0 {
+            0.0
+        } else {
+            1.0
+        };
+        assert_eq!(of(&tree, tree.root()).of_scan, expected);
+    }
+
+    #[test]
+    fn a_zero_byte_scan_does_not_divide_by_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = scan(dir.path());
+        // Exercise a zero denominator independently of filesystem allocation.
+        let mut nodes = tree.nodes_slice().to_vec();
+        nodes[tree.root().index()].allocated = 0;
+        let mut stats = tree.stats().clone();
+        stats.bytes_allocated = 0;
+        let tree = SizeTree::from_parts(
+            nodes,
+            kosha_core::NameArena::from_bytes(tree.names_bytes().to_vec()),
+            kosha_core::Owners::default(),
+            tree.root_path().to_path_buf(),
+            stats,
+        );
         assert_eq!(of(&tree, tree.root()).of_scan, 0.0);
     }
 

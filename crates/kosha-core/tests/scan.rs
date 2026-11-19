@@ -617,7 +617,9 @@ mod a_file_that_is_a_disk_image {
         // first: the answer has to be "this is an image" rather than "this is
         // not a directory", because the thing to do about it is a flag.
         match Scanner::new(ScanOptions::default()).scan(&image) {
-            Err(ScanError::ImageNotRead(path)) => assert_eq!(path, image),
+            Err(ScanError::ImageNotRead(path)) => {
+                assert_eq!(path, kosha_core::path::canonical(&image));
+            }
             other => panic!("expected ImageNotRead, got {other:?}"),
         }
     }
@@ -674,7 +676,9 @@ mod a_file_that_is_a_disk_image {
             let image = dir.path().join(name);
             write(&image);
             match Scanner::new(ScanOptions::default()).scan(&image) {
-                Err(ScanError::ImageNotRead(path)) => assert_eq!(path, image),
+                Err(ScanError::ImageNotRead(path)) => {
+                    assert_eq!(path, kosha_core::path::canonical(&image));
+                }
                 other => panic!("{name} was not recognised as an image: {other:?}"),
             }
         }
@@ -701,7 +705,9 @@ mod a_file_that_is_a_disk_image {
             let image = dir.path().join(name);
             write(&image);
             match Scanner::new(ScanOptions::default()).scan(&image) {
-                Err(ScanError::ImageNotRead(path)) => assert_eq!(path, image),
+                Err(ScanError::ImageNotRead(path)) => {
+                    assert_eq!(path, kosha_core::path::canonical(&image));
+                }
                 other => panic!("{name}: expected ImageNotRead, got {other:?}"),
             }
         }

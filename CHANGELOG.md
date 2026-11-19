@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Convert macOS du block counts to bytes for allocated-size comparisons, use
+  canonical image paths in scan tests, and test zero-byte details separately
+  from empty directories that occupy storage.
+
 - Add Linux GUI font development prerequisites to CI/release builds and the
   manual. Make export fixtures independent of temp-path aliases and filesystem
   restrictions on invalid UTF-8 filenames.
