@@ -1,6 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.1] — 2026-11-19
+
+Kosha 0.10.1 is the corrected preview candidate following the initial 0.10.0 source tag.
+It includes the portability fixes and CI improvements reviewed after that tag.
+
+### Release notes
+
+- Detect home directories using the same canonical paths as recorded scans, so
+  cache findings work when an OS supplies an alternate path spelling.
+- Keep the Windows closed-pipe handling while allowing strict non-Windows linting.
+- Validate native path, filesystem-allocation and export cases without assuming
+  Windows short paths, macOS /var aliases or Linux directory blocks are identical.
+- Include the Linux native build prerequisites and the current CI/coverage tools.
+
+Windows/macOS binaries are unsigned; macOS remains experimental. Verify the
+SHA-256 sidecars for downloaded archives.
 
 - Conservative CI job selection, a stable final check, cumulative PR detection,
   weekly full validation and removal of duplicate Rust test runs. Linux Rust
@@ -87,4 +102,6 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.1...HEAD
+
+[0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
