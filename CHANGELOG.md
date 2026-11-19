@@ -1,13 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.5] — 2026-11-19
 
+### Distribution updates
+
+- Add an unsigned Windows MSIX upload package for Microsoft Partner Center,
+  alongside the portable Windows ZIP. The package uses the registered KoshaApp
+  identity and includes the author, support email and project website.
+- Verify MSIX checksums, source commit, manifest identity/capabilities and exact
+  agreement with the executables in the Windows ZIP before drafting a release.
 - Package macOS downloads as a compressed DMG with an Applications shortcut,
-  companion CLI, offline manuals and verified SHA-256 sidecar.
-- Add opt-in development MSIX packaging with isolated app identities and CLI
-  aliases. Production signing and Microsoft Store distribution remain pending.
-- Add an opt-in unsigned Partner Center MSIX upload artifact alongside the ZIP
-  in GitHub releases, with registered identity, contact details and SHA-256 checks.
+  companion CLI and offline manuals.
+
+The MSIX asset is for Store submission, not direct consumer installation.
+Store certification and approval of the elevation/unvirtualized capabilities
+remain pending. Windows/macOS downloads remain unsigned; macOS support is
+experimental. No Microsoft Store submission or publication is automated.
 
 ## [0.10.4] — 2026-11-19
 
@@ -145,7 +153,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.5...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -154,3 +162,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.3]: https://github.com/coolnew/kosha/releases/tag/v0.10.3
 
 [0.10.4]: https://github.com/coolnew/kosha/releases/tag/v0.10.4
+
+[0.10.5]: https://github.com/coolnew/kosha/releases/tag/v0.10.5
