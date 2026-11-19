@@ -5,6 +5,7 @@ import importlib.util
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tarfile
@@ -36,7 +37,9 @@ class ReleaseTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Windows temp paths can use RUNNER~1 while resolve()/Git use the full
+        # name; macOS /var can likewise resolve through /private/var.
+        self.root = Path(self.temp.name).resolve()
 
     def project(self):
         (self.root / "crates/core").mkdir(parents=True)
@@ -101,6 +104,22 @@ class ReleaseTests(unittest.TestCase):
         for target in (self.root, self.root / "crates", self.root / ".git/objects", self.root.parent / "other/.git/build"):
             with self.assertRaises(ValueError):
                 release.safe_target(self.root, target)
+
+    def test_aliased_root_cannot_bypass_build_target_confinement(self):
+        alias = self.root / ".." / self.root.name
+        self.assertEqual(release.safe_target(alias, Path("target/check")), self.root / "target/check")
+        for target in (Path("crates"), Path(".")):
+            with self.assertRaises(ValueError):
+                release.safe_target(alias, target)
+
+    def test_nested_repository_selection_is_still_refused(self):
+        git(self.root, "init")
+        nested = self.root / "nested"
+        nested.mkdir()
+        with patch.object(release.sys, "argv", ["xtask-release.py", "--repo-path", str(nested)]), \
+             patch.object(release.sys, "stderr", io.StringIO()) as errors:
+            self.assertEqual(release.main(), 1)
+        self.assertIn("repository root", errors.getvalue())
 
     def test_clean_guard_and_git_refs_index_are_not_repaired_or_overwritten(self):
         git(self.root, "init")
@@ -234,7 +253,7 @@ class ReleaseTests(unittest.TestCase):
             return Version if name == "release_versions" else Package
         before = {"head": "a" * 40, "index": "unchanged", "refs": "unchanged", "status": ""}
         def selected_git(root, *args):
-            return str(self.root) if args == ("rev-parse", "--show-toplevel") else ""
+            return str(getattr(self, "reported_git_root", self.root)) if args == ("rev-parse", "--show-toplevel") else ""
         with patch.object(release.sys, "argv", ["xtask-release.py", "--repo-path", str(self.root)]), \
              patch.object(release, "module", selected_module), patch.object(release, "git", selected_git), \
              patch.object(release, "git_state", return_value=before), \
@@ -244,6 +263,34 @@ class ReleaseTests(unittest.TestCase):
         run.assert_not_called()
         self.assertFalse((self.root / "dist").exists())
         self.assertFalse(json.loads(output.getvalue())["execute"])
+
+    def test_dry_run_accepts_equivalent_git_root_spelling(self):
+        self.reported_git_root = self.root / ".." / self.root.name
+        self.test_dry_run_never_builds_or_creates_output()
+
+    @unittest.skipUnless(os.name == "nt", "Windows short paths")
+    def test_windows_short_path_root_is_accepted_without_weakening_confinement(self):
+        import ctypes
+        from ctypes import wintypes
+        folder = self.root / "release path alias regression fixture"
+        folder.mkdir()
+        short_path = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+        short_path.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        short_path.restype = wintypes.DWORD
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = short_path(str(folder), buffer, len(buffer))
+        self.assertGreater(length, 0)
+        self.assertLess(length, len(buffer))
+        alias = Path(buffer.value)
+        if alias == folder:
+            self.skipTest("This volume does not generate 8.3 aliases")
+        self.assertEqual(alias.resolve(), folder.resolve())
+        with self.assertRaises(ValueError):
+            release.safe_target(alias, Path("crates"))
+        self.assertEqual(release.safe_output(alias, Path("dist/check")), folder.resolve() / "dist/check")
+        self.root = folder.resolve()
+        self.reported_git_root = alias
+        self.test_dry_run_never_builds_or_creates_output()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.2] — 2026-11-19
 
-Nothing yet.
+- Fix release validation for Windows short-path aliases and macOS canonical temporary-directory paths, while retaining repository and build-output confinement checks.
+- Add a searchable manual website with a dedicated measured test-coverage section, preserving coverage provenance and badge links.
 
 ## [0.10.1] — 2026-11-19
 
@@ -106,6 +107,8 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.2...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
+
+[0.10.2]: https://github.com/coolnew/kosha/releases/tag/v0.10.2

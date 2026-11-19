@@ -20,7 +20,9 @@ class MarketplaceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # /var is a symlink on macOS; use the canonical fixture root so the
+        # path-safety guard still rejects actual links inside the marketplace.
+        self.root = Path(self.temp.name).resolve()
 
     def package(self, publisher='author', name='tools', version='1.0.0', kind='recipe-pack', listed=True):
         group = builder.KINDS.get(kind, kind)
@@ -119,6 +121,12 @@ class MarketplaceTests(unittest.TestCase):
             path.write_bytes(builder.encode(dict(manifest, path=name)))
             with self.subTest(name=name), self.assertRaises(ValueError):
                 builder.generated(self.root)
+
+    def test_links_inside_the_marketplace_are_still_refused(self):
+        with patch.object(Path, 'is_symlink', autospec=True,
+                          side_effect=lambda path: path == self.root / 'indexes'):
+            with self.assertRaisesRegex(ValueError, 'traverse links'):
+                builder.safe(self.root, 'indexes/recipes.jsonl')
 
     def test_check_is_read_only_and_refuses_stale_indexes(self):
         self.package()

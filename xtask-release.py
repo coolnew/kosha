@@ -177,6 +177,7 @@ def safe_target(root: Path, value: Path) -> Path:
         if parent.name.lower() == ".git" or parent.is_symlink() or getattr(parent, "is_junction", lambda: False)():
             raise ValueError("Cargo target cannot traverse Git metadata, symlinks or junctions")
     target = target.resolve()
+    root = root.resolve()
     if target.is_relative_to(root) and not target.is_relative_to(root / "target"):
         raise ValueError("In-repository Cargo output must stay under target/, never source or Git metadata")
     return target
@@ -244,7 +245,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         root = choose_repo(args.public, args.repo_path).resolve()
-        if git(root, "rev-parse", "--show-toplevel").replace("\\", "/").lower() != str(root).replace("\\", "/").lower():
+        if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
             raise ValueError("Select the repository root, not a nested directory")
         current = module(root / "xtask-version.py", "release_versions").validate(root)
         state = git_state(root)
