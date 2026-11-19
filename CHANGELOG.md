@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.10.6] — 2026-11-19
 
 ### Windows Store package acceptance
