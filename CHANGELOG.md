@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.10.1] — 2026-11-19
 
 Kosha 0.10.1 is the corrected preview candidate following the initial 0.10.0 source tag.
