@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Use the recorded canonical root in absolute-path prefix query tests, including
+  macOS temporary-directory aliases and Windows short paths.
+
 - Convert macOS du block counts to bytes for allocated-size comparisons, use
   canonical image paths in scan tests, and test zero-byte details separately
   from empty directories that occupy storage.

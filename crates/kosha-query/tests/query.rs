@@ -125,9 +125,17 @@ fn literal_prefix_suffix_queries_preserve_case_and_unicode_boundaries() {
     let negative = names(&tree, "file and not name endswith .mp4");
     assert_eq!(negative.len(), all.len() - 1);
     assert!(!negative.iter().any(|name| name == "holiday.MP4"));
-    let path_query = Query::parse(&format!("path startswith '{}'", dir.path().display())).unwrap();
+    // Absolute path predicates see the scan's canonical root, which may expand
+    // macOS /var aliases or Windows short temporary-directory names.
+    let path_query =
+        Query::parse(&format!("path startswith '{}'", tree.root_path().display())).unwrap();
     for id in tree.children(tree.root()) {
-        assert!(path_query.matches(&tree, id, now()));
+        assert!(
+            path_query.matches(&tree, id, now()),
+            "{} did not match {}",
+            path_query.source(),
+            tree.path_of(id).display()
+        );
     }
     for invalid in [
         "size startswith 10",
