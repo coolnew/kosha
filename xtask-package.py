@@ -80,6 +80,7 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
     roots.update({".github/ISSUE_TEMPLATE/bug_report.yml", ".github/ISSUE_TEMPLATE/feature_request.yml",
                   ".github/ISSUE_TEMPLATE/config.yml"})
     roots.update({"xtask-ci.py", "test_xtask_ci.py", "xtask-coverage.py",
+                  "xtask-ci-evidence.py", "test_xtask_ci_evidence.py",
                   "test_xtask_coverage.py", "xtask-docs.py", "test_xtask_docs.py",
                   "xtask-website.py", "test_xtask_website.py"})
     files = {}

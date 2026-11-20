@@ -7,22 +7,25 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Kosha. Search existing issues first if possible.
-        This report will be public. Redact personal paths, names, snapshots and logs.
+        A short report is enough. Unknown details are fine; screenshots are optional.
+        This report is public. Remove personal paths, names and secrets.
         For security vulnerabilities, use the private contact in [SECURITY.md](https://github.com/coolnew/kosha/security/policy).
   - type: input
     id: version
     attributes:
       label: Kosha version
-      description: Paste `kosha --version` or `kosha-gui --version`, or say website-only.
-      placeholder: Version and commit, if known
-    validations:
-      required: true
-  - type: input
+      description: From Settings → Version or `kosha --version`, if available.
+      placeholder: e.g. 0.10.7, website-only, or unknown
+  - type: dropdown
     id: system
     attributes:
       label: Operating system
-      placeholder: Windows 11 x64, macOS version and chip, or Linux distribution
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Other or unsure
     validations:
       required: true
   - type: dropdown
@@ -41,20 +44,22 @@ body:
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
-      description: Give the smallest example you can. A synthetic folder or query is preferable to private scan data.
-      placeholder: Describe the steps, command or query that triggers the problem.
+      label: What happened?
+      description: What did you do, what happened, and what did you expect? A few lines are enough.
+      placeholder: "I clicked / ran …\nKosha did …\nI expected …"
     validations:
       required: true
-  - type: textarea
-    id: behavior
+  - type: checkboxes
+    id: context
     attributes:
-      label: Expected and actual result
-      description: Include the exact error message if there is one.
-    validations:
-      required: true
+      label: Anything else that applies? (optional)
+      options:
+        - label: This happens every time I try.
+        - label: I am viewing a saved snapshot or cached scan.
+        - label: I am running as administrator or root.
+        - label: This started after an upgrade.
   - type: textarea
     id: evidence
     attributes:
-      label: Optional screenshots or logs
-      description: Review and redact these before uploading. Do not attach complete personal scan indexes or secrets.
+      label: Extra details (optional)
+      description: Exact error, screenshot, OS version, chip, install method or command. Redact private information; do not upload complete scan indexes.

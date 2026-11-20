@@ -49,6 +49,12 @@ Compression, cloud placeholders, skipped subtrees, and hardlink accounting can
 also make totals and individual rows differ. Adding a folder's total to the
 files listed inside it would count those bytes twice.
 
+Apparent size is useful even when you mainly care about disk use: it explains
+sparse/compressed files and allocation rounding. To simplify the list, open the
+command palette and choose **Hide the apparent column**. You can restore it
+with **Show the apparent column**. The preference is saved; the underlying
+measurement and exports keep both sizes.
+
 ### Quick look
 
 | Field | What it measures |

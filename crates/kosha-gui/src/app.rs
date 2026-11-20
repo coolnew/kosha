@@ -22,6 +22,7 @@ use std::time::Duration;
 use crate::ui::tooltip;
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::base::{h_flex, v_flex};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Theme, ThemeMode};
 use gpui_kit::prelude::FluentBuilder;
@@ -79,6 +80,7 @@ struct ColumnDrag {
 }
 
 pub struct KoshaApp {
+    planning_action: Option<gpui_kit::Task<()>>,
     state: State,
     /// Discards background results after another location is requested.
     load_generation: u64,
@@ -372,6 +374,7 @@ impl KoshaApp {
         let startup_snapshots = kosha_core::snapshot::store::list_all();
 
         KoshaApp {
+            planning_action: None,
             state,
             load_generation: 0,
             comparison_generation: 0,
@@ -3029,6 +3032,37 @@ impl KoshaApp {
         cx.notify();
     }
 
+    /// Explicit activation opens a live file through the OS association. A
+    /// snapshot/image records names, not a file that can be opened on this disk.
+    fn open_file(&mut self, id: NodeId, cx: &mut Context<Self>) {
+        let Some(ready) = self.state.ready() else {
+            return;
+        };
+        if ready.source.is_past() || ready.tree.stats().strategy == kosha_core::Strategy::DiskImage
+        {
+            self.state.notice = Some("This view records metadata, not file contents. Scan the live folder to open its files.".into());
+            cx.notify();
+            return;
+        }
+        let path = ready.tree.path_of(id);
+        // A disconnected share must not hold the UI thread while we check it.
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { current_file(path) })
+                .await;
+            this.update(cx, |app, cx| {
+                match result {
+                    Ok(path) => cx.open_with_system(&path),
+                    Err(message) => app.state.notice = Some(message),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn on_scan_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // Capture Escape before a focused input can consume it. Other keys
         // retain normal bubbling and overlay dismissal keeps its usual order.
@@ -3041,6 +3075,12 @@ impl KoshaApp {
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modified = event.keystroke.modifiers.secondary();
+
+        if key == "escape" && self.planning_action.take().is_some() {
+            self.state.notice = Some("Cleanup preview cancelled.".into());
+            cx.notify();
+            return;
+        }
 
         // These work wherever we are, including mid-scan and before any scan.
         if modified {
@@ -3182,6 +3222,27 @@ impl KoshaApp {
             }
         }
 
+        if modified
+            && (key == "delete" || (cfg!(target_os = "macos") && key == "backspace"))
+            && !self.settings_open
+            && !self.help_open
+            && !self.owners_open
+            && !self.state.asking_to_unlock
+            && self.state.pending.is_none()
+            && self
+                .state
+                .ready()
+                .is_some_and(|ready| ready.comparison.is_none())
+        {
+            if let Some(ready) = self.state.ready()
+                && let Some(id) = ready.selected
+            {
+                let tree = Arc::clone(&ready.tree);
+                self.begin_entry_trash(id, &tree, cx);
+            }
+            return;
+        }
+
         let Some(ready) = self.state.ready_mut() else {
             if key == "escape" {
                 self.state.cancel_scan();
@@ -3246,6 +3307,67 @@ impl KoshaApp {
     /// The plan is built and dry-run *before* the dialog appears, so the counts
     /// and the byte total the user approves come out of the same code path that
     /// will execute — not from a parallel estimate that can drift away from it.
+    fn begin_entry_trash(&mut self, id: NodeId, tree: &Arc<SizeTree>, cx: &mut Context<Self>) {
+        if self.planning_action.is_some() || self.state.pending.is_some() {
+            return;
+        }
+        let Some(ready) = self.state.ready() else {
+            return;
+        };
+        if !Arc::ptr_eq(&ready.tree, tree) {
+            self.state.notice = Some("The scan changed. Select the entry again.".into());
+        } else if ready.source.is_past()
+            || ready.tree.stats().strategy == kosha_core::Strategy::DiskImage
+        {
+            self.state.notice = Some("Scan the live folder before moving files to Trash.".into());
+        } else if !self.state.mode().is_read_write() {
+            self.state.notice = Some("Read-only. Switch modes in the title bar to act.".into());
+        } else {
+            let tree = Arc::clone(tree);
+            let root = self.state.session.root().to_path_buf();
+            let title = format!("Move {} to Trash", format::printable(&tree.name_lossy(id)));
+            self.state.notice = Some("Preparing cleanup preview… Escape cancels.".into());
+            self.planning_action = Some(cx.spawn(async move |this, cx| {
+                let checked = Arc::clone(&tree);
+                let pending = cx
+                    .background_executor()
+                    .spawn(async move {
+                        // Planning grants no write permission. Execution uses only
+                        // the real session's grant after the user confirms.
+                        let session = kosha_fsops::Session::new(root);
+                        let plan = ActionPlan::build(&checked, &[id], Action::Trash, &session);
+                        let preview = plan.dry_run();
+                        PendingAction {
+                            title,
+                            plan,
+                            preview,
+                        }
+                    })
+                    .await;
+                this.update(cx, |app, cx| {
+                    app.planning_action = None;
+                    app.state.notice = None;
+                    if app.state.mode().is_read_write()
+                        && app.state.pending.is_none()
+                        && !app.settings_open
+                        && !app.help_open
+                        && !app.owners_open
+                        && !app.command_open
+                        && !app.state.asking_to_unlock
+                        && app.state.ready().is_some_and(|ready| {
+                            Arc::ptr_eq(&ready.tree, &tree) && !ready.source.is_past()
+                        })
+                    {
+                        app.state.pending = Some(pending);
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }));
+        }
+        cx.notify();
+    }
+
     fn begin_action(&mut self, index: usize, cx: &mut Context<Self>) {
         // Before the mode check, because it is the more fundamental refusal: a
         // snapshot is a record of a disk as it was, and acting on it would
@@ -5065,7 +5187,7 @@ impl KoshaApp {
                             cx.notify();
                         }
                     }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         if let Some(ready) = this.state.ready_mut() {
                             ready.selected = Some(id);
                         }
@@ -5075,6 +5197,8 @@ impl KoshaApp {
                             .is_some_and(|ready| ready.tree.node(id).is_dir());
                         if is_dir {
                             this.navigate_to(id, window, cx);
+                        } else if event.click_count() >= 2 {
+                            this.open_file(id, cx);
                         } else {
                             cx.notify();
                         }
@@ -6197,10 +6321,15 @@ fn row(
         .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
             // `ClickEvent` covers keyboard activation too, and its accessor
             // reports one click for that — which is the right reading.
+            window.focus(&this.focus, cx);
             let opening = event.click_count() >= 2;
+            let file = this
+                .state
+                .ready()
+                .is_some_and(|ready| !ready.tree.node(id).is_dir());
             if let Some(ready) = this.state.ready_mut() {
                 ready.selected = Some(id);
-                if opening {
+                if opening && !file {
                     if in_results {
                         ready.reveal(id);
                     } else {
@@ -6209,11 +6338,76 @@ fn row(
                 }
             }
             if opening {
-                this.sync_query_input(window, cx);
+                if file {
+                    this.open_file(id, cx);
+                } else {
+                    this.sync_query_input(window, cx);
+                }
             }
             cx.notify();
         }))
+        .context_menu(entry_context_menu(id, Arc::clone(&ready.tree), cx))
         .into_any_element()
+}
+
+fn entry_context_menu(
+    id: NodeId,
+    tree: Arc<SizeTree>,
+    cx: &mut Context<KoshaApp>,
+) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static + use<> {
+    let app = cx.entity().downgrade();
+    move |menu, _, cx| {
+        let Some(view) = app.upgrade() else {
+            return menu;
+        };
+        let state = view.read(cx);
+        let live = state.state.ready().is_some_and(|ready| {
+            Arc::ptr_eq(&ready.tree, &tree)
+                && !ready.source.is_past()
+                && ready.tree.stats().strategy != kosha_core::Strategy::DiskImage
+        });
+        let writable = live && state.state.mode().is_read_write();
+        let opening = view.clone();
+        let opened_tree = Arc::clone(&tree);
+        let trashing = view.clone();
+        let trashed_tree = Arc::clone(&tree);
+        menu.item(
+            PopupMenuItem::new("Open with default application")
+                .disabled(!live || tree.node(id).is_dir())
+                .on_click(move |_, _, cx| {
+                    opening.update(cx, |app, cx| {
+                        if app
+                            .state
+                            .ready()
+                            .is_some_and(|ready| Arc::ptr_eq(&ready.tree, &opened_tree))
+                        {
+                            app.open_file(id, cx);
+                        }
+                    })
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new(if writable {
+                "Move to Trash…"
+            } else if live {
+                "Move to Trash (Read-only)"
+            } else {
+                "Move to Trash (live scan required)"
+            })
+            .disabled(!writable)
+            .on_click(move |_, _, cx| {
+                trashing.update(cx, |app, cx| {
+                    if let Some(ready) = app.state.ready_mut()
+                        && Arc::ptr_eq(&ready.tree, &trashed_tree)
+                    {
+                        ready.selected = Some(id);
+                    }
+                    app.begin_entry_trash(id, &trashed_tree, cx);
+                })
+            }),
+        )
+    }
 }
 
 // ------------------------------------------------------------------ insights
@@ -6882,13 +7076,16 @@ impl KoshaApp {
     }
 }
 
-/// Show a file of ours in the platform's own file manager.
-///
-/// Selected in a folder window rather than opened: the audit log is `.jsonl`,
-/// which a fresh Windows has no association for, and "how do you want to open
-/// this file?" is not the answer to "what did kosha do". A folder with the
-/// file highlighted is the same gesture every application uses for "here it
-/// is", and it cannot fail for want of an editor.
+/// Check again before dispatching a file to another application.
+fn current_file(path: PathBuf) -> Result<PathBuf, String> {
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => Ok(path),
+        Ok(_) => Err("The selected entry is no longer a regular file. Rescan the folder.".into()),
+        Err(error) => Err(format!("Cannot open this file: {error}")),
+    }
+}
+
+/// Show a file in the platform file manager, selected rather than opened.
 fn reveal(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
@@ -7030,6 +7227,30 @@ fn export_rows(
 #[cfg(test)]
 mod search_export_tests {
     use super::*;
+
+    #[test]
+    fn external_open_checks_current_file_type_and_existence() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sample with spaces.txt");
+        std::fs::write(&file, b"test").unwrap();
+        assert_eq!(current_file(file.clone()).unwrap(), file);
+        assert!(current_file(dir.path().to_path_buf()).is_err());
+        std::fs::remove_file(&file).unwrap();
+        assert!(current_file(file.clone()).is_err());
+        std::fs::create_dir(&file).unwrap();
+        assert!(current_file(file).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_open_refuses_links_instead_of_following_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sample.txt");
+        std::fs::write(&file, b"test").unwrap();
+        let link = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(current_file(link).is_err());
+    }
 
     #[test]
     fn exporting_a_capped_search_writes_all_matches_from_its_recorded_tree() {

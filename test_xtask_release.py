@@ -334,6 +334,18 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unclassified"):
             package.public_payloads(self.root)
 
+    def test_public_checkout_keeps_ci_evidence_tools_without_private_helpers(self):
+        git(self.root, "init")
+        names = ["xtask-ci-evidence.py", "test_xtask_ci_evidence.py"]
+        for name in names:
+            (self.root / name).write_text("# reviewed public CI helper\n", encoding="utf-8")
+        git(self.root, "add", *names)
+        self.assertEqual(set(package.public_payloads(self.root)), set(names))
+        (self.root / "private_ci_helper.py").write_text("# internal\n", encoding="utf-8")
+        git(self.root, "add", "private_ci_helper.py")
+        with self.assertRaisesRegex(ValueError, "Unclassified"):
+            package.public_payloads(self.root)
+
     def test_public_privacy_policy_is_kept_in_source_and_offline_documentation(self):
         git(self.root, "init")
         for name in ["README.md", "PRIVACY.md"]:

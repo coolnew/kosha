@@ -61,7 +61,7 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .child(
                         div()
                             .text_color(palette.text_dim)
-                            .child("Read-write mode allows the actions in the insights panel:"),
+                            .child("Read-write mode permits these file operations:"),
                     )
                     .child(
                         v_flex()
@@ -74,7 +74,11 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             .border_color(palette.hairline)
                             .text_size(px(metrics::TEXT_SM))
                             .text_color(palette.text_dim)
-                            .child("Move to trash — recoverable from the Recycle Bin")
+                            .child(if cfg!(windows) {
+                                "Move to trash — recoverable from the Recycle Bin"
+                            } else {
+                                "Move to trash — recoverable from the system Trash"
+                            })
                             .child("Empty a cache directory — permanent")
                             .child("Delete permanently — permanent")
                             .child("Compress — reversible, and loses nothing"),

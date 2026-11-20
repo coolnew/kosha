@@ -23,11 +23,25 @@ These controls are part of development after 0.10.6; older builds can use
 
 These keys apply when focus is outside a text field.
 
+Double-click a regular file in the list, search results or treemap to open it
+with the operating system's associated application. Single clicks select files;
+folder navigation is unchanged. A snapshot or disk-image view contains metadata
+only: rescan the live folder before opening files. Missing files produce a
+notice; links are not launched. Choose trusted files, since their associated
+application controls what happens after opening.
+
+The file-opening and entry context actions are additions after 0.10.7.
+You can also choose **Open with default application** from an entry's
+right-click menu; opening a file does not require Read-write mode.
+
+![A synthetic Markdown search result on macOS with its Open with default application context action](images/gui-macos-file-open-menu.png)
+
 | Key | Action |
 | --- | --- |
 | Up / Down | Move the selection by one row |
 | Page Up / Page Down | Move the selection by up to 12 rows |
 | Home / End | Select the first or last row |
+| Ctrl+Delete (Windows/Linux), Command+Delete (macOS) | Preview moving the selected live entry to Trash; requires Read-write and confirmation |
 | Enter / Right | Open the selected directory in folder view, or reveal the selected match in its containing folder in search results |
 | Backspace / Left | Move to the parent directory |
 | Space | Open or close Quick Look for the selected entry. Moving the selection updates Quick Look while it is open |

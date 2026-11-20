@@ -803,7 +803,10 @@ fn choice(
         let (text, selected) = (*text, *selected);
         let edit = edit.clone();
         buttons.push(
-            ui::chip(text)
+            // Labels repeat between rows (notably Theme/System and
+            // Accent/System). GPUI routes state and clicks by element ID;
+            // sharing that ID can send an accent click to the theme row.
+            ui::chip((label, index))
                 .when(selected, |this| {
                     this.bg(palette.accent).text_color(palette.accent_text)
                 })

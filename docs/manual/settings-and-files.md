@@ -10,6 +10,13 @@ units, theme, accent, panels, saved searches, pinned folders, columns, and scan
 and analysis options. Scan-option changes apply on the next scan; rescan to
 update results already on screen.
 
+Theme and accent are independent. **Theme → System** follows the desktop's
+light/dark appearance; **Accent → System** uses its accent where supported,
+falling back to Kosha's blue when no desktop accent is available. You can
+switch either preference back to System without resetting the other.
+
+![macOS Settings showing separate System choices for Theme and Accent in a synthetic workspace](images/gui-macos-settings-dark.png)
+
 | Group | What to look for |
 | --- | --- |
 | Display | Units, light/dark/system appearance, accent and window tint |

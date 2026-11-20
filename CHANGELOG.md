@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Add file-list context actions and a platform Trash shortcut with background
+  previews, confirmation, Read-write requirements and stale-scan guards.
+- Explain review-only cluster slack without promising automatic recovery, and
+  document how to hide the apparent-size column.
+- Open live files with their associated application by double-clicking in the
+  file list, search results or treemap; report missing files and refuse links
+  and metadata-only snapshot/image views.
+- Fix independent Theme/System and Accent/System settings buttons so the
+  desktop accent can be restored after choosing Kosha's accent.
 - Require full trusted CI for the exact tagged commit before release builds.
   Reuse compatible native Rust validation reports while retaining separate
   optimized compilation and all native package checks. Local/manual builds

@@ -9,20 +9,30 @@ body:
       value: |
         Tell us what you are trying to achieve. Check existing issues if possible.
         This request will be public; leave out personal file paths and confidential data.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where would this help?
+      multiple: true
+      options:
+        - Desktop app
+        - Command line
+        - Installation or upgrade
+        - Website or documentation
+        - Search recipes or marketplace
+        - Other or unsure
   - type: textarea
     id: problem
     attributes:
       label: What would you like to do?
-      description: Explain the task or difficulty, and whether it concerns the GUI, CLI, installer or website.
+      description: A few lines about your task or difficulty are enough.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: Suggested improvement
-      description: An example of the desired behavior is helpful.
-    validations:
-      required: true
+      label: Suggested improvement (optional)
+      description: An example helps, but you do not need to design the solution.
   - type: textarea
     id: alternatives
     attributes:

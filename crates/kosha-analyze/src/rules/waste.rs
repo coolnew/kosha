@@ -70,8 +70,11 @@ impl Rule for ClusterWaste {
                 Some(d) => format!(
                     "Small files each occupy a whole allocation unit, so their \
                      on-disk size exceeds their contents. The worst offender is \
-                     {} with {} of slack across {}. Archiving such a \
-                     directory recovers most of it.",
+                     {} with {} of slack across {}. This is allocation \
+                     overhead, not disposable contents. Review the listed \
+                     directories. An archive may reduce overhead for inactive \
+                     documents after the originals are safely replaced; for \
+                     active caches, use the owning application's cleanup tools.",
                     tree.name_lossy(d),
                     format::bytes_in(worst[0].1, ctx.units),
                     format::plural(worst[0].2 as usize, "file"),
