@@ -445,8 +445,8 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
     return {metadata_name, name, name + ".sha256"}
 
 
-def validation_commands(root: Path) -> list[list[str]]:
-    commands = [["cargo", "fmt", "--all", "--check"],
+def validation_commands(root: Path, reuse_rust: bool = False) -> list[list[str]]:
+    commands = [] if reuse_rust else [["cargo", "fmt", "--all", "--check"],
                 ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"],
                 ["cargo", "test", "--locked", "--workspace"]]
     for script, args in (("xtask-version.py", []), ("xtask-llms.py", ["--check"]), ("xtask-eol.py", []), ("xtask-spdx.py", ["--check"]), ("xtask-gaps.py", []), ("xtask-mutations.py", []), ("xtask-dco.py", [])):
@@ -484,8 +484,11 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, help="Fresh subdirectory within selected checkout's dist/")
     parser.add_argument("--target-dir", type=Path, help="Separate rebuildable Cargo target directory")
     parser.add_argument("--msix-store", action="store_true", help="Windows only: also package an unsigned Partner Center upload MSIX from KOSHA_MSIX_* identity/contact variables")
+    parser.add_argument("--ci-evidence", type=Path, help="Public tag workflow only: revalidate trusted CI reports and reuse compatible Rust validation")
     args = parser.parse_args()
     try:
+        if args.ci_evidence and (args.prepare or args.next_preview):
+            raise ValueError("CI evidence is for hosted tag packaging, not version preparation")
         root = choose_repo(args.public, args.repo_path).resolve()
         if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
             raise ValueError("Select the repository root, not a nested directory")
@@ -553,7 +556,20 @@ def main() -> int:
             if remote.rstrip("/").removesuffix(".git") not in {"git@github.com:coolnew/kosha", "https://github.com/coolnew/kosha"}:
                 raise ValueError("Public candidate origin must identify coolnew/kosha")
         notes_ready = bool(re.search(r'^## \[?' + re.escape(version) + r'\]?\s+[—-]\s+\d{4}-\d{2}-\d{2}\s*$', files.get("CHANGELOG.md", b"").decode("utf-8"), re.M))
-        checks = validation_commands(root)
+        ci_validation = None
+        reuse_rust = False
+        if args.ci_evidence:
+            evidence_tool = module(root / "xtask-ci-evidence.py", "release_ci_evidence")
+            evidence = evidence_tool.verified(root, args.ci_evidence)
+            rustc = subprocess.check_output(["rustc", "-vV"], text=True).strip()
+            reuse_rust = evidence_tool.reuse_for_host(evidence, os.environ.get("RUNNER_OS"), rustc,
+                                                     os.environ.get("ImageOS", ""), os.environ.get("ImageVersion", ""))
+            ci_validation = {k: evidence[k] for k in ("repository", "commit", "run_id", "run_attempt", "url")}
+            ci_validation["reused_rust_validation"] = reuse_rust
+            ci_validation["decision"] = ("Reuse CI format/Clippy/Rust tests" if reuse_rust else
+                                          "Runner image or compiler differs; run full local Rust validation")
+            print(ci_validation["decision"], flush=True)
+        checks = validation_commands(root, reuse_rust=reuse_rust)
         short = state["head"][:12]
         out = args.output_dir or root / "dist/releases" / f"v{version}-{short}"
         out = safe_output(root, out)
@@ -572,6 +588,8 @@ def main() -> int:
                 "archives": ([] if args.binary_only else ["source.zip", "source.tar.gz"]) + ([] if args.source_only else ["host binary archive"]) + (["Partner Center upload MSIX (unsigned)"] if args.msix_store else []),
                 "git_mutations": [], "remote_mutations": [],
                 "remaining_release_acceptance": "Linux/non-host, clean-machine GUI/Sandbox, agreement and hosted workflow checks remain separate evidence"}
+        if ci_validation is not None:
+            plan["ci_validation"] = ci_validation
         if windows and not args.source_only:
             module(root / "xtask-installer.py", "release_installer").numeric_version(version)
             plan["build"] += ["--target", windows.TARGET]
@@ -638,6 +656,8 @@ def main() -> int:
                     "commit": state["head"], "target": package.target_triple(),
                     "publication_candidate": candidate, "validation": "selected host checks passed",
                     "source_scope": "reviewed public files only", "artifacts": []}
+        if ci_validation is not None:
+            manifest["ci_validation"] = ci_validation
         for artifact in artifacts:
             digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
             Path(str(artifact) + ".sha256").write_text(f"{digest}  {artifact.name}\n", encoding="utf-8", newline="\n")

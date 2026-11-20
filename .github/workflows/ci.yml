@@ -55,6 +55,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
       # GPUI needs system libraries for Wayland, X11 and font handling.
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
@@ -92,6 +96,19 @@ jobs:
         run: |
           cargo build --locked -p kosha-cli
           python scripts/check-recipe-authoring-manual.py --cli target/debug/kosha
+
+      - name: Record reusable native validation
+        if: github.repository == 'coolnew/kosha' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: python xtask-ci-evidence.py --native "${{ runner.temp }}/ci-validation/validation.json"
+
+      - name: Upload native validation report
+        if: github.repository == 'coolnew/kosha' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v6
+        with:
+          name: ci-validation-${{ runner.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-validation/validation.json
+          retention-days: 14
+          if-no-files-found: error
 
   # A different libc, not a different kernel. `statvfs` field widths differ
   # between musl and glibc, and a numeric conversion that is a no-op on one can

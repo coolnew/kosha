@@ -38,6 +38,14 @@ def git(root, *args):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_ci_reuse_omits_only_rust_validation_and_keeps_native_python_gates(self):
+        normal=release.validation_commands(ROOT)
+        reused=release.validation_commands(ROOT,reuse_rust=True)
+        self.assertEqual(normal[3:],reused)
+        self.assertTrue(all(command[0]=='cargo' for command in normal[:3]))
+        self.assertTrue(any('unittest' in command for command in reused))
+        self.assertTrue(any('xtask-version.py' in command for command in reused))
+
     def test_numbered_previews_publish_without_latest_or_store_packages(self):
         for version in ["0.10.7-alpha.1", "0.10.7-beta.12", "0.10.7-rc.2"]:
             self.assertEqual(release.github_release_policy(version),

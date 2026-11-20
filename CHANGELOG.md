@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- Require full trusted CI for the exact tagged commit before release builds.
+  Reuse compatible native Rust validation reports while retaining separate
+  optimized compilation and all native package checks. Local/manual builds
+  remain fully validated; missing or invalid CI approval blocks tagged releases.
+
 ## [0.10.7] — 2026-11-20
 
 ### Security

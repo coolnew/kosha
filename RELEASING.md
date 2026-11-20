@@ -1,5 +1,27 @@
 # Releasing kosha
 
+## CI approval and production builds
+
+Tagged releases require successful **full CI for the exact tagged commit** on
+trusted main, including Linux, Windows, macOS, musl and the final gate. CI keeps
+native validation reports for 14 days. Docs-only runs, PR merge commits, old
+SHAs and mixed-attempt partial reruns do not qualify. Manually run full CI on
+main when native jobs were skipped; wait for all reports before advancing main.
+
+The tag gate verifies GitHub run/job state and report provenance before starting
+release builds. Compatible compiler/runner images reuse CI formatting, Clippy
+and Rust tests. Changed/unknown environments run those checks locally. Invalid
+approval blocks release. Optimized compilation retains production flags,
+including Windows static CRT. Native Python/repository checks, package smoke,
+installer, MSIX/DMG and hash/provenance checks remain mandatory. Host manifests
+record the CI run and reuse decision; debug CI executables are not shipped.
+
+Local builds and manual release rehearsals keep complete validation. The
+`--ci-evidence` option is reserved for the public tag workflow and rechecks live
+approval; it is not a local skip-tests switch. For a timing/expired-report
+failure, rerun all CI jobs for the candidate and rerun the tag workflow. Do not
+move the tag. Source corrections require a new version.
+
 Versions are declared in workspace `Cargo.toml`, inherited by all crates, and
 repeated on local path dependencies and in `Cargo.lock`. `python xtask-version.py`
 checks that they agree. Binaries report version, commit and build target.
@@ -20,8 +42,9 @@ checks that they agree. Binaries report version, commit and build target.
    archives/checksums as workflow artifacts but does not create a release.
 
 The hosted release workflow accepts reviewed `coolnew/kosha` source only and
-uses `xtask-release.py --execute` for each host. Workspace tests/clippy and
-repository/Python gates precede packaging; a build alone cannot create a draft.
+uses `xtask-release.py --execute` for each host. Verified CI evidence covers
+compatible Rust validation; repository/Python gates and production build/package
+checks precede packaging. A build alone cannot create a draft.
 It retains source ZIP/TAR.GZ, host binary archives, SHA-256 sidecars and per-host
 manifests. Manual rehearsals need committed, dated candidate release notes too.
 Linux is the sole producer of the shared source ZIP/TAR.GZ. Windows and macOS

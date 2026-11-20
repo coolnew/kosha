@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -78,6 +79,39 @@ jobs:
           runpy.run_path("xtask-release.py")["require_unpublished_release"](os.environ["GITHUB_REF_NAME"])
           PY
 
+      - name: Require successful full CI for the exact tagged commit
+        id: ci
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python xtask-ci-evidence.py --select target/approved-ci.json
+
+      - name: Download reports from the approved CI run attempt
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: coolnew/kosha
+          run-id: ${{ steps.ci.outputs.run_id }}
+          pattern: ci-validation-*-${{ steps.ci.outputs.run_attempt }}
+          path: target/validated-ci/reports
+
+      - name: Verify native CI reports and bind release evidence
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python xtask-ci-evidence.py --collect target/approved-ci.json --reports target/validated-ci/reports --output target/validated-ci/ci-evidence.json
+
+      - name: Retain approved validation evidence for release jobs
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/upload-artifact@v6
+        with:
+          name: validated-ci
+          path: target/validated-ci/
+          overwrite: true
+          retention-days: 14
+          if-no-files-found: error
+
   build:
     name: ${{ matrix.target }}
     needs: public-source
@@ -121,6 +155,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
+      - name: Download verified CI evidence
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/download-artifact@v7
+        with:
+          name: validated-ci
+          path: target/validated-ci
       - name: Verify host architecture
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
@@ -131,13 +171,19 @@ jobs:
         run: python xtask-nsis.py --output-dir "${{ runner.temp }}/kosha-nsis" --execute
       - name: Validate, build, package, and smoke-test clean candidate
         if: runner.os == 'Linux'
-        run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate ${{ github.event_name == 'push' && github.ref_type == 'tag' && '--ci-evidence target/validated-ci/ci-evidence.json' || '' }}
       - name: Validate and package host binaries (shared sources are built on Linux)
         if: runner.os == 'macOS' || (runner.os == 'Windows' && env.KOSHA_MSIX_STORE_UPLOAD != 'true')
-        run: python xtask-release.py --execute --binary-only --target-dir target --output-dir dist/candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python xtask-release.py --execute --binary-only --target-dir target --output-dir dist/candidate ${{ github.event_name == 'push' && github.ref_type == 'tag' && '--ci-evidence target/validated-ci/ci-evidence.json' || '' }}
       - name: Validate and package Windows ZIP plus Partner Center upload MSIX
         if: runner.os == 'Windows' && env.KOSHA_MSIX_STORE_UPLOAD == 'true'
-        run: python xtask-release.py --execute --binary-only --msix-store --target-dir target --output-dir dist/candidate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python xtask-release.py --execute --binary-only --msix-store --target-dir target --output-dir dist/candidate ${{ github.event_name == 'push' && github.ref_type == 'tag' && '--ci-evidence target/validated-ci/ci-evidence.json' || '' }}
       - name: Smoke-test per-user Setup and PATH cleanup
         if: runner.os == 'Windows'
         shell: pwsh
@@ -188,18 +234,27 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
         with:
-          path: artifacts
+          path: target/release-artifacts
+          pattern: kosha-*
           merge-multiple: true
+      - name: Download CI approval for final recheck
+        uses: actions/download-artifact@v7
+        with:
+          name: validated-ci
+          path: target/validated-ci
+      - name: Recheck CI approval before assembling release
+        run: python xtask-ci-evidence.py --verify target/validated-ci/ci-evidence.json --manifests target/release-artifacts
       - name: Verify downloaded archives and manifests
         run: |
           python3 - <<'PY'
           import os, runpy
           from pathlib import Path
-          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true")
+          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("target/release-artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true")
           PY
       - name: Recheck publication state before uploading
         run: |
@@ -214,7 +269,7 @@ jobs:
           prerelease: ${{ needs.public-source.outputs.prerelease == 'true' }}
           make_latest: 'false'
           fail_on_unmatched_files: true
-          files: artifacts/*
+          files: target/release-artifacts/*
           generate_release_notes: true
           body: |
             Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
@@ -246,7 +301,7 @@ jobs:
           from pathlib import Path
           release = runpy.run_path("xtask-release.py")
           tag = os.environ["GITHUB_REF_NAME"]
-          release["verify_uploaded_release"](Path("artifacts"), release["github_release"](tag, os.environ["RELEASE_ID"]), tag)
+          release["verify_uploaded_release"](Path("target/release-artifacts"), release["github_release"](tag, os.environ["RELEASE_ID"]), tag)
           PY
       - name: Publish numbered preview (keep regular releases as drafts)
         if: needs.public-source.outputs.publish_preview == 'true'

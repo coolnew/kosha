@@ -4,7 +4,11 @@ Kosha is checked on Windows, Linux and macOS. The
 [CI runs](https://github.com/coolnew/kosha/actions/workflows/ci.yml) show the
 exact commit, selected jobs and their outcomes. A passing documentation-only
 run means its selected checks passed; it does not mean native tests ran again.
-Release candidates always undergo the separate full release validation.
+Tagged releases require a successful full native/musl CI run for the exact
+source commit. Compatible release hosts can reuse its Rust validation results;
+optimized binaries are built separately and native package checks always run.
+If the compiler or runner image differs, Rust validation runs again. Local and
+manual release rehearsals retain the full validation path.
 
 ## Which checks run
 
