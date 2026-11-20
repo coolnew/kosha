@@ -1,6 +1,43 @@
 # Changelog
 
-## [Unreleased]
+## [0.10.7] — 2026-11-20
+
+### Security
+
+- Update rustls to 0.23.46, addressing the four reported TLS advisories
+  GHSA-2mjx-qc3c-rqvc, GHSA-h2v8-394m-p7vv, GHSA-c8m5-c952-6cm4 and
+  GHSA-w44r-93j7-qv28. Upgrade from earlier builds for the corrected dependency.
+
+### Windows downloads
+
+- Portable ZIP, offline Setup EXE and Store-upload MSIX now use the same
+  verified static-CRT binaries: no separate Visual C++ Redistributable needed.
+- New offline Setup offers per-user/all-users installation, optional CLI PATH
+  integration, upgrades and uninstall that preserves user data. Windows
+  downloads remain unsigned; the MSIX is for Partner Center upload, not sideloading.
+
+### macOS
+
+- Add the native application menu and working Command+Q, including with search
+  or Settings focused. Native Apple Silicon tests verified both quit paths,
+  scanning/search, dark/light themes and saved window geometry (Refs #2, #3).
+- Seal the complete app bundle and companion CLI with ad-hoc signatures,
+  verified before packaging and after DMG extraction. The downloaded rc.2 DMG
+  also passed checksum/image/strict bundle checks on macOS 14.4.1.
+- macOS remains experimental. Ad-hoc signatures do not provide Developer ID
+  trust or Apple notarization; Gatekeeper can block a download. See the
+  [macOS installation guide](https://coolnew.github.io/kosha/manual/macos/)
+  for supported first-launch approval and warning guidance. Issue #1 remains
+  open for download-trust acceptance; no automatic security bypass is installed.
+
+### Website and support
+
+- Redesigned homepage with GUI/CLI showcases, easier issue-report links and
+  guided bug/feature forms, a public privacy policy and clearer download guides.
+- Clarify the separate `coolnew/kosha-marketplace` catalog and recipe source.
+
+This regular release follows the 0.10.7 release candidates. Existing releases
+and preview assets are unchanged. Issues #4–#9 are outside this release's scope.
 
 - Update rustls to 0.23.46 for TLS security fixes covering handshake record
   boundaries, certificate decompression, session Debug redaction and key-exchange
@@ -254,7 +291,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.7-rc.2...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.7...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -271,3 +308,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.7-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.7-rc.1
 
 [0.10.7-rc.2]: https://github.com/coolnew/kosha/releases/tag/v0.10.7-rc.2
+
+[0.10.7]: https://github.com/coolnew/kosha/releases/tag/v0.10.7
