@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Bound local insight rule-pack files, rule counts and marker/text sizes, reject
+  unknown root fields and nonregular entries, and document authoring limits.
+
 - Add guarded treemap context actions and delayed folder previews showing up
   to six largest recorded children, with cancellable workers and a bounded
   scan-specific cache.

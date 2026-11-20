@@ -115,3 +115,63 @@ Review them before sharing.
 Optional rule packs in `rules.d/` extend findings and are validated before use.
 Their suggestions still follow normal confidence, mode, and confirmation rules.
 Rescan after editing a pack to refresh findings.
+
+### Author local insight rules
+
+These JSON files produce findings; [search recipes](recipe-authoring.md) instead
+translate queries. Marketplace installation currently supports search recipe
+packs only. Local insight files use this separate version-1 contract:
+
+```json
+{
+  "version": 1,
+  "rules": [{
+    "id": "review-session-records",
+    "title": "Session records to review",
+    "detail": "These may contain valuable conversation history. Review before changing anything.",
+    "subject": "directory",
+    "under-home": ".codex/sessions",
+    "action": "review-only"
+  }]
+}
+```
+
+Save as a regular `.json` file directly in `rules.d/`. Use your actual tool's
+storage location; this example does not discover custom profiles or classify
+session histories as junk. Kosha evaluates recorded directory metadata, never
+conversation contents. No commands, scripts, network access, regex, fuzzy
+selectors or AI models are part of this format.
+
+Each rule needs `id`, `title`, `detail`, `subject`, `action`, and exactly one
+matcher: `under-home` is an exact relative path inside the detected home;
+`directory` is an exact directory name anywhere in the scan. A directory matcher
+can require any of up to eight sibling marker names in `beside`. Matching is
+literal, using the scanned path spelling; there are no globs or environment
+variable expansions. Unknown home means no `under-home` match. Nodes below
+the minimum finding size are omitted.
+
+Actions are `review-only`, `trash`, or `empty-contents`. A bare name supports
+only review; a required sibling marker earns stronger evidence, and an exact
+home path earns likely confidence. Confidence is derived, never author-supplied.
+Path/name evidence does not prove data is disposable. Prefer review for history,
+credentials, profiles, user-created data and tool-managed caches. In particular,
+use uv's own cache commands rather than deleting its cache directly; see
+[uv cache safety](https://docs.astral.sh/uv/concepts/cache/#cache-safety).
+Kosha never runs the commands in explanatory text.
+
+Builds after 0.10.7 enforce these limits: 256 KiB per file, 32 rules per file,
+32 JSON files and 64 accepted rules across the directory. Fields are bounded
+in UTF-8 bytes: ID 80, title 160, detail 4,096, subject 80, directory name 255,
+relative home path 1,024, and each sibling marker 255. IDs use lowercase ASCII
+letters, digits and hyphens and cannot duplicate built-ins or earlier files.
+Files load in filename order. Over-budget or malformed files and unknown JSON
+fields are refused; a bad individual rule leaves valid rules in that file usable.
+A file that exceeds the remaining aggregate rule budget is skipped as a whole;
+more than 32 JSON files refuses the directory. Errors are reported and inputs
+are never rewritten. Links and directories are not rule files.
+
+These budgets bound loading and rule count; they are not a scan-time guarantee.
+Each rule can still examine a large tree. Marketplace insight installation,
+shared evaluation indexes and aggregate work/cancellation budgets remain future
+work. A finding never grants filesystem access or bypasses the normal mode,
+preview, source, identity and confirmation safeguards.

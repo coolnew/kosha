@@ -46,6 +46,7 @@
 //! file takes, and for the same reason: somebody's hand-edited file is their
 //! work, and destroying it to record an objection is not our place.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -126,6 +127,8 @@ impl PackRule {
 /// is the same problem in a few words, for where there is one line.
 #[derive(Clone, PartialEq, Eq, Debug, thiserror::Error)]
 pub enum Rejected {
+    #[error("rule `{id}` exceeds its authoring limit: {what}")]
+    Limit { id: String, what: &'static str },
     #[error("rule `{0}` has no {1}")]
     Missing(String, &'static str),
     #[error(
@@ -159,6 +162,7 @@ impl Rejected {
     /// with the fix leaves exactly the half that does not help.
     pub fn summary(&self) -> String {
         match self {
+            Rejected::Limit { id, .. } => format!("`{id}` exceeds a rule limit"),
             Rejected::Missing(id, what) => format!("`{id}` has no {what}"),
             Rejected::Unearned { id, action } => {
                 format!("`{id}` needs a `beside` marker to justify `{action}`")
@@ -176,6 +180,7 @@ impl Rejected {
 
 /// A pack file as written, before anything has been checked.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawPack {
     /// Refused rather than guessed at if it is not one we know. A pack written
     /// for a later format would otherwise load with its unknown fields quietly
@@ -232,6 +237,11 @@ impl RawAction {
 
 /// The format this build understands.
 pub const VERSION: u32 = 1;
+/// Local rule packs are bounded data, never executable plugins.
+pub const MAX_PACK_BYTES: usize = 256 * 1024;
+pub const MAX_PACK_RULES: usize = 32;
+pub const MAX_PACK_FILES: usize = 32;
+pub const MAX_TOTAL_RULES: usize = 64;
 
 /// What reading a pack produced: the rules that loaded, and why the rest did
 /// not.
@@ -274,6 +284,7 @@ impl Loaded {
                 PackError::Version { path, found } => {
                     format!("{} is version {found}", path.display())
                 }
+                PackError::Limit { path, message } => format!("{}: {message}", path.display()),
             })
             .chain(self.rejected.iter().map(Rejected::summary))
             .collect()
@@ -283,6 +294,8 @@ impl Loaded {
 /// Why a whole file could not be read.
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
+    #[error("rule pack `{path}` refused: {message}")]
+    Limit { path: PathBuf, message: String },
     #[error("could not read `{path}`")]
     Unreadable {
         path: PathBuf,
@@ -317,22 +330,58 @@ pub fn directory() -> Option<PathBuf> {
 ///
 /// A missing directory is not an error — almost nobody has one.
 pub fn load_all() -> Loaded {
-    let mut loaded = Loaded::default();
     let Some(dir) = directory() else {
-        return loaded;
+        return Loaded::default();
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        return loaded;
-    };
+    load_directory(&dir)
+}
 
-    let mut files: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-        })
-        .collect();
+fn limit(path: &Path, message: impl Into<String>) -> PackError {
+    PackError::Limit {
+        path: path.to_path_buf(),
+        message: message.into(),
+    }
+}
+
+fn load_directory(dir: &Path) -> Loaded {
+    let mut loaded = Loaded::default();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return loaded,
+        Err(source) => {
+            loaded.unreadable.push(PackError::Unreadable {
+                path: dir.to_path_buf(),
+                source,
+            });
+            return loaded;
+        }
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let path = match entry {
+            Ok(entry) => entry.path(),
+            Err(source) => {
+                loaded.unreadable.push(PackError::Unreadable {
+                    path: dir.to_path_buf(),
+                    source,
+                });
+                return loaded;
+            }
+        };
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+        {
+            if files.len() == MAX_PACK_FILES {
+                loaded.unreadable.push(limit(
+                    dir,
+                    format!("at most {MAX_PACK_FILES} JSON files are supported; no files loaded"),
+                ));
+                return loaded;
+            }
+            files.push(path);
+        }
+    }
     files.sort();
 
     let reserved: Vec<String> = crate::registered_rules()
@@ -351,6 +400,10 @@ pub fn load_all() -> Loaded {
             .collect();
         match read(&file, &taken) {
             Ok(one) => {
+                if loaded.rules.len() + one.rules.len() > MAX_TOTAL_RULES {
+                    loaded.unreadable.push(limit(&file, format!("at most {MAX_TOTAL_RULES} rules across rules.d; this file was not loaded")));
+                    continue;
+                }
                 loaded.rules.extend(one.rules);
                 loaded.rejected.extend(one.rejected);
             }
@@ -366,16 +419,44 @@ pub fn load_all() -> Loaded {
 /// salvage and no rule to name. A file that parses but contains rules that do
 /// not earn what they ask for loads the rest and reports them.
 pub fn read(path: &Path, reserved: &[&str]) -> Result<Loaded, PackError> {
-    let text = std::fs::read_to_string(path).map_err(|source| PackError::Unreadable {
+    let metadata = std::fs::symlink_metadata(path).map_err(|source| PackError::Unreadable {
         path: path.to_path_buf(),
         source,
     })?;
+    if !metadata.file_type().is_file() {
+        return Err(limit(
+            path,
+            "expected a regular file, not a link or directory",
+        ));
+    }
+    if metadata.len() > MAX_PACK_BYTES as u64 {
+        return Err(limit(
+            path,
+            format!("maximum file size is {MAX_PACK_BYTES} bytes"),
+        ));
+    }
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .and_then(|file| {
+            file.take(MAX_PACK_BYTES as u64 + 1)
+                .read_to_string(&mut text)
+        })
+        .map_err(|source| PackError::Unreadable {
+            path: path.to_path_buf(),
+            source,
+        })?;
     parse(&text, path, reserved)
 }
 
 /// The whole of reading a pack, minus the file. Separated so every rule about
 /// what a pack may claim is testable from a string.
 pub fn parse(text: &str, path: &Path, reserved: &[&str]) -> Result<Loaded, PackError> {
+    if text.len() > MAX_PACK_BYTES {
+        return Err(limit(
+            path,
+            format!("maximum file size is {MAX_PACK_BYTES} bytes"),
+        ));
+    }
     let raw: RawPack = serde_json::from_str(text).map_err(|e| PackError::Malformed {
         path: path.to_path_buf(),
         message: e.to_string(),
@@ -385,6 +466,12 @@ pub fn parse(text: &str, path: &Path, reserved: &[&str]) -> Result<Loaded, PackE
             path: path.to_path_buf(),
             found: raw.version,
         });
+    }
+    if raw.rules.len() > MAX_PACK_RULES {
+        return Err(limit(
+            path,
+            format!("at most {MAX_PACK_RULES} rules per file are supported"),
+        ));
     }
 
     let mut loaded = Loaded::default();
@@ -401,6 +488,12 @@ pub fn parse(text: &str, path: &Path, reserved: &[&str]) -> Result<Loaded, PackE
 /// somebody's disk.
 fn validate(raw: RawRule, reserved: &[&str], so_far: &[PackRule]) -> Result<PackRule, Rejected> {
     let id = raw.id.trim().to_string();
+    if id.len() > 80 {
+        return Err(Rejected::Limit {
+            id: "(overlong id)".into(),
+            what: "id: 80 UTF-8 bytes",
+        });
+    }
     if id.is_empty() {
         return Err(Rejected::Missing(String::from("(unnamed)"), "id"));
     }
@@ -418,6 +511,31 @@ fn validate(raw: RawRule, reserved: &[&str], so_far: &[PackRule]) -> Result<Pack
         return Err(Rejected::MalformedId(
             kosha_core::format::printable(&id).into_owned(),
         ));
+    }
+    for (value, maximum, what) in [
+        (raw.title.as_str(), 160, "title: 160 UTF-8 bytes"),
+        (raw.detail.as_str(), 4096, "detail: 4096 UTF-8 bytes"),
+        (raw.subject.as_str(), 80, "subject: 80 UTF-8 bytes"),
+        (
+            raw.directory.as_deref().unwrap_or(""),
+            255,
+            "directory: 255 UTF-8 bytes",
+        ),
+        (
+            raw.under_home.as_deref().unwrap_or(""),
+            1024,
+            "under-home: 1024 UTF-8 bytes",
+        ),
+    ] {
+        if value.len() > maximum {
+            return Err(Rejected::Limit { id, what });
+        }
+    }
+    if raw.beside.len() > 8 || raw.beside.iter().any(|name| name.len() > 255) {
+        return Err(Rejected::Limit {
+            id,
+            what: "beside: 8 names, each at most 255 UTF-8 bytes",
+        });
     }
     if reserved.contains(&id.as_str()) {
         return Err(Rejected::ReservedId(id));
@@ -1070,5 +1188,155 @@ mod summary_tests {
         )
         .unwrap();
         assert!(loaded.summaries()[0].contains("my-rule"));
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn document(first: usize, count: usize) -> String {
+        serde_json::json!({"version":1,"rules":(first..first+count).map(|id|
+            serde_json::json!({"id":format!("rule-{id}"),"title":"Review","detail":"Keep valuable data",
+                "subject":"directory","directory":"sessions","action":"review-only"})
+        ).collect::<Vec<_>>()}).to_string()
+    }
+
+    #[test]
+    fn byte_and_rule_limits_refuse_the_whole_document_without_a_partial_success() {
+        let path = Path::new("pack.json");
+        let mut text = document(0, 1);
+        text.extend(std::iter::repeat_n(' ', MAX_PACK_BYTES + 1 - text.len()));
+        assert!(matches!(
+            parse(&text, path, &[]),
+            Err(PackError::Limit { .. })
+        ));
+        assert_eq!(
+            parse(&document(0, MAX_PACK_RULES), path, &[])
+                .unwrap()
+                .rules
+                .len(),
+            MAX_PACK_RULES
+        );
+        assert!(matches!(
+            parse(&document(0, MAX_PACK_RULES + 1), path, &[]),
+            Err(PackError::Limit { .. })
+        ));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.json");
+        std::fs::write(&path, text).unwrap();
+        assert!(matches!(read(&path, &[]), Err(PackError::Limit { .. })));
+    }
+
+    #[test]
+    fn unknown_root_contract_is_not_silently_ignored() {
+        assert!(matches!(
+            parse(
+                r#"{"version":1,"rules":[],"execute":"a command"}"#,
+                Path::new("unknown.json"),
+                &[]
+            ),
+            Err(PackError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn directory_budgets_are_deterministic_and_do_not_rewrite_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create in reverse order: loading still reserves the first 64 IDs by filename.
+        for index in (0..3).rev() {
+            std::fs::write(
+                dir.path().join(format!("{index}.json")),
+                document(index * 32, 32),
+            )
+            .unwrap();
+        }
+        let loaded = load_directory(dir.path());
+        assert_eq!(loaded.rules.len(), 64);
+        assert_eq!(loaded.rules.first().unwrap().id, "rule-0");
+        assert_eq!(loaded.rules.last().unwrap().id, "rule-63");
+        assert_eq!(loaded.unreadable.len(), 1);
+        assert!(loaded.problems()[0].contains("2.json"));
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("2.json")).unwrap(),
+            document(64, 32)
+        );
+        for index in 3..=MAX_PACK_FILES {
+            std::fs::write(dir.path().join(format!("{index}.json")), "{}").unwrap();
+        }
+        let refused = load_directory(dir.path());
+        assert!(refused.rules.is_empty());
+        assert!(refused.problems()[0].contains("no files loaded"));
+    }
+
+    #[test]
+    fn excessive_marker_fanout_rejects_only_that_rule_and_diagnostics_remain_printable() {
+        let mut value: serde_json::Value = serde_json::from_str(&document(0, 2)).unwrap();
+        value["rules"][0]["beside"] =
+            serde_json::json!(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+        let loaded = parse(&value.to_string(), Path::new("markers.json"), &[]).unwrap();
+        assert_eq!(loaded.rules.len(), 1);
+        assert_eq!(loaded.rules[0].id, "rule-1");
+        assert!(matches!(loaded.rejected[0], Rejected::Limit { .. }));
+        value["rules"][0]["id"] = serde_json::json!("bad\nforged");
+        assert!(
+            parse(&value.to_string(), Path::new("markers.json"), &[])
+                .unwrap()
+                .problems()
+                .iter()
+                .all(|s| !s.chars().any(char::is_control))
+        );
+    }
+
+    #[test]
+    fn directories_are_refused_before_attempting_a_read() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            read(dir.path(), &[]),
+            Err(PackError::Limit { .. })
+        ));
+    }
+
+    #[test]
+    fn field_limits_count_utf8_bytes_and_preserve_other_rules() {
+        for (field, value) in [
+            ("id", "x".repeat(81)),
+            ("title", "é".repeat(81)),
+            ("detail", "x".repeat(4097)),
+            ("subject", "x".repeat(81)),
+            ("directory", "x".repeat(256)),
+            ("under-home", "x".repeat(1025)),
+        ] {
+            let mut value_doc: serde_json::Value = serde_json::from_str(&document(0, 2)).unwrap();
+            value_doc["rules"][0][field] = serde_json::json!(value);
+            let result = parse(&value_doc.to_string(), Path::new("fields.json"), &[]).unwrap();
+            assert_eq!(result.rules.len(), 1, "{field}");
+            assert_eq!(result.rules[0].id, "rule-1", "{field}");
+            assert!(
+                matches!(result.rejected[0], Rejected::Limit { .. }),
+                "{field}"
+            );
+        }
+        let mut value: serde_json::Value = serde_json::from_str(&document(0, 1)).unwrap();
+        value["rules"][0]["title"] = serde_json::json!("é".repeat(80));
+        assert_eq!(
+            parse(&value.to_string(), Path::new("boundary.json"), &[])
+                .unwrap()
+                .rules
+                .len(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_pack_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("original.json");
+        let linked = dir.path().join("linked.json");
+        std::fs::write(&original, document(0, 1)).unwrap();
+        std::os::unix::fs::symlink(&original, &linked).unwrap();
+        assert!(matches!(read(&linked, &[]), Err(PackError::Limit { .. })));
+        assert_eq!(std::fs::read_to_string(original).unwrap(), document(0, 1));
     }
 }
