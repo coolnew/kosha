@@ -2,6 +2,10 @@
 
 ## CI approval and production builds
 
+The workflow supplies its own `GITHUB_TOKEN` with Actions read permission; no
+personal token or private `.env` is needed. Job tokens are treated as opaque
+header-safe credentials rather than constrained to a personal-token format.
+
 Tagged releases require successful **full CI for the exact tagged commit** on
 trusted main, including Linux, Windows, macOS, musl and the final gate. CI keeps
 native validation reports for 14 days. Docs-only runs, PR merge commits, old

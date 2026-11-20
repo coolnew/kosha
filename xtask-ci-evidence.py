@@ -32,8 +32,12 @@ class NoRedirect(HTTPRedirectHandler):
 class Client:
     def __init__(self):
         self.token = os.environ.get('GH_TOKEN')
-        if not self.token or not re.fullmatch(r'[A-Za-z0-9_]{20,255}',self.token):
-            raise ValueError('A valid GH_TOKEN with Actions read permission is required; no private .env is read')
+        # Job tokens are opaque and may be longer or use a different encoding
+        # than personal access tokens. Check header safety, not a guessed format;
+        # GitHub authenticates the token and enforces Actions read permission.
+        if (not self.token or len(self.token) > 16384 or not self.token.isascii()
+                or any(not c.isprintable() or c.isspace() for c in self.token)):
+            raise ValueError('A nonempty header-safe GH_TOKEN is required; no private .env is read')
         self.opener = build_opener(NoRedirect())
 
     def get(self, path):

@@ -1,6 +1,66 @@
 # Changelog
 
-## [0.10.8] — 2026-11-20
+## [0.10.9] — 2026-11-20
+
+### Desktop workflow improvements
+
+- Right-click file-list and search rows for guarded actions, including a Trash
+  preview and the platform Trash shortcut. Read-only protection, confirmation,
+  background planning and stale-scan checks remain in place (Refs #4).
+- Double-click a live file in the list, search results or treemap to open its
+  associated application. Missing files, links and snapshot/image-only views
+  are refused rather than opened against the wrong source (Refs #7).
+- Restore the system accent independently of the system theme (Refs #9).
+- Hover over treemap folders for a bounded preview of their largest children,
+  and use the tile context menu for actions without navigating away (Refs #6).
+- Explain allocation slack as review-only overhead, without promising automatic
+  recovery. Keep apparent size for sparse/compressed-file comparisons and use
+  the column visibility controls when it is not needed (Refs #5, #8).
+
+### Optional marketplace insights
+
+Review-only insight packs now work in both the CLI and GUI, with exact indexed
+location matching and refresh from the current recorded scan. The first curated
+pack helps review known assistant-session locations as valuable data, not junk.
+Personal and downloaded location rules use `location: {base, path}` with `home`,
+`scan_root`, `absolute`, `cache`, `temp` and `local_app_data` bases. Parsing,
+component counts, file sizes and aggregate rule budgets are bounded. No pack
+runs commands, inspects conversations or authorizes cleanup. See the
+[insight-pack manual](https://coolnew.github.io/kosha/manual/insight-packs/).
+
+The unreleased `under-home` prototype has been removed without compatibility
+aliases. Reauthor/reinstall prototype packs using the documented structured
+location shape. Existing search recipe packs remain separate and unchanged.
+
+### Downloads and known limitations
+
+Windows portable ZIP and offline Setup use static-CRT binaries. The Store-upload
+MSIX is for Partner Center submission. Linux archives and the Apple Silicon DMG
+include the CLI/GUI and offline documentation; source archives and SHA-256 files
+are published separately. Windows packages remain unsigned. macOS is experimental
+and ad-hoc signed, without Developer ID signing or notarization; see the
+[macOS installation guide](https://coolnew.github.io/kosha/manual/macos/).
+
+Issue #1 remains open for macOS download trust. Issue #6 remains open for its
+broader roadmap, including owning-application cleanup and explicit AI integration.
+Read-only defaults are retained. This release does not infer user personas or
+perform browser-history cleanup.
+
+### Release validation
+
+Native Windows/Mac regression checks and hosted cross-platform CI cover the
+changes. Release builds require full trusted CI for their exact commit, reuse
+compatible native validation reports, and retain optimized builds and package
+acceptance checks. Updated manuals include synthetic Mac screenshots.
+
+### Release automation correction
+
+Accept current GitHub-managed job tokens in the exact-commit CI gate without
+assuming a short personal-token format. Header-safety, bounded input and all
+CI provenance checks remain enforced. The v0.10.8 tag stopped before packaging;
+no 0.10.8 binaries or release were published. Its tag remains unchanged.
+
+## [0.10.8] — 2026-11-20 (not published)
 
 ### Desktop workflow improvements
 
@@ -344,7 +404,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.8...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.9...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -365,3 +425,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.7]: https://github.com/coolnew/kosha/releases/tag/v0.10.7
 
 [0.10.8]: https://github.com/coolnew/kosha/releases/tag/v0.10.8
+
+[0.10.9]: https://github.com/coolnew/kosha/releases/tag/v0.10.9

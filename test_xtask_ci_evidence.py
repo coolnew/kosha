@@ -54,6 +54,22 @@ class FakeClient:
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_job_tokens_are_opaque_not_limited_to_personal_token_shape(self):
+        for token in ['ghs_'+'a'*40, 'github_pat_'+'b'*90,
+                      'header.'+'encoded-segment_'*40+'.signature~+/==']:
+            with self.subTest(length=len(token)), patch.dict(os.environ, {'GH_TOKEN':token}):
+                self.assertEqual(ci.Client().token, token)
+
+    def test_missing_oversized_or_header_unsafe_tokens_are_refused_without_echo(self):
+        for token in ['', 'a'*16385, 'secret\r\nInjected: value', 'secret token',
+                      'secret\tvalue', 'secret\x7fvalue', 'secret\u00e9value']:
+            with self.subTest(length=len(token)), patch.dict(os.environ, {'GH_TOKEN':token}):
+                with self.assertRaises(ValueError) as caught:
+                    ci.Client()
+                self.assertNotIn(token or 'Injected', str(caught.exception))
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(ValueError):
+            ci.Client()
+
     def test_exact_full_main_run_is_accepted(self):
         proof=ci.select_run(FakeClient(),COMMIT)
         self.assertEqual(proof['run_id'],22)
