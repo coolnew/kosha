@@ -3803,6 +3803,7 @@ dependencies = [
 name = "kosha-marketplace"
 version = "0.10.7"
 dependencies = [
+ "kosha-analyze",
  "kosha-core",
  "kosha-search",
  "serde",

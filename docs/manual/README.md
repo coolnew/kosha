@@ -26,6 +26,7 @@ scanning, queries, exports, and comparisons.
 17. [Privacy policy](../../PRIVACY.md)
 18. [Download formats and Windows installation](downloads.md)
 19. [Install and run on macOS](macos.md)
+20. [Use and author review-only insight packs](insight-packs.md)
 
 These pages describe the current source version. An older installed release
 may have different controls. Include your version when reporting a problem.

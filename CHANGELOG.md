@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Add marketplace review-only insight packs for exact directory locations,
+  shared by CLI/GUI, with bounded indexed matching, isolated storage, native
+  validation and in-memory GUI refresh after pack changes.
+
 - Bound local insight rule-pack files, rule counts and marker/text sizes, reject
   unknown root fields and nonregular entries, and document authoring limits.
 

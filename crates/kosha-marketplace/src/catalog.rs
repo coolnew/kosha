@@ -58,17 +58,22 @@ pub struct Entry {
 
 impl Entry {
     pub fn unavailable_reason(&self) -> Option<String> {
-        if self.kind != "recipe-pack" {
+        if self.kind != "recipe-pack" && self.kind != super::insights::KIND {
             return Some(format!("Unsupported package kind: {}", self.kind));
+        }
+        if self.kind == super::insights::KIND && self.requires != [super::insights::CAPABILITY] {
+            return Some("Insight packs require insight.locations.v1".into());
         }
         if !self.platforms.is_empty() && !self.platforms.iter().any(|p| p == std::env::consts::OS) {
             return Some("Not available on this OS".into());
         }
-        if let Some(capability) = self
-            .requires
-            .iter()
-            .find(|r| !kosha_search::RECIPE_CAPABILITIES.contains(&r.as_str()))
-        {
+        if let Some(capability) = self.requires.iter().find(|r| {
+            if self.kind == super::insights::KIND {
+                r.as_str() != super::insights::CAPABILITY
+            } else {
+                !kosha_search::RECIPE_CAPABILITIES.contains(&r.as_str())
+            }
+        }) {
             return Some(format!("Unsupported requirement: {capability}"));
         }
         None
@@ -93,6 +98,9 @@ impl Catalog {
     }
 
     pub fn install(&self, id: &str) -> Result<RecipePackMetadata, String> {
+        if self.find(id)?.kind == super::insights::KIND {
+            return super::insights::install(&download_insight(self, id, fetch)?);
+        }
         let (text, book) = download(self, id, fetch)?;
         super::install_validated(&text, &book)
     }
@@ -146,7 +154,9 @@ fn validate_entry(entry: &Entry, indexed: bool) -> Result<(), String> {
         || !fixed_hex(&entry.sha256, 64)
         || entry.bytes.is_some_and(|b| {
             b == 0
-                || b > if entry.kind == "recipe-pack" {
+                || b > if entry.kind == super::insights::KIND {
+                    kosha_analyze::pack::MAX_PACK_BYTES
+                } else if entry.kind == "recipe-pack" {
                     MAX_RECIPE_BYTES
                 } else {
                     MAX_GENERIC_ARTIFACT_BYTES
@@ -182,6 +192,19 @@ fn validate_entry(entry: &Entry, indexed: bool) -> Result<(), String> {
             );
             if entry.path != expected {
                 return Err("Recipe artifact path disagrees with namespace/version".into());
+            }
+        }
+        if entry.kind == super::insights::KIND {
+            let pack = &entry.metadata;
+            if entry.path
+                != format!(
+                    "packages/insights/{}/{}/{}/pack.json",
+                    pack.publisher.as_deref().unwrap(),
+                    pack.id,
+                    pack.version
+                )
+            {
+                return Err("Insight artifact path disagrees with its namespace/version".into());
             }
         }
     } else if !(entry
@@ -462,6 +485,41 @@ fn download(
     Ok((text, book))
 }
 
+fn download_insight(
+    catalog: &Catalog,
+    id: &str,
+    fetch: impl FnOnce(&str, usize) -> Result<Vec<u8>, String>,
+) -> Result<String, String> {
+    let entry = catalog.find(id)?;
+    if let Some(reason) = entry.unavailable_reason() {
+        return Err(reason);
+    }
+    if entry.kind != super::insights::KIND {
+        return Err("Expected insight-pack".into());
+    }
+    let bytes = fetch(
+        &format!("{RAW}/{}/{}", catalog.revision, entry.path),
+        kosha_analyze::pack::MAX_PACK_BYTES,
+    )?;
+    if entry.bytes != Some(bytes.len())
+        || bytes.len() > kosha_analyze::pack::MAX_PACK_BYTES
+        || format!("{:x}", Sha256::digest(&bytes)) != entry.sha256
+    {
+        return Err(format!("Marketplace digest mismatch for {id}"));
+    }
+    let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+    let pack = super::insights::parse(&text)?;
+    if pack.metadata != entry.metadata
+        || pack.platforms != entry.platforms
+        || entry.requires != [super::insights::CAPABILITY]
+    {
+        return Err(
+            "Insight artifact metadata, platforms or capabilities disagree with catalog".into(),
+        );
+    }
+    Ok(text)
+}
+
 pub fn install(id: &str) -> Result<RecipePackMetadata, String> {
     cached()?.install(id)
 }
@@ -472,6 +530,73 @@ mod tests {
     use serde_json::json;
 
     const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn indexed_future_insight_capabilities_are_unavailable_without_poisoning_catalog() {
+        let text = super::super::insights::fixture("alice", "sessions", 1);
+        let pack: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let entry: Entry = serde_json::from_value(json!({"kind":"insight-pack","publisher":"alice","metadata":pack["metadata"],
+            "platforms":[],"requires":["insight.future.v9"],"path":"packages/insights/alice/sessions/1.0.0/pack.json",
+            "bytes":text.len(),"sha256":format!("{:x}",Sha256::digest(text.as_bytes()))})).unwrap();
+        validate_entry(&entry, true).unwrap();
+        assert!(entry.unavailable_reason().is_some());
+    }
+
+    #[test]
+    fn insight_download_is_pinned_bounded_and_checks_the_complete_contract() {
+        let text = super::super::insights::fixture("alice", "sessions", 1);
+        let pack: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let entry = json!({"kind":"insight-pack","publisher":"alice","metadata":pack["metadata"],
+            "platforms":[],"requires":[super::super::insights::CAPABILITY],
+            "path":"packages/insights/alice/sessions/1.0.0/pack.json","bytes":text.len(),"sha256":format!("{:x}",Sha256::digest(text.as_bytes()))});
+        let catalog = parse(
+            REVISION,
+            json!({"schema":1,"packages":[entry.clone()]})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let fetched = download_insight(&catalog, "alice/sessions", |url, limit| {
+            assert_eq!(
+                url,
+                format!("{RAW}/{REVISION}/packages/insights/alice/sessions/1.0.0/pack.json")
+            );
+            assert_eq!(limit, kosha_analyze::pack::MAX_PACK_BYTES);
+            Ok(text.as_bytes().to_vec())
+        })
+        .unwrap();
+        assert_eq!(fetched, text);
+        assert!(download_insight(&catalog, "sessions", |_, _| Ok(b"corrupt".to_vec())).is_err());
+        let mut different = entry.clone();
+        different["metadata"]["title"] = json!("Different title");
+        let changed = parse(
+            REVISION,
+            json!({"schema":1,"packages":[different]})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(
+            download_insight(&changed, "sessions", |_, _| Ok(text.as_bytes().to_vec()))
+                .unwrap_err()
+                .contains("disagree")
+        );
+        let mut unknown = entry;
+        unknown["requires"] = json!(["insight.exec"]);
+        let unavailable = parse(
+            REVISION,
+            json!({"schema":1,"packages":[unknown]})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(
+            download_insight(&unavailable, "sessions", |_, _| panic!(
+                "unsupported capability must never fetch"
+            ))
+            .is_err()
+        );
+    }
 
     fn fixture() -> (serde_json::Value, Vec<u8>) {
         let pack = json!({

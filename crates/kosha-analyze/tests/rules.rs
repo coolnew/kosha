@@ -15,6 +15,94 @@ use kosha_core::{ScanOptions, Scanner, SizeTree};
 
 const MB: usize = 1024 * 1024;
 
+/// Opt-in CPU comparison over a recorded tree, with no rescan or private paths
+/// in successful output. This is a lookup microbenchmark, not scanner throughput.
+#[test]
+#[ignore = "set KOSHA_HOME_BENCH_SNAPSHOT to an existing .kosha metadata record"]
+fn benchmark_indexed_home_paths_against_the_previous_arena_walk() {
+    use kosha_analyze::{
+        Rule,
+        pack::{Matcher, PackRule},
+    };
+    use kosha_core::{Flags, NodeId};
+    use std::hint::black_box;
+    use std::time::Instant;
+    let source = std::env::var_os("KOSHA_HOME_BENCH_SNAPSHOT").expect("snapshot path is required");
+    let (_, tree) = kosha_core::snapshot::read(std::fs::File::open(source).unwrap()).unwrap();
+    let mut context = Context::detect();
+    context.min_reclaimable = 0;
+    if let Some(home) = std::env::var_os("KOSHA_HOME_BENCH_HOME") {
+        context.home = Some(home.into());
+    }
+    let home = context
+        .home
+        .as_ref()
+        .expect("recorded home must be specified if not detectable");
+    let paths = [
+        ".claude/projects",
+        ".codex/sessions",
+        ".cache/uv",
+        ".npm/_cacache",
+        "AppData/Local/uv/cache",
+        ".cargo/registry/cache",
+        "Library/Caches",
+        "missing-benchmark-path",
+    ];
+    let rules: Vec<_> = (0..64)
+        .map(|index| PackRule {
+            id: format!("benchmark-{index}"),
+            title: "Review".into(),
+            detail: "Recorded metadata".into(),
+            subject: "directory".into(),
+            matcher: Matcher::Location(kosha_analyze::location::Location {
+                base: kosha_analyze::location::LocationBase::Home,
+                path: paths[index % paths.len()].into(),
+            }),
+            action: Suggested::ReviewOnly,
+        })
+        .collect();
+    let started = Instant::now();
+    let indexed: Vec<_> = rules
+        .iter()
+        .map(|rule| {
+            rule.evaluate(black_box(&tree), black_box(&context))
+                .first()
+                .and_then(|found| found.nodes.first().copied())
+        })
+        .collect();
+    let indexed_us = started.elapsed().as_micros();
+    let started = Instant::now();
+    let mut visits = 0u64;
+    let reference: Vec<_> = rules
+        .iter()
+        .map(|rule| {
+            let Matcher::Location(location) = &rule.matcher else {
+                unreachable!()
+            };
+            let target = home.join(&location.path);
+            let leaf = target.file_name().unwrap();
+            (0..tree.len()).map(NodeId::from_index).find(|&id| {
+                visits += 1;
+                let node = tree.node(id);
+                node.is_dir()
+                    && tree.name(id) == leaf
+                    && !node.flags.contains(Flags::SYMLINK)
+                    && !node.flags.contains(Flags::HARDLINK_DUP)
+                    && !node.flags.contains(Flags::OTHER_DEVICE)
+                    && !node.flags.contains(Flags::UNREADABLE)
+                    && tree.path_of(id) == target
+            })
+        })
+        .collect();
+    let reference_us = started.elapsed().as_micros();
+    assert_eq!(indexed, reference, "indexed matching changed the result");
+    println!(
+        "{}",
+        serde_json::json!({"entries":tree.len(),"rules":rules.len(),"matched_rules":indexed.iter().filter(|id|id.is_some()).count(),
+        "reference_node_visits":visits,"indexed_us":indexed_us,"reference_us":reference_us})
+    );
+}
+
 /// Ten years past the fixture's mtimes, so everything in it reads as old, and
 /// a threshold low enough that a test fixture can trip the rules at all.
 fn ctx() -> Context {

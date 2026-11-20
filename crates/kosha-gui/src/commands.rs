@@ -164,7 +164,7 @@ pub struct Command {
 
 pub(crate) fn download_recipe_pack(pack: &kosha_search::RecipePackMetadata) -> Command {
     Command {
-        label: format!("Get recipe pack {}", pack.title),
+        label: format!("Get marketplace pack {}", pack.title),
         detail: format!(
             "{} · {} · {} · {}",
             pack.qualified_id(),
@@ -173,7 +173,7 @@ pub(crate) fn download_recipe_pack(pack: &kosha_search::RecipePackMetadata) -> C
             pack.tags.join(", ")
         ),
         binding: None,
-        keywords: &["marketplace recipe packs", "download"],
+        keywords: &["marketplace recipe insight packs", "download"],
         action: Action::DownloadRecipePack(pack.qualified_id()),
     }
 }
@@ -198,14 +198,14 @@ pub(crate) fn marketplace_entry(entry: &kosha_marketplace::catalog::Entry) -> Co
     }
 }
 
-pub(crate) fn remove_recipe_pack(pack: &kosha_search::RecipePackMetadata) -> Command {
+pub(crate) fn remove_recipe_pack(pack: &kosha_marketplace::InstalledPackage) -> Command {
     Command {
-        label: format!("Remove recipe pack {}", pack.title),
-        detail: format!("{} · version {}", pack.qualified_id(), pack.version),
+        label: format!("Remove {} {}", pack.kind.replace('-', " "), pack.title),
+        detail: format!("{} · version {}", pack.key(), pack.version),
         binding: None,
         keywords: &["installed recipe packs", "marketplace", "uninstall"],
         action: Action::RemoveRecipePack {
-            id: pack.qualified_id(),
+            id: pack.key(),
             title: pack.title.clone(),
         },
     }
@@ -716,8 +716,8 @@ pub fn all(
         action: Action::ShowAuditLog,
     });
     commands.push(Command {
-        label: "Install a recipe pack…".into(),
-        detail: "Choose a local recipe pack JSON file".into(),
+        label: "Install a marketplace pack…".into(),
+        detail: "Choose a local recipe or review-only insight pack JSON file".into(),
         binding: None,
         keywords: &["recipe", "marketplace", "import", "install"],
         action: Action::InstallRecipePack,
@@ -1054,7 +1054,10 @@ mod tests {
             version: "1.0".into(),
             tags: vec![],
         };
-        let commands = [remove_recipe_pack(&pack)];
+        let commands = [remove_recipe_pack(&kosha_marketplace::InstalledPackage {
+            kind: "recipe-pack",
+            metadata: pack.clone(),
+        })];
         for query in [
             "installed recipe packs",
             "test-workflows",
@@ -1065,7 +1068,7 @@ mod tests {
         assert_eq!(
             commands[0].action,
             Action::RemoveRecipePack {
-                id: pack.qualified_id(),
+                id: format!("recipe-pack:{}", pack.qualified_id()),
                 title: pack.title
             }
         );

@@ -11,6 +11,43 @@ use std::path::PathBuf;
 
 use kosha_core::format::Units;
 
+/// OS roots are resolved once outside pure rule evaluation and can be injected
+/// independently in tests. Missing providers remain unknown, never guessed.
+#[derive(Clone, Debug, Default)]
+pub struct KnownLocations {
+    pub cache: Option<PathBuf>,
+    pub temp: Option<PathBuf>,
+    pub local_app_data: Option<PathBuf>,
+}
+
+impl KnownLocations {
+    fn detect(home: Option<&std::path::Path>) -> Self {
+        #[cfg(windows)]
+        let local_app_data = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute());
+        #[cfg(not(windows))]
+        let local_app_data = None;
+        #[cfg(windows)]
+        let cache = {
+            let _ = home;
+            local_app_data.clone()
+        };
+        #[cfg(target_os = "macos")]
+        let cache = home.map(|p| p.join("Library/Caches"));
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        let cache = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home.map(|p| p.join(".cache")));
+        Self {
+            cache: cache.map(|p| kosha_core::path::canonical(&p)),
+            temp: Some(kosha_core::path::canonical(&std::env::temp_dir())),
+            local_app_data: local_app_data.map(|p: PathBuf| kosha_core::path::canonical(&p)),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Context {
     /// "Now" as Unix seconds. Every age comparison is relative to this.
@@ -19,6 +56,7 @@ pub struct Context {
     /// match on well-known locations need it; everything else ignores it.
     /// Use `kosha_core::path::canonical` so its spelling matches scanned paths.
     pub home: Option<PathBuf>,
+    pub locations: KnownLocations,
     /// Findings smaller than this are dropped before ranking. A 40 MB tip in a
     /// panel about a 900 GB volume is noise.
     pub min_reclaimable: u64,
@@ -47,9 +85,12 @@ pub struct Context {
 impl Context {
     /// A context anchored to the current wall clock and environment.
     pub fn detect() -> Self {
+        let home = home_dir();
+        let locations = KnownLocations::detect(home.as_deref());
         Context {
             now: kosha_core::format::now_unix(),
-            home: home_dir(),
+            home,
+            locations,
             ..Context::at(kosha_core::format::now_unix())
         }
     }
@@ -60,6 +101,7 @@ impl Context {
         Context {
             now,
             home: None,
+            locations: KnownLocations::default(),
             min_reclaimable: 32 * 1024 * 1024,
             stale_installer_days: 90,
             cold_file_days: 365,

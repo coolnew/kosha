@@ -11,12 +11,15 @@ const HELP: &str = "kosha marketplace sync\n\
                    kosha marketplace show PACK-ID\n\
                    kosha marketplace get PACK-ID\n\
                    kosha marketplace install FILE\n\
+                   kosha marketplace validate FILE\n\
                    kosha marketplace list\n\
                    kosha marketplace uninstall PACK-ID\n\n\
                    Sync the public catalog, then search it offline or use get to download and install a pack.\n\
                    Use publisher/id when IDs overlap. Unsupported package kinds and capabilities are browse-only.\n\
                    Use install for a local JSON file.\n\
-                   The CLI and GUI share installed packs. Personal search-recipes.json stays separate.";
+                   Recipe packs translate searches. Insight packs add review-only findings for exact home paths.\n\
+                   Use list to see kind:publisher/id keys; uninstall accepts these keys or an unambiguous name.\n\
+                   The CLI and GUI share installed packs. Personal search-recipes.json and rules.d stay separate.";
 
 pub fn run(args: &[String]) -> Result<(), String> {
     match args
@@ -75,13 +78,27 @@ pub fn run(args: &[String]) -> Result<(), String> {
         ["install", file] => {
             print_installed(kosha_marketplace::install_local(Path::new(file))?);
         }
+        ["validate", file] => {
+            let pack = kosha_marketplace::validate_local(Path::new(file))?;
+            sayln!(
+                "Validated {} version {} (no installation)",
+                pack.qualified_id(),
+                pack.version
+            );
+        }
         ["list"] => {
-            let packs = kosha_marketplace::installed()?;
+            let packs = kosha_marketplace::installed_all()?;
             if packs.is_empty() {
-                sayln!("No installed recipe packs.");
+                sayln!("No installed marketplace packs.");
             }
             for pack in packs {
-                sayln!("{}  {}  {}", pack.qualified_id(), pack.version, pack.title);
+                sayln!(
+                    "{}  {}  {}  [{}]",
+                    pack.qualified_id(),
+                    pack.version,
+                    pack.title,
+                    pack.key()
+                );
             }
         }
         ["uninstall", id] => {

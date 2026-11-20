@@ -53,7 +53,7 @@ kosha search --load "saved.kosha" "documents" --export jsonl --absolute-paths
   Inspect `--describe --json` before executing an uncertain phrase; rejected
   wording must not be silently broadened. Exact DSL is available through
   `kosha "PATH" --query "file and size > 10mb" --export json`.
-- For recipe packs, run `kosha marketplace sync` to refresh the public catalog.
+- For optional recipe or review-only insight packs, run `kosha marketplace sync` to refresh the public catalog.
   `marketplace search TERMS` and `marketplace show PACK-ID` read the saved
   catalog offline. `marketplace get PACK-ID` downloads, validates, and installs
   the selected pack for the current OS. `marketplace install FILE` installs

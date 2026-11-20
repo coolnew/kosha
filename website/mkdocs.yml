@@ -45,6 +45,7 @@ nav:
       - Query language: manual/query-language.md
       - Marketplace: manual/marketplace.md
       - Author recipe packs: manual/recipe-authoring.md
+      - Review-only insights: manual/insight-packs.md
   - Quality:
       - Tests and scope: manual/quality-and-coverage.md
       - Performance reference: manual/performance.md

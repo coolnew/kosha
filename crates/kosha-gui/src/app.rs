@@ -86,6 +86,7 @@ pub struct KoshaApp {
     state: State,
     /// Discards background results after another location is requested.
     load_generation: u64,
+    analysis_generation: u64,
     comparison_generation: u64,
     comparison_busy: bool,
     scan_timing: crate::scan_timing::ScanTiming,
@@ -110,7 +111,7 @@ pub struct KoshaApp {
     filter: Entity<InputState>,
     search_bar: Entity<crate::search_bar::SearchBar>,
     search_recipes: Result<kosha_search::RecipeBook, String>,
-    installed_recipe_packs: Vec<kosha_search::RecipePackMetadata>,
+    installed_recipe_packs: Vec<kosha_marketplace::InstalledPackage>,
     changing_recipe_packs: bool,
     marketplace_catalog: Option<Arc<kosha_marketplace::catalog::Catalog>>,
     syncing_marketplace: bool,
@@ -381,6 +382,7 @@ impl KoshaApp {
             planning_action: None,
             state,
             load_generation: 0,
+            analysis_generation: 0,
             comparison_generation: 0,
             comparison_busy: false,
             scan_timing: Default::default(),
@@ -404,7 +406,7 @@ impl KoshaApp {
             filter,
             search_bar,
             search_recipes,
-            installed_recipe_packs: kosha_marketplace::installed().unwrap_or_default(),
+            installed_recipe_packs: kosha_marketplace::installed_all().unwrap_or_default(),
             changing_recipe_packs: false,
             marketplace_catalog: kosha_marketplace::catalog::cached().ok().map(Arc::new),
             syncing_marketplace: false,
@@ -2228,27 +2230,7 @@ impl KoshaApp {
         // having: "this build cache was 12 GB in March" is exactly the kind of
         // thing somebody opens a snapshot to find out. What they cannot do is
         // act on one, and `begin_action` is where that is refused.
-        let context = self.settings.analysis_context();
-        let packs = kosha_analyze::pack::load_all();
-        let rules = packs.rules;
-        let generation = self.load_generation;
-        let task = cx
-            .background_executor()
-            .spawn(async move { kosha_analyze::findings_with(&tree, &context, &rules) });
-        cx.spawn(async move |this, cx| {
-            let insights = task.await;
-            this.update(cx, |this, cx| {
-                if this.load_generation != generation {
-                    return;
-                }
-                if let Some(ready) = this.state.ready_mut() {
-                    ready.insights = Some(Arc::new(insights));
-                    cx.notify();
-                }
-            })
-            .ok();
-        })
-        .detach();
+        self.refresh_insights(cx);
     }
 
     /// Keep the tree on screen as a snapshot.
@@ -2569,7 +2551,7 @@ impl KoshaApp {
                     Ok(catalog) => {
                         let count = catalog.search("").count();
                         app.marketplace_catalog = Some(Arc::new(catalog));
-                        format!("Marketplace updated. {count} packs support this OS.")
+                        format!("Marketplace updated. {count} catalog packages; availability is shown per package.")
                     }
                     Err(error) => format!("Could not sync the marketplace: {error}"),
                 });
@@ -2626,7 +2608,7 @@ impl KoshaApp {
         let prompt = window.prompt(
             gpui_kit::PromptLevel::Warning,
             &question,
-            Some("Personal recipes are kept."),
+            Some("Only the installed pack is removed. Personal rules, recipes and scanned files are kept."),
             &["Cancel", "Remove"],
             cx,
         );
@@ -2661,7 +2643,7 @@ impl KoshaApp {
                     let result = operation();
                     (
                         result,
-                        kosha_marketplace::installed(),
+                        kosha_marketplace::installed_all(),
                         kosha_marketplace::load(),
                     )
                 })
@@ -2678,11 +2660,12 @@ impl KoshaApp {
                         format!("{message}. Fix the recipe configuration to use installed packs.")
                     }
                     Ok(message) => message,
-                    Err(error) => format!("Could not change recipe packs: {error}"),
+                    Err(error) => format!("Could not change marketplace packs: {error}"),
                 };
                 app.search_recipes = recipes;
                 let text = app.filter.read(cx).value().to_string();
                 app.query_text_changed(text, cx);
+                app.refresh_insights(cx);
                 app.state.notice = Some(notice);
                 cx.notify();
             })
@@ -2950,44 +2933,40 @@ impl KoshaApp {
 
         // Analysis is pure and CPU-bound, so it goes straight to the background
         // pool and lands whenever it lands. The tree is already browsable.
+        self.refresh_insights(cx);
+    }
+
+    /// Re-evaluate the current immutable scan after a pack change, without rescanning.
+    fn refresh_insights(&mut self, cx: &mut Context<Self>) {
+        let Some(ready) = self.state.ready() else {
+            return;
+        };
+        let tree = Arc::clone(&ready.tree);
         let context = self.settings.analysis_context();
-        // Read on every scan rather than once at startup, so editing a pack
-        // and pressing rescan is enough — the alternative is a restart to see
-        // whether a rule you just wrote works, which is most of the work of
-        // writing one.
-        let packs = kosha_analyze::pack::load_all();
-        if packs.has_problems() {
-            // The same place a settings-file problem goes. A rule that did not
-            // load has to be *said*: its author is looking at a file they wrote
-            // and no finding from it, with nothing else to go on.
-            // The short form: the status bar is one line, and a message that
-            // runs off the edge loses exactly the half that says what to do.
-            // The full text, with the fix, is what `kosha-cli` prints.
-            let problems = packs.summaries();
-            self.state.notice = Some(match problems.len() {
-                1 => format!("Rule pack: {}", problems[0]),
-                n => format!("Rule pack: {} (and {} more)", problems[0], n - 1),
-            });
-        }
-
-        // `findings_with` rather than `analyze`: the latter is the pure rule
-        // engine, and some findings have to open files or come from the user's
-        // own rules. Both front ends go through the same function so the window
-        // and the command line cannot drift apart about what a scan found.
-        let rules = packs.rules;
+        self.analysis_generation += 1;
+        let ticket = self.analysis_generation;
         let generation = self.load_generation;
-        let task = cx
-            .background_executor()
-            .spawn(async move { kosha_analyze::findings_with(&tree, &context, &rules) });
-
         cx.spawn(async move |this, cx| {
-            let insights = task.await;
-            this.update(cx, |this, cx| {
-                if this.load_generation != generation {
+            let (insights, problems) = cx
+                .background_spawn(async move {
+                    let packs = kosha_marketplace::load_analysis_rules();
+                    let problems = packs.summaries();
+                    (
+                        kosha_analyze::findings_with(&tree, &context, &packs.rules),
+                        problems,
+                    )
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                if app.load_generation != generation || app.analysis_generation != ticket {
                     return;
                 }
-                if let Some(ready) = this.state.ready_mut() {
+                if let Some(ready) = app.state.ready_mut() {
                     ready.insights = Some(Arc::new(insights));
+                    if let Some(first) = problems.first() {
+                        app.state.notice =
+                            Some(format!("Rule pack: {first} ({} problems)", problems.len()));
+                    }
                     cx.notify();
                 }
             })

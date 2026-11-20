@@ -17,6 +17,53 @@ spec.loader.exec_module(builder)
 
 
 class MarketplaceTests(unittest.TestCase):
+    def insight_package(self):
+        folder = self.root / 'packages/insights/author/sessions/1.0.0'
+        folder.mkdir(parents=True)
+        meta = {'id':'sessions','publisher':'author','version':'1.0.0','title':'Review sessions','description':'Valuable records, not disposable cache'}
+        entry = {'schema':1,'kind':'insight-pack','publisher':'author','metadata':meta,'platforms':[],
+                 'requires':[builder.INSIGHT_CAPABILITY],'path':'packages/insights/author/sessions/1.0.0/pack.json'}
+        document = {'schema':1,'kind':'insight-pack','metadata':meta,'platforms':[],'requires':[builder.INSIGHT_CAPABILITY],
+                    'insights':[{'id':'session-history','title':'Review history','detail':'Keep valuable conversations.','subject':'directory','location':{'base':'home','path':'.assistant/sessions'},'action':'review-only'}]}
+        (folder/'manifest.json').write_bytes(builder.encode(entry))
+        (folder/'pack.json').write_bytes(builder.encode(document))
+        return folder, entry, document
+
+    def test_insight_contract_generates_a_distinct_bounded_index(self):
+        folder, entry, document = self.insight_package()
+        result = builder.generated(self.root)
+        record = json.loads(result['indexes/insights.jsonl'])
+        self.assertEqual(record['kind'],'insight-pack')
+        self.assertEqual(record['requires'],[builder.INSIGHT_CAPABILITY])
+        self.assertEqual(record['sha256'],hashlib.sha256((folder/'pack.json').read_bytes()).hexdigest())
+
+    def test_insight_contract_refuses_destructive_or_executable_fields(self):
+        folder, entry, document = self.insight_package()
+        import copy
+        for key, value in [('action','trash'),('command','run something'),('under-home','../outside'),('under-home','C:/Windows'),('under-home','.')]:
+            bad = copy.deepcopy(document)
+            bad['insights'][0][key] = value
+            (folder/'pack.json').write_bytes(builder.encode(bad))
+            with self.subTest(key=key,value=value),self.assertRaises(ValueError):
+                builder.generated(self.root)
+        document['platforms'] = ['windows']
+        (folder/'pack.json').write_bytes(builder.encode(document))
+        with self.assertRaisesRegex(ValueError,'disagree'):
+            builder.generated(self.root)
+
+    def test_shared_location_corpus(self):
+        source = Path(__file__).parent / "crates/kosha-analyze/tests/fixtures/location_cases.jsonl"
+        if not source.exists():
+            source = Path(__file__).parent / "tests/fixtures/location_cases.jsonl"
+        for line, text in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            case = json.loads(text)
+            with self.subTest(line=line):
+                if case["valid"]:
+                    self.assertEqual(builder.validate_location(case["location"]), case["normalized"])
+                else:
+                    with self.assertRaises(ValueError):
+                        builder.validate_location(case["location"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

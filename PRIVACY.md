@@ -39,7 +39,7 @@ Kosha can save the following in its application directories or locations you sel
   metadata, including names, paths, sizes, timestamps, and collected ownership data.
 - Exported results or comparisons and an audit log of file-changing operations,
   which can include affected paths and metadata.
-- Downloaded marketplace catalogs and recipe packs.
+- Downloaded marketplace catalogs, recipe packs and review-only insight packs.
 
 Snapshots and exports do not contain copies of scanned file contents, but their
 metadata can be sensitive. Kosha has no built-in cloud sync, advertising,
@@ -59,7 +59,7 @@ software, can copy data elsewhere under your chosen provider's policies.
 
 ## Optional marketplace network requests
 
-When you request a marketplace sync or download a recipe pack, Kosha makes HTTPS
+When you request a marketplace sync or download a recipe or insight pack, Kosha makes HTTPS
 requests to GitHub's API and raw-content services for
 [coolnew/kosha-marketplace](https://github.com/coolnew/kosha-marketplace).
 GitHub receives ordinary connection information such as your IP address,

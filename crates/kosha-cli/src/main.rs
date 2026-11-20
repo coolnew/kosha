@@ -37,7 +37,7 @@ USAGE:
     kosha search --load SAVED.kosha \"folders created last week\"
     kosha search --path PATH \"files ending with md\"
     kosha search --help             natural-language search options
-    kosha marketplace --help       install and manage local recipe packs
+    kosha marketplace --help       install and manage marketplace packs
 
 OPTIONS:
     --top N          Show the N largest entries at the root (default 15)
@@ -1282,7 +1282,7 @@ fn print_insights(tree: &SizeTree, args: &Args) {
     // Loaded here rather than inside `findings` so that a rule which did not
     // load can be *said*. A pack author looking at a file they wrote and no
     // finding from it has nothing to go on otherwise.
-    let packs = kosha_analyze::pack::load_all();
+    let packs = kosha_marketplace::load_analysis_rules();
     for problem in packs.problems() {
         eprintln!("rule pack: {problem}");
     }

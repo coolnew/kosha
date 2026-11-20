@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 kosha-core.workspace = true
+kosha-analyze.workspace = true
 kosha-search.workspace = true
 tempfile = "3"
 serde = { version = "1", features = ["derive"] }

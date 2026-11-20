@@ -7,7 +7,8 @@ is the source of maintained catalogs and optional declarative search packs.
 The marketplace supplies optional declarative search packs. Sync/discovery and
 downloads are explicit; loaded recipes work offline and do not execute scripts.
 Plugins and other future package kinds may appear as **unavailable** metadata.
-Kosha currently installs recipe packs only.
+Builds after 0.10.7 also support [review-only insight packs](insight-packs.md)
+for exact structured storage locations. Earlier releases keep that kind unavailable.
 
 Authors should follow [Author and test recipe packs](recipe-authoring.md) for a
 complete package, manifest and JSONL corpus, plus matching pitfalls, field/type
@@ -36,6 +37,8 @@ New installed copies live under configuration
 `recipe-packs/PUBLISHER/pack-ID.json`; older `recipe-packs/pack-ID.json` files
 still load. Your personal `search-recipes.json` remains independent. Syncing
 catalog metadata does not change installed packs or automatically update them.
+Insight copies use the separate `insight-packs/` store; personal `rules.d`
+files are preserved. Listing prints kind-qualified keys for unambiguous removal.
 
 ## Catalog and package layout
 

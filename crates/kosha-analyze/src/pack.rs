@@ -21,7 +21,7 @@
 //! | What the rule matches on | Evidence | Confidence |
 //! | --- | --- | --- |
 //! | a directory name **and** a required sibling file | `Marker` | `Certain` |
-//! | an exact path under the home directory | `KnownPath` | `Likely` |
+//! | an exact structured location | `KnownPath` | `Likely` |
 //! | a directory name alone | `NameOnly` | `Possible` |
 //!
 //! This mirrors the built-in catalogue exactly, and for the reason given there:
@@ -85,8 +85,8 @@ pub enum Matcher {
     /// holds the alternatives for a `Marker` one — any single one of them
     /// beside the directory is proof.
     Directory { name: String, beside: Vec<String> },
-    /// An exact directory path relative to the user's home.
-    UnderHome { relative: PathBuf },
+    /// An exact recorded directory relative to an explicit location base.
+    Location(crate::location::Location),
 }
 
 impl Matcher {
@@ -94,7 +94,7 @@ impl Matcher {
         match self {
             Matcher::Directory { beside, .. } if !beside.is_empty() => Evidence::Marker,
             Matcher::Directory { .. } => Evidence::NameOnly,
-            Matcher::UnderHome { .. } => Evidence::KnownPath,
+            Matcher::Location(_) => Evidence::KnownPath,
         }
     }
 }
@@ -137,11 +137,9 @@ pub enum Rejected {
          directory is, or change the action to `review-only`"
     )]
     Unearned { id: String, action: &'static str },
-    #[error(
-        "rule `{0}` sets both `directory` and `under-home`; a rule matches one way or the other"
-    )]
+    #[error("rule `{0}` sets both `directory` and `location`; a rule matches one way or the other")]
     Ambiguous(String),
-    #[error("rule `{0}` matches nothing: it needs either `directory` or `under-home`")]
+    #[error("rule `{0}` matches nothing: it needs either `directory` or `location`")]
     MatchesNothing(String),
     #[error("rule `{0}` has an id that is already taken by a built-in rule")]
     ReservedId(String),
@@ -149,10 +147,8 @@ pub enum Rejected {
     DuplicateId(String),
     #[error("rule `{0}` has an id that is not lowercase letters, digits and hyphens")]
     MalformedId(String),
-    #[error("rule `{0}` has an `under-home` path that leaves the home directory")]
-    EscapesHome(String),
-    #[error("rule `{0}` has an `under-home` path that is absolute; it has to be relative to home")]
-    AbsolutePath(String),
+    #[error("rule `{id}` has an invalid location: {message}")]
+    InvalidLocation { id: String, message: &'static str },
 }
 
 impl Rejected {
@@ -172,8 +168,7 @@ impl Rejected {
             Rejected::ReservedId(id) => format!("`{id}` is a built-in rule's id"),
             Rejected::DuplicateId(id) => format!("`{id}` appears twice"),
             Rejected::MalformedId(id) => format!("`{id}` is not a valid id"),
-            Rejected::EscapesHome(id) => format!("`{id}` points outside the home directory"),
-            Rejected::AbsolutePath(id) => format!("`{id}` needs a relative path"),
+            Rejected::InvalidLocation { id, .. } => format!("`{id}` has an invalid location"),
         }
     }
 }
@@ -191,7 +186,7 @@ struct RawPack {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct RawRule {
     id: String,
     title: String,
@@ -202,7 +197,7 @@ struct RawRule {
     #[serde(default)]
     beside: Vec<String>,
     #[serde(default)]
-    under_home: Option<String>,
+    location: Option<crate::location::Location>,
     action: RawAction,
 }
 
@@ -521,11 +516,6 @@ fn validate(raw: RawRule, reserved: &[&str], so_far: &[PackRule]) -> Result<Pack
             255,
             "directory: 255 UTF-8 bytes",
         ),
-        (
-            raw.under_home.as_deref().unwrap_or(""),
-            1024,
-            "under-home: 1024 UTF-8 bytes",
-        ),
     ] {
         if value.len() > maximum {
             return Err(Rejected::Limit { id, what });
@@ -554,7 +544,7 @@ fn validate(raw: RawRule, reserved: &[&str], so_far: &[PackRule]) -> Result<Pack
         }
     }
 
-    let matcher = match (raw.directory, raw.under_home) {
+    let matcher = match (raw.directory, raw.location) {
         (Some(_), Some(_)) => return Err(Rejected::Ambiguous(id)),
         (None, None) => return Err(Rejected::MatchesNothing(id)),
         (Some(name), None) => {
@@ -574,36 +564,26 @@ fn validate(raw: RawRule, reserved: &[&str], so_far: &[PackRule]) -> Result<Pack
                     .collect(),
             }
         }
-        (None, Some(relative)) => {
-            let relative = relative.trim();
-            if relative.is_empty() {
-                return Err(Rejected::Missing(id, "under-home path"));
+        (None, Some(location)) => {
+            if !raw.beside.is_empty() {
+                return Err(Rejected::InvalidLocation {
+                    id,
+                    message: "beside applies only to a directory matcher",
+                });
             }
-            let drive_letter = relative.len() >= 2
-                && relative.as_bytes()[1] == b':'
-                && relative.as_bytes()[0].is_ascii_alphabetic();
-            let relative = PathBuf::from(relative.replace('\\', "/"));
-            // A drive letter is checked by hand rather than left to
-            // `is_absolute`, which answers for the platform it is running
-            // on: `C:/Windows` is absolute on Windows and an ordinary
-            // relative directory called `C:` on Linux, so one pack file
-            // would mean two different things on two machines. A pack is a
-            // file people copy between computers, and a path that is a
-            // mistake on one of them is a mistake on all of them.
-            if drive_letter || relative.is_absolute() || relative.has_root() {
-                return Err(Rejected::AbsolutePath(id));
+            let location = location
+                .validate()
+                .map_err(|message| Rejected::InvalidLocation {
+                    id: id.clone(),
+                    message,
+                })?;
+            if !matches!(raw.action, RawAction::ReviewOnly) {
+                return Err(Rejected::InvalidLocation {
+                    id,
+                    message: "location rules must use review-only",
+                });
             }
-            // `..` would let a pack point anywhere at all — `C:\Windows` is
-            // three of them from most home directories. The safety guards would
-            // refuse to act on it, but a rule that can only ever be refused is
-            // one to reject while somebody can still fix it.
-            if relative
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
-                return Err(Rejected::EscapesHome(id));
-            }
-            Matcher::UnderHome { relative }
+            Matcher::Location(location)
         }
     };
 
@@ -657,7 +637,7 @@ impl Rule for PackRule {
     fn evaluate(&self, tree: &SizeTree, ctx: &Context) -> Vec<Insight> {
         let found = match &self.matcher {
             Matcher::Directory { name, beside } => self.match_directories(tree, name, beside),
-            Matcher::UnderHome { relative } => self.match_under_home(tree, ctx, relative),
+            Matcher::Location(location) => self.match_location(tree, ctx, location),
         };
         if found.is_empty() {
             return Vec::new();
@@ -721,30 +701,35 @@ impl PackRule {
         found
     }
 
-    /// One exact directory under the user's home.
-    fn match_under_home(&self, tree: &SizeTree, ctx: &Context, relative: &Path) -> Vec<NodeId> {
-        let Some(home) = ctx.home.as_ref() else {
+    /// Resolve only the selected path in the immutable index. This never opens
+    /// the path or reads metadata outside the already recorded scan.
+    fn match_location(
+        &self,
+        tree: &SizeTree,
+        ctx: &Context,
+        location: &crate::location::Location,
+    ) -> Vec<NodeId> {
+        let Some(target) = location.target(tree, ctx) else {
             return Vec::new();
         };
-        let target = home.join(relative);
-        let Some(leaf) = target.file_name() else {
+        let Ok(rest) = target.strip_prefix(tree.root_path()) else {
             return Vec::new();
         };
-
-        // Only build a path for nodes whose name could possibly end the
-        // pattern: reconstruction is cheap but not free, and this takes it from
-        // every directory in the tree to a handful.
-        for index in 0..tree.len() {
-            let id = NodeId::from_index(index);
-            let node = tree.node(id);
-            if !node.is_dir() || tree.name(id) != leaf || !util::is_countable(tree, id) {
-                continue;
-            }
-            if tree.path_of(id) == target {
-                return vec![id];
-            }
+        // The scanner already sorts direct children by encoded name bytes.
+        // Resolve only the requested path with binary searches, instead of
+        // traversing every arena entry once for every location rule.
+        let mut id = tree.root();
+        for component in rest.components() {
+            let Some(child) = tree.child_named(id, component.as_os_str()) else {
+                return Vec::new();
+            };
+            id = child;
         }
-        Vec::new()
+        if tree.node(id).is_dir() && util::is_countable(tree, id) {
+            vec![id]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -788,8 +773,8 @@ mod tests {
                         "title": "My tool's cache",
                         "detail": "Rebuilt on next run.",
                         "subject": "cache directory",
-                        "under-home": ".config/mytool/cache",
-                        "action": "empty-contents"
+                        "location":{"base":"home","path":".config/mytool/cache"},
+                        "action": "review-only"
                     },
                     {
                         "id": "scratch",
@@ -908,7 +893,7 @@ mod tests {
         assert_eq!(loaded.rules[0].confidence(), Confidence::Possible);
     }
 
-    /// `..` in an under-home path would let a pack point at anything on the
+    /// `..` in a home-based location would let a pack point at anything on the
     /// machine. The safety guards would refuse to act, but a rule that can only
     /// ever be refused is one to reject while the author can still fix it.
     #[test]
@@ -920,13 +905,16 @@ mod tests {
                     "title": "Elsewhere",
                     "detail": "Not under home at all.",
                     "subject": "directory",
-                    "under-home": "{escape}",
+                    "location":{{"base":"home","path":"{escape}"}},
                     "action": "review-only"
                 }}"#
             ))
             .unwrap();
             assert!(
-                matches!(loaded.rejected.as_slice(), [Rejected::EscapesHome(_)]),
+                matches!(
+                    loaded.rejected.as_slice(),
+                    [Rejected::InvalidLocation { .. }]
+                ),
                 "`{escape}` was accepted"
             );
         }
@@ -941,7 +929,7 @@ mod tests {
                     "title": "Somewhere",
                     "detail": "Given absolutely.",
                     "subject": "directory",
-                    "under-home": "{absolute}",
+                    "location":{{"base":"home","path":"{absolute}"}},
                     "action": "review-only"
                 }}"#
             ))
@@ -949,7 +937,7 @@ mod tests {
             assert!(
                 matches!(
                     loaded.rejected.as_slice(),
-                    [Rejected::AbsolutePath(_) | Rejected::EscapesHome(_)]
+                    [Rejected::InvalidLocation { .. }]
                 ),
                 "`{absolute}` was accepted: {:?}",
                 loaded.rejected
@@ -998,7 +986,7 @@ mod tests {
     fn a_rule_matches_one_way_or_the_other_and_never_neither() {
         let both = one(r#"{
                 "id": "both", "title": "Both", "detail": "Two matchers.",
-                "subject": "directory", "directory": "a", "under-home": "b",
+                "subject": "directory", "directory": "a", "location":{"base":"home","path":"b"},
                 "action": "review-only"
             }"#)
         .unwrap();
@@ -1145,13 +1133,13 @@ mod summary_tests {
                     { "id": "a", "title": "T", "detail": "D", "subject": "s",
                       "directory": "x", "action": "trash" },
                     { "id": "b", "title": "T", "detail": "D", "subject": "s",
-                      "directory": "x", "under-home": "y", "action": "review-only" },
+                      "directory": "x", "location":{"base":"home","path":"y"}, "action": "review-only" },
                     { "id": "c", "title": "T", "detail": "D", "subject": "s",
                       "action": "review-only" },
                     { "id": "Bad Id", "title": "T", "detail": "D", "subject": "s",
                       "directory": "x", "action": "review-only" },
                     { "id": "d", "title": "T", "detail": "D", "subject": "s",
-                      "under-home": "../escape", "action": "review-only" }
+                      "location":{"base":"home","path":"../escape"}, "action": "review-only" }
                 ]
             }"#,
             Path::new("rules.json"),
@@ -1305,7 +1293,6 @@ mod budget_tests {
             ("detail", "x".repeat(4097)),
             ("subject", "x".repeat(81)),
             ("directory", "x".repeat(256)),
-            ("under-home", "x".repeat(1025)),
         ] {
             let mut value_doc: serde_json::Value = serde_json::from_str(&document(0, 2)).unwrap();
             value_doc["rules"][0][field] = serde_json::json!(value);

@@ -5,6 +5,7 @@
 //! from installation, and query translation stays in kosha-search.
 
 pub mod catalog;
+pub mod insights;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -220,8 +221,44 @@ fn lock(directory: &Path) -> Result<File, String> {
 pub fn install_local(source: &Path) -> Result<RecipePackMetadata, String> {
     let file =
         open_recipe_file(source).map_err(|error| format!("{}: {error}", source.display()))?;
-    let (text, book) = read(file).map_err(|error| format!("{}: {error}", source.display()))?;
+    let mut text = String::new();
+    file.take(MAX_RECIPE_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() > MAX_RECIPE_BYTES {
+        return Err("Package file exceeds the byte limit".into());
+    }
+    let kind = serde_json::from_str::<serde_json::Value>(&text)
+        .map_err(|e| e.to_string())?
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("recipe-pack")
+        .to_owned();
+    if kind == insights::KIND {
+        return insights::install(&text);
+    }
+    let book = RecipeBook::from_json(&text)?;
     install_validated(&text, &book)
+}
+
+/// Validate all rules without changing configuration, downloading or scanning.
+pub fn validate_local(source: &Path) -> Result<RecipePackMetadata, String> {
+    let mut text = String::new();
+    open_recipe_file(source)?
+        .take(MAX_RECIPE_BYTES as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() > MAX_RECIPE_BYTES {
+        return Err("Package file exceeds the byte limit".into());
+    }
+    let document: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if document.get("kind").and_then(|v| v.as_str()) == Some(insights::KIND) {
+        return Ok(insights::parse(&text)?.metadata);
+    }
+    RecipeBook::from_json(&text)?
+        .metadata()
+        .cloned()
+        .ok_or("Expected versioned package metadata".into())
 }
 
 fn install_validated(text: &str, book: &RecipeBook) -> Result<RecipePackMetadata, String> {
@@ -236,6 +273,17 @@ fn install_in(
     let pack = book
         .metadata()
         .ok_or("Installation needs a versioned recipe pack with metadata")?;
+    persist_in(directory, text, pack, || {
+        load_from(directory, Some(book)).map(|_| ())
+    })
+}
+
+fn persist_in(
+    directory: &Path,
+    text: &str,
+    pack: &RecipePackMetadata,
+    preflight: impl FnOnce() -> Result<(), String>,
+) -> Result<RecipePackMetadata, String> {
     if !store_exists(directory)? {
         fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     }
@@ -250,7 +298,7 @@ fn install_in(
     }
     // Check the exact prospective load order under the writer lock. A rejected
     // pack must not make a previously usable store exceed execution budgets.
-    load_from(directory, Some(book))?;
+    preflight()?;
     let path = pack_path(directory, &pack.qualified_id())?;
     let parent = path.parent().ok_or("Missing pack namespace directory")?;
     if !store_exists(parent)? {
@@ -287,7 +335,88 @@ pub fn installed() -> Result<Vec<RecipePackMetadata>, String> {
 }
 
 pub fn uninstall(id: &str) -> Result<(), String> {
-    uninstall_in(&config()?.join(PACK_DIRECTORY), id)
+    let root = config()?;
+    if let Some(id) = id.strip_prefix("recipe-pack:") {
+        return uninstall_in(&root.join(PACK_DIRECTORY), id);
+    }
+    if let Some(id) = id.strip_prefix("insight-pack:") {
+        return uninstall_in(&root.join(insights::DIRECTORY), id);
+    }
+    let mut choices = Vec::new();
+    for kind in [PACK_DIRECTORY, insights::DIRECTORY] {
+        for key in pack_ids(&root.join(kind))? {
+            if key == id || (!id.contains('/') && key.rsplit('/').next() == Some(id)) {
+                choices.push((kind, key));
+            }
+        }
+    }
+    // As with catalog lookup, an exact publisher/id wins over bare aliases.
+    if choices.iter().any(|(_, key)| key == id) {
+        choices.retain(|(_, key)| key == id);
+    }
+    match choices.as_slice() {
+        [(kind, key)] => uninstall_in(&root.join(kind), key),
+        [] => Err(format!("Package {id} is not installed")),
+        _ => Err(format!(
+            "Ambiguous package {id}; use recipe-pack:publisher/id or insight-pack:publisher/id"
+        )),
+    }
+}
+
+/// Kind is part of the local management key; publisher/id stays the catalog identity.
+pub struct InstalledPackage {
+    pub kind: &'static str,
+    pub metadata: RecipePackMetadata,
+}
+
+impl std::ops::Deref for InstalledPackage {
+    type Target = RecipePackMetadata;
+    fn deref(&self) -> &Self::Target {
+        &self.metadata
+    }
+}
+
+impl InstalledPackage {
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.kind, self.qualified_id())
+    }
+}
+
+pub fn installed_all() -> Result<Vec<InstalledPackage>, String> {
+    let mut all: Vec<_> = installed()?
+        .into_iter()
+        .map(|metadata| InstalledPackage {
+            kind: "recipe-pack",
+            metadata,
+        })
+        .collect();
+    all.extend(
+        insights::installed()?
+            .into_iter()
+            .map(|metadata| InstalledPackage {
+                kind: insights::KIND,
+                metadata,
+            }),
+    );
+    all.sort_by_key(|pack| (pack.qualified_id(), pack.kind));
+    Ok(all)
+}
+
+/// Shared offline analysis configuration. Managed insights never enter personal rules.d.
+pub fn load_analysis_rules() -> kosha_analyze::pack::Loaded {
+    let mut loaded = kosha_analyze::pack::load_all();
+    match insights::load() {
+        Ok(rules) => loaded.rules.extend(rules),
+        Err(message) => loaded
+            .unreadable
+            .push(kosha_analyze::pack::PackError::Limit {
+                path: kosha_core::dirs::config_dir()
+                    .unwrap_or_default()
+                    .join(insights::DIRECTORY),
+                message,
+            }),
+    }
+    loaded
 }
 
 fn uninstall_in(directory: &Path, id: &str) -> Result<(), String> {

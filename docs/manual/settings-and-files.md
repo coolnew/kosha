@@ -75,6 +75,7 @@ there is no production MSIX distribution yet.
 | `recipe-packs/` | Configuration | Managed copies of explicitly installed recipe packs, shared by the CLI and GUI |
 | `marketplace-catalog.snapshot` | Data | Last synced public marketplace catalog and its GitHub commit, shared by the CLI and GUI |
 | `rules.d/` | Configuration | Optional JSON rule packs for findings |
+| `insight-packs/` | Configuration | Managed review-only insight packs in builds after 0.10.7; separate from personal rules |
 | `snapshots/` | Data | Explicit `.kosha` records saved by either executable |
 | `drive-cache/` | Data | Automatic historical records written by the GUI and read explicitly by the CLI |
 | `audit.jsonl` | Data | Append-only history of file-changing actions from the GUI |
@@ -119,8 +120,8 @@ Rescan after editing a pack to refresh findings.
 ### Author local insight rules
 
 These JSON files produce findings; [search recipes](recipe-authoring.md) instead
-translate queries. Marketplace installation currently supports search recipe
-packs only. Local insight files use this separate version-1 contract:
+translate queries. [Managed insight packs](insight-packs.md) use a distinct,
+review-only capability. Local insight files use this separate version-1 contract:
 
 ```json
 {
@@ -130,7 +131,7 @@ packs only. Local insight files use this separate version-1 contract:
     "title": "Session records to review",
     "detail": "These may contain valuable conversation history. Review before changing anything.",
     "subject": "directory",
-    "under-home": ".codex/sessions",
+    "location": {"base": "home", "path": ".codex/sessions"},
     "action": "review-only"
   }]
 }
@@ -143,16 +144,19 @@ conversation contents. No commands, scripts, network access, regex, fuzzy
 selectors or AI models are part of this format.
 
 Each rule needs `id`, `title`, `detail`, `subject`, `action`, and exactly one
-matcher: `under-home` is an exact relative path inside the detected home;
-`directory` is an exact directory name anywhere in the scan. A directory matcher
-can require any of up to eight sibling marker names in `beside`. Matching is
-literal, using the scanned path spelling; there are no globs or environment
-variable expansions. Unknown home means no `under-home` match. Nodes below
-the minimum finding size are omitted.
+matcher: `location` is a structured exact path; `directory` is an exact directory
+name anywhere in the scan. A directory matcher can require any of up to eight
+sibling marker names in `beside`. See [location bases and limits](insight-packs.md)
+for `home`, `scan_root`, `absolute`, `cache`, `temp` and `local_app_data`.
+Matching is literal against recorded metadata. Unknown providers and targets
+outside the recorded scan produce no match. Nodes below the minimum finding
+size are omitted. The old `under-home` key is rejected; no compatibility aliases
+are retained.
 
-Actions are `review-only`, `trash`, or `empty-contents`. A bare name supports
-only review; a required sibling marker earns stronger evidence, and an exact
-home path earns likely confidence. Confidence is derived, never author-supplied.
+Location rules always require `review-only`, with likely confidence. Directory
+rules support `review-only`, `trash`, or `empty-contents`; a bare name supports
+only review, while a required sibling marker earns stronger evidence.
+Confidence is derived, never author-supplied.
 Path/name evidence does not prove data is disposable. Prefer review for history,
 credentials, profiles, user-created data and tool-managed caches. In particular,
 use uv's own cache commands rather than deleting its cache directly; see
@@ -171,7 +175,8 @@ more than 32 JSON files refuses the directory. Errors are reported and inputs
 are never rewritten. Links and directories are not rule files.
 
 These budgets bound loading and rule count; they are not a scan-time guarantee.
-Each rule can still examine a large tree. Marketplace insight installation,
-shared evaluation indexes and aggregate work/cancellation budgets remain future
-work. A finding never grants filesystem access or bypasses the normal mode,
+Directory-name rules can still examine a large tree; exact home-path rules use
+the existing sorted child-name index. Managed insights have stricter path and
+aggregate limits and do not accept directory-name or destructive rules.
+A finding never grants filesystem access or bypasses the normal mode,
 preview, source, identity and confirmation safeguards.

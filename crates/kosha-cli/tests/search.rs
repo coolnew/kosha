@@ -554,3 +554,66 @@ fn local_pack_management_preserves_personal_recipes_and_uses_id_order() {
     assert_eq!(std::fs::read_to_string(personal).unwrap(), personal_json);
     assert!(root.join("a-local.json").is_file());
 }
+
+#[test]
+fn insight_validation_and_kind_qualified_removal_preserve_recipe_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let metadata = serde_json::json!({"publisher":"tests","id":"sessions","title":"Session tools","description":"Synthetic metadata","version":"1.0.0"});
+    let recipe = serde_json::json!({"schema":1,"kind":"recipe-pack","metadata":metadata,"recipes":[{"phrase":"session documents","dsl":"file and ext = md"}]}).to_string();
+    let insight = serde_json::json!({"schema":1,"kind":"insight-pack","metadata":metadata,"requires":["insight.locations.v1"],"platforms":[],
+        "insights":[{"id":"sessions","title":"Review sessions","detail":"Keep valuable history","subject":"directory","location":{"base":"home","path":".assistant/sessions"},"action":"review-only"}]}).to_string();
+    std::fs::write(root.join("recipe.json"), &recipe).unwrap();
+    std::fs::write(root.join("insight.json"), &insight).unwrap();
+    let before = std::fs::read_dir(root).unwrap().count();
+    let validated = run(&["marketplace", "validate", "insight.json"], root);
+    assert!(validated.status.success(), "{}", stderr(&validated));
+    assert_eq!(
+        std::fs::read_dir(root).unwrap().count(),
+        before,
+        "validation wrote configuration"
+    );
+    for source in ["recipe.json", "insight.json"] {
+        let installed = run(&["marketplace", "install", source], root);
+        assert!(installed.status.success(), "{}", stderr(&installed));
+    }
+    let listing = run(&["marketplace", "list"], root);
+    assert!(listing.status.success());
+    assert!(stdout(&listing).contains("recipe-pack:tests/sessions"));
+    assert!(stdout(&listing).contains("insight-pack:tests/sessions"));
+    assert!(
+        !run(&["marketplace", "uninstall", "tests/sessions"], root)
+            .status
+            .success()
+    );
+    assert!(
+        run(
+            &["marketplace", "uninstall", "insight-pack:tests/sessions"],
+            root
+        )
+        .status
+        .success()
+    );
+    let describe = run(
+        &["search", "--describe", "--json", "session documents"],
+        root,
+    );
+    assert!(describe.status.success(), "{}", stderr(&describe));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&describe.stdout).unwrap()["dsl"],
+        "file and ext = md"
+    );
+    assert!(
+        run(&["marketplace", "uninstall", "tests/sessions"], root)
+            .status
+            .success()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("recipe.json")).unwrap(),
+        recipe
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("insight.json")).unwrap(),
+        insight
+    );
+}
