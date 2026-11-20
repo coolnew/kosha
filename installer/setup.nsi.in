@@ -1,0 +1,312 @@
+; SPDX-License-Identifier: MIT OR Apache-2.0
+; SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
+Unicode true
+RequestExecutionLevel user
+ManifestDPIAware true
+SetCompressor /SOLID lzma
+Name "Kosha @VERSION@"
+OutFile @OUTPUT@
+Icon @ICON@
+VIProductVersion "@NUMERIC@"
+VIAddVersionKey /LANG=1033 "ProductName" "Kosha"
+VIAddVersionKey /LANG=1033 "FileDescription" "Kosha offline installer"
+VIAddVersionKey /LANG=1033 "FileVersion" "@VERSION@"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright 2026 Neeraj Sharma and The kosha contributors"
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "FileFunc.nsh"
+!include "WordFunc.nsh"
+!include "StrFunc.nsh"
+!include "x64.nsh"
+!define KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\KoshaDesktop"
+Var Machine
+Var AddPath
+Var Args
+Var ScopeCheck
+Var PathCheck
+Var Dialog
+Var EnvRoot
+Var EnvKey
+Var PathMode
+Var PathType
+Var PathAdded
+Var RequestedDir
+!insertmacro MUI_PAGE_WELCOME
+Page custom Options OptionsLeave
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
+Function SetScope
+  SetRegView 64
+  ${If} $Machine == 1
+    SetShellVarContext all
+    StrCpy $INSTDIR "$PROGRAMFILES64\Kosha"
+    StrCpy $EnvRoot 0x80000002
+    StrCpy $EnvKey "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+  ${Else}
+    SetShellVarContext current
+    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Kosha"
+    StrCpy $EnvRoot 0x80000001
+    StrCpy $EnvKey "Environment"
+  ${EndIf}
+  ReadRegStr $0 SHCTX "${KEY}" "InstallLocation"
+  ${If} $0 != ""
+    StrCpy $INSTDIR $0
+  ${EndIf}
+  ${If} $RequestedDir != ""
+    StrCpy $INSTDIR $RequestedDir
+  ${EndIf}
+FunctionEnd
+
+Function Elevate
+  System::Call 'shell32::IsUserAnAdmin() i.r0'
+  ${If} $0 == 0
+    StrCpy $0 "/ALLUSERS /AddToPath=$AddPath"
+    ${If} ${Silent}
+      StrCpy $0 "$0 /S"
+    ${EndIf}
+    ClearErrors
+    ExecShellWait "runas" "$EXEPATH" "$0"
+    ${If} ${Errors}
+      MessageBox MB_ICONEXCLAMATION "Administrator approval was cancelled or unavailable. No all-users installation was performed." /SD IDOK
+      SetErrorLevel 1602
+    ${EndIf}
+    Quit
+  ${EndIf}
+FunctionEnd
+
+Function .onInit
+  StrCpy $RequestedDir $INSTDIR
+  ${IfNot} ${RunningX64}
+    MessageBox MB_ICONSTOP "Kosha requires x64 Windows." /SD IDOK
+    Abort
+  ${EndIf}
+  SetRegView 64
+  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "CurrentBuildNumber"
+  ${If} $0 < 19041
+    MessageBox MB_ICONSTOP "Kosha requires Windows 10 version 2004 or later." /SD IDOK
+    Abort
+  ${EndIf}
+  StrCpy $Machine 0
+  StrCpy $AddPath 1
+  ${GetParameters} $Args
+  ClearErrors
+  ${GetOptions} $Args "/ALLUSERS" $0
+  ${IfNot} ${Errors}
+    StrCpy $Machine 1
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $Args "/AddToPath=" $0
+  ${IfNot} ${Errors}
+    ${If} $0 != 0
+    ${AndIf} $0 != 1
+      MessageBox MB_ICONSTOP "Use /AddToPath=0 or /AddToPath=1." /SD IDOK
+      Abort
+    ${EndIf}
+    StrCpy $AddPath $0
+  ${EndIf}
+  ${If} $Machine == 1
+    Call Elevate
+  ${EndIf}
+  Call SetScope
+FunctionEnd
+
+Function Options
+  nsDialogs::Create 1018
+  Pop $Dialog
+  ${NSD_CreateLabel} 0 0 100% 28u "Install Kosha for yourself, or choose all users (requires administrator approval). Close Kosha before upgrading."
+  Pop $0
+  ${NSD_CreateCheckbox} 0 40u 100% 14u "Install for all users"
+  Pop $ScopeCheck
+  ${NSD_SetState} $ScopeCheck $Machine
+  ${NSD_CreateCheckbox} 0 65u 100% 14u "Add the Kosha command line to PATH"
+  Pop $PathCheck
+  ${NSD_SetState} $PathCheck $AddPath
+  nsDialogs::Show
+FunctionEnd
+
+Function OptionsLeave
+  ${NSD_GetState} $ScopeCheck $Machine
+  ${NSD_GetState} $PathCheck $AddPath
+  ${If} $Machine == 1
+    Call Elevate
+  ${EndIf}
+  Call SetScope
+FunctionEnd
+
+; Read/write PATH through native buffers, never through NSIS's short strings.
+; Preserve the registry value type and remove only a whole owned path segment.
+!macro ChangePath Prefix
+Function ${Prefix}ChangePath
+  System::Call 'advapi32::RegOpenKeyExW(p $EnvRoot, w "$EnvKey", i 0, i 0x103, *p.r1) i.r0'
+  ${If} $0 != 0
+    MessageBox MB_ICONSTOP "Cannot access PATH. Retry with the PATH option disabled." /SD IDOK
+    Abort
+  ${EndIf}
+  StrCpy $3 0
+  System::Call 'advapi32::RegQueryValueExW(p r1, w "Path", p 0, *i.r2, p 0, *i.r3) i.r0'
+  ${If} $0 == 2
+    StrCpy $3 2
+    StrCpy $2 2
+  ${ElseIf} $0 != 0
+    System::Call 'advapi32::RegCloseKey(p r1)'
+    Abort
+  ${EndIf}
+  ${If} $3 > 65534
+    System::Call 'advapi32::RegCloseKey(p r1)'
+    MessageBox MB_ICONSTOP "PATH exceeds Windows's supported environment length." /SD IDOK
+    Abort
+  ${EndIf}
+  ${If} $2 != 1
+  ${AndIf} $2 != 2
+    System::Call 'advapi32::RegCloseKey(p r1)'
+    Abort
+  ${EndIf}
+  StrCpy $PathType $2
+  StrLen $8 $INSTDIR
+  IntOp $9 $8 * 2
+  IntOp $9 $9 + $3
+  IntOp $9 $9 + 16
+  System::Alloc $9
+  Pop $4
+  ${If} $4 == 0
+    System::Call 'advapi32::RegCloseKey(p r1)'
+    Abort
+  ${EndIf}
+  System::Call 'kernel32::lstrcpyW(p r4, w ";") p'
+  IntOp $6 $4 + 2
+  System::Call 'kernel32::lstrcpyW(p r6, w "") p'
+  System::Call 'advapi32::RegQueryValueExW(p r1, w "Path", p 0, *i.r2, p r6, *i r3) i.r0'
+  ${If} $0 != 0
+  ${AndIf} $0 != 2
+    System::Free $4
+    System::Call 'advapi32::RegCloseKey(p r1)'
+    Abort
+  ${EndIf}
+  System::Call 'kernel32::lstrcatW(p r4, w ";") p'
+  System::Call 'shlwapi::StrStrIW(p r4, w ";$INSTDIR;") p.r7'
+  StrCpy $R0 0
+  ${If} $PathMode == 1
+    ${If} $7 == 0
+      System::Call 'kernel32::lstrlenW(p r6) i.r0'
+      ${If} $0 == 1
+        System::Call 'kernel32::lstrcpyW(p r6, w "") p'
+      ${EndIf}
+      System::Call 'kernel32::lstrcatW(p r4, w "$INSTDIR;") p'
+      StrCpy $PathAdded 1
+      StrCpy $R0 1
+    ${EndIf}
+  ${Else}
+    ${If} $7 != 0
+      IntOp $5 $8 + 1
+      IntOp $5 $5 * 2
+      IntOp $5 $7 + $5
+      System::Call 'kernel32::lstrlenW(p r5) i.r9'
+      IntOp $9 $9 + 1
+      IntOp $9 $9 * 2
+      System::Call 'kernel32::RtlMoveMemory(p r7, p r5, p r9)'
+      StrCpy $R0 1
+    ${EndIf}
+  ${EndIf}
+  ${If} $R0 == 1
+    System::Call 'kernel32::lstrlenW(p r6) i.r9'
+    ${If} $9 > 32767
+      System::Free $4
+      System::Call 'advapi32::RegCloseKey(p r1)'
+      MessageBox MB_ICONSTOP "Adding Kosha would exceed Windows's PATH length limit. Retry without the PATH option." /SD IDOK
+      Abort
+    ${EndIf}
+    IntOp $9 $9 - 1
+    IntOp $9 $9 * 2
+    IntOp $5 $6 + $9
+    System::Call '*$5(&i2 0)'
+    IntOp $9 $9 + 2
+    System::Call 'advapi32::RegSetValueExW(p r1, w "Path", i 0, i $PathType, p r6, i r9) i.r0'
+    ${If} $0 != 0
+      System::Free $4
+      System::Call 'advapi32::RegCloseKey(p r1)'
+      MessageBox MB_ICONSTOP "Could not update PATH." /SD IDOK
+      Abort
+    ${EndIf}
+    System::Call 'user32::SendMessageTimeoutW(p 0xffff, i 0x1a, p 0, w "Environment", i 2, i 5000, *p.r0)'
+  ${EndIf}
+  System::Free $4
+  System::Call 'advapi32::RegCloseKey(p r1)'
+FunctionEnd
+!macroend
+!insertmacro ChangePath ""
+!insertmacro ChangePath "un."
+
+Section "Kosha"
+  ReadRegStr $0 SHCTX "${KEY}" "NumericVersion"
+  ${If} $0 != ""
+    ${VersionCompare} $0 "@NUMERIC@" $1
+    ${If} $1 == 1
+      MessageBox MB_ICONSTOP "A newer Kosha is installed. Uninstall it before installing an older version." /SD IDOK
+      SetErrorLevel 1638
+      Abort
+    ${EndIf}
+  ${EndIf}
+  SetOverwrite on
+  @INSTALL@
+  SetOutPath "$INSTDIR"
+  WriteUninstaller "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$SMPROGRAMS\Kosha.lnk" "$INSTDIR\kosha-gui.exe"
+  ReadRegDWORD $PathAdded SHCTX "${KEY}" "PathAdded"
+  ${If} $AddPath == 1
+    StrCpy $PathMode 1
+    Call ChangePath
+  ${EndIf}
+  WriteRegStr SHCTX "${KEY}" "DisplayName" "Kosha"
+  WriteRegStr SHCTX "${KEY}" "DisplayVersion" "@VERSION@"
+  WriteRegStr SHCTX "${KEY}" "NumericVersion" "@NUMERIC@"
+  WriteRegStr SHCTX "${KEY}" "Publisher" "Neeraj Sharma"
+  WriteRegStr SHCTX "${KEY}" "URLInfoAbout" "https://coolnew.github.io/kosha/"
+  WriteRegStr SHCTX "${KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr SHCTX "${KEY}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+  WriteRegStr SHCTX "${KEY}" "DisplayIcon" "$INSTDIR\kosha-gui.exe"
+  WriteRegDWORD SHCTX "${KEY}" "NoModify" 1
+  WriteRegDWORD SHCTX "${KEY}" "NoRepair" 1
+  WriteRegDWORD SHCTX "${KEY}" "PathAdded" $PathAdded
+SectionEnd
+
+Function un.onInit
+  SetRegView 64
+  StrCpy $Machine 0
+  SetShellVarContext current
+  ReadRegStr $0 HKLM "${KEY}" "InstallLocation"
+  ${If} $0 == $INSTDIR
+    System::Call 'shell32::IsUserAnAdmin() i.r0'
+    ${If} $0 == 0
+      ExecShellWait "runas" "$INSTDIR\Uninstall.exe"
+      Quit
+    ${EndIf}
+    StrCpy $Machine 1
+    SetShellVarContext all
+  ${EndIf}
+  ${If} $Machine == 1
+    StrCpy $EnvRoot 0x80000002
+    StrCpy $EnvKey "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+  ${Else}
+    StrCpy $EnvRoot 0x80000001
+    StrCpy $EnvKey "Environment"
+  ${EndIf}
+FunctionEnd
+
+Section "Uninstall"
+  ReadRegDWORD $0 SHCTX "${KEY}" "PathAdded"
+  ${If} $0 == 1
+    StrCpy $PathMode 0
+    Call un.ChangePath
+  ${EndIf}
+  @REMOVE@
+  Delete "$SMPROGRAMS\Kosha.lnk"
+  Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR"
+  DeleteRegKey SHCTX "${KEY}"
+  ; No recursive deletion. Saved scans, settings, unknown files remain intact.
+SectionEnd

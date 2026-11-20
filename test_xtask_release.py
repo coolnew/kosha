@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from test_windows_distribution import image
 from urllib.error import HTTPError, URLError
 
 
@@ -379,7 +380,13 @@ class ReleaseTests(unittest.TestCase):
             def public_payloads(root):
                 return {"README.md": b"# Public\n", "CHANGELOG.md": b"# Changes\n"}
         def selected_module(path, name):
-            return Version if name == "release_versions" else Package
+            if name == "release_versions":
+                return Version
+            if name == "release_windows":
+                return load("xtask-windows")
+            if name == "release_installer":
+                return load("xtask-installer")
+            return Package
         before = {"head": "a" * 40, "index": "unchanged", "refs": "unchanged", "status": ""}
         def selected_git(root, *args):
             return str(getattr(self, "reported_git_root", self.root)) if args == ("rev-parse", "--show-toplevel") else ""
@@ -394,7 +401,7 @@ class ReleaseTests(unittest.TestCase):
         plan = json.loads(output.getvalue())
         self.assertFalse(plan["execute"])
         if "--binary-only" in getattr(self, "release_flags", []):
-            self.assertEqual(plan["archives"], ["host binary archive"])
+            self.assertEqual(plan["archives"], ["host binary archive"] + (["NSIS offline Setup EXE (static CRT)"] if os.name == "nt" else []))
 
     def test_binary_only_dry_run_omits_shared_sources(self):
         self.release_flags = ["--binary-only"]
@@ -557,6 +564,8 @@ class ReleaseAssetTests(unittest.TestCase):
     def seed(self, root):
         for target, extension in release.RELEASE_TARGETS.items():
             names = [f"kosha-v0.10.2-{target}{extension}"]
+            if target == "x86_64-pc-windows-msvc":
+                names.append("kosha-v0.10.2-x64-setup.exe")
             if target == release.SOURCE_OWNER:
                 names += ["kosha-v0.10.2-source.zip", "kosha-v0.10.2-source.tar.gz"]
             entries = []
@@ -581,7 +590,7 @@ class ReleaseAssetTests(unittest.TestCase):
         version = "0.10.2"
         prefix = "kosha-v" + version
         win_name = prefix + "-x86_64-pc-windows-msvc.zip"
-        binaries = {"kosha.exe": b"same cli", "kosha-gui.exe": b"same gui"}
+        binaries = {"kosha.exe": image() + b"same cli", "kosha-gui.exe": image() + b"same gui"}
         with zipfile.ZipFile(root / win_name, "w") as archive:
             for name, data in binaries.items():
                 archive.writestr(prefix + "-x86_64-pc-windows-msvc/" + name, data)

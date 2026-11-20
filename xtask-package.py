@@ -32,6 +32,7 @@ import json
 import os
 import platform
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -74,6 +75,10 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
     roots = {".gitattributes", ".gitignore", "Cargo.toml", "Cargo.lock", "DCO", "LICENSE-MIT", "LICENSE-APACHE", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md", "SECURITY.md", "TRADEMARKS.md", "LLMS.md", "llms.txt", "clippy.toml", "rust-toolchain.toml", "rustfmt.toml", "xtask-dco.py", "xtask-eol.py", "xtask-spdx.py", "xtask-gaps.py", "xtask-mutations.py", "xtask-version.py", "xtask-package.py", "xtask-release.py", "xtask-llms.py", "test_xtask_version.py", "test_xtask_llms.py", "test_xtask_release.py"}
     roots.update({"PRIVACY.md", "xtask-marketplace.py", "test_xtask_marketplace.py"})
     roots.update({"xtask-msix.py", "test_xtask_msix.py"})
+    roots.update({"xtask-windows.py", "xtask-installer.py", "test_windows_distribution.py",
+                  "installer/setup.nsi.in", "xtask-nsis.py"})
+    roots.update({".github/ISSUE_TEMPLATE/bug_report.yml", ".github/ISSUE_TEMPLATE/feature_request.yml",
+                  ".github/ISSUE_TEMPLATE/config.yml"})
     roots.update({"xtask-ci.py", "test_xtask_ci.py", "xtask-coverage.py",
                   "test_xtask_coverage.py", "xtask-docs.py", "test_xtask_docs.py",
                   "xtask-website.py", "test_xtask_website.py"})
@@ -85,7 +90,7 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
             if any(part.lower().startswith(".env") or part.lower() in {".git", ".claude", ".codex", ".agents"} for part in Path(name).parts):
                 raise ValueError(f"Private file in Git-only data inventory: {name}")
             continue
-        if name not in roots and name not in {"docs/README.md", "scripts/test-windows-gui-console.py", "scripts/check-recipe-authoring-manual.py"} and not name.startswith(("crates/", "assets/", "docs/manual/", "website/", ".github/workflows/")):
+        if name not in roots and name not in {"docs/README.md", "scripts/test-windows-installer.py", "scripts/test-windows-gui-console.py", "scripts/check-recipe-authoring-manual.py"} and not name.startswith(("crates/", "assets/", "docs/manual/", "website/", ".github/workflows/")):
             raise ValueError(f"Unclassified public-checkout file: {name}")
         path = root / name
         if path.is_symlink() or getattr(path, "is_junction", lambda: False)() or not path.resolve().is_relative_to(root):
@@ -127,7 +132,9 @@ def binaries() -> tuple[Path, Path]:
     """
     suffix = ".exe" if WINDOWS else ""
     target = os.environ.get("CARGO_TARGET_DIR")
-    release = (Path(target).expanduser() if target else ROOT / "target") / "release"
+    build = Path(target).expanduser() if target else ROOT / "target"
+    triple = os.environ.get("CARGO_BUILD_TARGET")
+    release = (build / triple if triple else build) / "release"
     cli, gui = release / f"kosha{suffix}", release / f"kosha-gui{suffix}"
     for one in (cli, gui):
         if not one.is_file():
@@ -187,6 +194,8 @@ def assemble(name: str) -> Path:
     out.mkdir(parents=True)
 
     cli, gui = binaries()
+    if WINDOWS:
+        runpy.run_path(str(ROOT / "xtask-windows.py"))["verify_folder"](cli.parent)
     for name, data in documentation_payloads().items():
         target = out / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -392,6 +401,8 @@ def verify(path: Path, folder_name: str) -> list:
             wrong.append(f"missing packaged documentation: {relative.as_posix()}")
     suffix = ".exe" if WINDOWS else ""
     cli = unpacked / f"kosha{suffix}"
+    if WINDOWS:
+        runpy.run_path(str(ROOT / "xtask-windows.py"))["verify_folder"](unpacked)
     if not WINDOWS:
         cli.chmod(0o755)
 

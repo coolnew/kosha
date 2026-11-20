@@ -341,6 +341,8 @@ def verify_release_assets(root: Path, commit: str, expect_msix: bool = False) ->
         version = current
         prefix = f"kosha-v{version}"
         names = {prefix + "-" + target + extension}
+        if target == "x86_64-pc-windows-msvc":
+            names.add(prefix + "-x64-setup.exe")
         if target == SOURCE_OWNER:
             names.update({prefix + "-source.zip", prefix + "-source.tar.gz"})
         entries = manifest.get("artifacts", [])
@@ -436,6 +438,7 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
             raise ValueError("MSIX runtime mismatch")
         with zipfile.ZipFile(root / f"kosha-v{version}-x86_64-pc-windows-msvc.zip") as windows:
             for binary in ["kosha.exe", "kosha-gui.exe"]:
+                module(ROOT / "xtask-windows.py", "msix_windows_imports").verify_bytes(msix.read(binary))
                 original = windows.read(f"kosha-v{version}-x86_64-pc-windows-msvc/{binary}")
                 if msix.read(binary) != original:
                     raise ValueError("MSIX and Windows ZIP binaries differ: " + binary)
@@ -542,6 +545,7 @@ def main() -> int:
         if args.notes_file or version != current:
             raise ValueError("Use --prepare for a version bump; packaging requires the committed current version")
         package = module(root / "xtask-package.py", "release_package")
+        windows = module(root / "xtask-windows.py", "release_windows") if os.name == "nt" else None
         files = package.public_payloads(root)
         candidate = not (root / "publication/files.jsonl").exists()
         if candidate:
@@ -568,6 +572,10 @@ def main() -> int:
                 "archives": ([] if args.binary_only else ["source.zip", "source.tar.gz"]) + ([] if args.source_only else ["host binary archive"]) + (["Partner Center upload MSIX (unsigned)"] if args.msix_store else []),
                 "git_mutations": [], "remote_mutations": [],
                 "remaining_release_acceptance": "Linux/non-host, clean-machine GUI/Sandbox, agreement and hosted workflow checks remain separate evidence"}
+        if windows and not args.source_only:
+            module(root / "xtask-installer.py", "release_installer").numeric_version(version)
+            plan["build"] += ["--target", windows.TARGET]
+            plan["archives"].append("NSIS offline Setup EXE (static CRT)")
         print(json.dumps(plan, indent=2), flush=True)
         if not args.execute:
             return 0
@@ -576,13 +584,14 @@ def main() -> int:
         if candidate and not notes_ready:
             raise ValueError("Public candidate needs a matching dated CHANGELOG entry; prepare and commit release notes first")
         environment = dict(os.environ, CARGO_TARGET_DIR=str(target))
+        binary_dir = (target / windows.TARGET if windows else target) / "release"
         for command in checks:
             run_command(root, command, environment, before)
         if not args.source_only:
-            run_command(root, plan["build"], environment, before)
+            run_command(root, plan["build"], windows.build_environment(environment) if windows else environment, before)
             console_probe = root / "scripts/test-windows-gui-console.py"
             if os.name == "nt" and console_probe.exists():
-                run_command(root, [sys.executable, str(console_probe), "--gui", str(target / "release/kosha-gui.exe")], environment, before)
+                run_command(root, [sys.executable, str(console_probe), "--gui", str(binary_dir / "kosha-gui.exe")], environment, before)
         if package.public_payloads(root) != files:
             raise ValueError("Public source bytes changed during validation/build")
         out.mkdir(parents=True, exist_ok=True)
@@ -591,7 +600,10 @@ def main() -> int:
         if not args.source_only:
             package.ROOT, package.DIST = root, out
             previous_target = os.environ.get("CARGO_TARGET_DIR")
+            previous_triple = os.environ.get("CARGO_BUILD_TARGET")
             os.environ["CARGO_TARGET_DIR"] = str(target)
+            if windows:
+                os.environ["CARGO_BUILD_TARGET"] = windows.TARGET
             try:
                 name = f"kosha-v{version}-{package.target_triple()}"
                 folder = package.assemble(name)
@@ -600,16 +612,26 @@ def main() -> int:
                 if wrong:
                     raise ValueError("Binary package smoke checks failed: " + "; ".join(wrong))
                 artifacts.append(binary_archive)
+                if windows:
+                    installer = module(root / "xtask-installer.py", "release_installer_build")
+                    setup = installer.build(folder, out / "installer-work", version)
+                    destination = out / setup.name
+                    setup.rename(destination)
+                    artifacts.append(destination)
             finally:
                 if previous_target is None:
                     os.environ.pop("CARGO_TARGET_DIR", None)
                 else:
                     os.environ["CARGO_TARGET_DIR"] = previous_target
+                if previous_triple is None:
+                    os.environ.pop("CARGO_BUILD_TARGET", None)
+                else:
+                    os.environ["CARGO_BUILD_TARGET"] = previous_triple
         protected(root, before)
         if args.msix_store:
             msix_out = out / "msix-work"
             run_command(root, [sys.executable, "xtask-msix.py", "--store-upload", "--allow-elevation", "--unvirtualized",
-                              "--binary-dir", str(target / "release"), "--output-dir", str(msix_out), "--execute"], environment, before)
+                              "--binary-dir", str(binary_dir), "--output-dir", str(msix_out), "--execute"], environment, before)
             for name in [f"kosha-v{version}-x64-store-upload.msix", f"kosha-v{version}-x64-store-upload.msix.sha256", "msix-store-upload.json"]:
                 (msix_out / name).rename(out / name)
         manifest = {"schema": "kosha.release-candidate.v1", "project": "kosha", "version": version,

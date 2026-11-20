@@ -19,6 +19,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -225,6 +226,10 @@ def main():
             raise ValueError("CLI and GUI binary stamps disagree")
         makeappx = sdk_tool("makeappx.exe")
         payload = out / "payload"
+        # No hidden Redistributable prerequisite: both Store and portable builds
+        # use the same verified static-CRT executables.
+        module = runpy.run_path(str(ROOT / "xtask-windows.py"))
+        module["verify_folder"](args.binary_dir)
         payload.mkdir(parents=True)
         for name, data in packer.documentation_payloads().items():
             dest = payload / name

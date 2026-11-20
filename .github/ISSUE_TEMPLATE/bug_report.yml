@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
+
+name: Report a bug
+description: Report a problem with Kosha's desktop app, CLI, installer or website.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Kosha. Search existing issues first if possible.
+        This report will be public. Redact personal paths, names, snapshots and logs.
+        For security vulnerabilities, use the private contact in [SECURITY.md](https://github.com/coolnew/kosha/security/policy).
+  - type: input
+    id: version
+    attributes:
+      label: Kosha version
+      description: Paste `kosha --version` or `kosha-gui --version`, or say website-only.
+      placeholder: Version and commit, if known
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 x64, macOS version and chip, or Linux distribution
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it happen?
+      options:
+        - Desktop app
+        - Command line
+        - Installation or upgrade
+        - Website or documentation
+        - Search recipes or marketplace
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest example you can. A synthetic folder or query is preferable to private scan data.
+      placeholder: Describe the steps, command or query that triggers the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual result
+      description: Include the exact error message if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional screenshots or logs
+      description: Review and redact these before uploading. Do not attach complete personal scan indexes or secrets.

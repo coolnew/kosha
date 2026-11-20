@@ -5,6 +5,9 @@ For a visual walkthrough of the desktop app, see the
 
 ## Open kosha
 
+See [download formats and Windows installation](downloads.md) to choose between
+the portable ZIP, offline Setup EXE, Store package, DMG and Linux archive.
+
 Download the archive for your operating system from the project's
 [release page](https://github.com/coolnew/kosha/releases). Extract it before
 running the application. On Windows, open `kosha-gui.exe`; on Linux, run
@@ -43,7 +46,7 @@ companion `.sha256` checksum. See the distribution's installation notes for
 desktop integration and operating-system prerequisites.
 An asset ending in `-x64-store-upload.msix`, when present, is for the maintainer
 to submit to Microsoft Partner Center. It is unsigned and is not a directly
-installable alternative to the Windows ZIP. Use the ZIP for ordinary Windows
+installable alternative to the Windows ZIP or Setup EXE. Use the ZIP or Setup for ordinary Windows
 downloads until a Store-distributed or separately trusted MSIX is available.
 The Store package declares a visible **KoshaApp** entry for the GUI and a
 `kosha` execution alias for Terminal. It targets Windows desktops only.

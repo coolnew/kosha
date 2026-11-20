@@ -1,5 +1,11 @@
 # Troubleshooting
 
+Report a problem using the [guided bug form](https://github.com/coolnew/kosha/issues/new?template=bug_report.yml),
+or [suggest a feature](https://github.com/coolnew/kosha/issues/new?template=feature_request.yml).
+Include your version, operating system and reproduction steps. GitHub reports
+are public: redact personal paths and logs. For security concerns, use the
+[private security contact](https://github.com/coolnew/kosha/security/policy).
+
 ## macOS says the app is damaged or cannot be verified
 
 Some early DMGs, including 0.10.5, shipped without a complete app-bundle seal.

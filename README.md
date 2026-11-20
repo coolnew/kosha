@@ -156,9 +156,11 @@ offline [manual](docs/manual/README.md). Source builds are available below.
 - **Linux:** follow the [installation guide](docs/manual/linux.md) for desktop
   prerequisites and integration.
 - **macOS:** open the DMG and drag `Kosha.app` to Applications; the image also
-  includes the companion CLI and offline manuals. Builds have no Developer ID
-  signature and are not notarized. macOS support is experimental; interactive
-  validation is limited. See [launch troubleshooting](docs/manual/troubleshooting.md).
+  includes the companion CLI and offline manuals. Builds are ad-hoc signed,
+  not Apple-notarized. If blocked as an unidentified developer, trusted downloads
+  may need **System Settings → Privacy & Security → Open Anyway** after the
+  first launch attempt. See the [macOS installation guide](https://coolnew.github.io/kosha/manual/macos/)
+  for verification, warning details and CLI setup. macOS support is experimental.
 
 Pre-release builds and unsigned binaries may trigger operating-system warnings.
 Check the supplied SHA-256 files when downloading release archives.

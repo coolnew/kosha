@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
-Nothing yet.
+- Update rustls to 0.23.46 for TLS security fixes covering handshake record
+  boundaries, certificate decompression, session Debug redaction and key-exchange
+  prediction state (GHSA-2mjx-qc3c-rqvc, GHSA-h2v8-394m-p7vv,
+  GHSA-c8m5-c952-6cm4, GHSA-w44r-93j7-qv28).
+
+- Make website issue reporting easy to find, with navigation/footer links and
+  guided GitHub forms for bugs and feature requests.
+
+- Build Windows portable ZIP, Setup and Store MSIX from verified static-CRT
+  binaries, removing the separate Visual C++ Redistributable prerequisite.
+- Add an offline NSIS Setup EXE with per-user/all-users installation, optional
+  CLI PATH integration, upgrades and uninstall that preserves user data.
+- Document release download formats and Windows installation behavior.
 
 ## [0.10.7-rc.2] — 2026-11-20
 

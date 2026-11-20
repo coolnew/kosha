@@ -26,9 +26,11 @@ nav:
   - Overview: index.md
   - Get started:
       - Installation: manual/getting-started.md
+      - Download formats: manual/downloads.md
       - Desktop tour: manual/desktop-tour.md
       - Command line: manual/command-line.md
       - Linux: manual/linux.md
+      - macOS: manual/macos.md
   - User manual:
       - Contents: manual/index.md
       - Scanning: manual/scanning.md

@@ -126,6 +126,9 @@ jobs:
           EXPECTED_TARGET: ${{ matrix.target }}
         run: >-
           python -c "import os,runpy; actual=runpy.run_path('xtask-package.py')['target_triple'](); assert actual == os.environ['EXPECTED_TARGET'], 'Runner architecture changed: ' + actual"
+      - name: Install pinned portable NSIS compiler
+        if: runner.os == 'Windows'
+        run: python xtask-nsis.py --output-dir "${{ runner.temp }}/kosha-nsis" --execute
       - name: Validate, build, package, and smoke-test clean candidate
         if: runner.os == 'Linux'
         run: python xtask-release.py --execute --target-dir target --output-dir dist/candidate
@@ -135,6 +138,14 @@ jobs:
       - name: Validate and package Windows ZIP plus Partner Center upload MSIX
         if: runner.os == 'Windows' && env.KOSHA_MSIX_STORE_UPLOAD == 'true'
         run: python xtask-release.py --execute --binary-only --msix-store --target-dir target --output-dir dist/candidate
+      - name: Smoke-test per-user Setup and PATH cleanup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem dist/candidate/kosha-v*-x64-setup.exe)
+          if ($setup.Count -ne 1) { throw 'Expected one Setup EXE' }
+          python scripts/test-windows-installer.py --setup $setup[0].FullName --execute
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Name host-specific release manifest
         env:
           RELEASE_TARGET: ${{ matrix.target }}
@@ -153,6 +164,8 @@ jobs:
             dist/candidate/kosha-v*-x64-store-upload.msix
             dist/candidate/kosha-v*-x64-store-upload.msix.sha256
             dist/candidate/msix-store-upload.json
+            dist/candidate/kosha-v*-x64-setup.exe
+            dist/candidate/kosha-v*-x64-setup.exe.sha256
           if-no-files-found: error
       - uses: actions/upload-artifact@v6
         if: runner.os == 'Linux'
@@ -207,6 +220,9 @@ jobs:
             Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
             manuals, SHA-256 sidecars, and a manifest for each host build.
             Both executables report their version, commit, and target with `--version`.
+            Windows includes a portable ZIP and an offline NSIS Setup EXE with
+            per-user/all-users scope and optional PATH integration. Both use
+            static-CRT binaries with no Visual C++ Redistributable prerequisite.
 
             When included, `*-x64-store-upload.msix` is an unsigned Partner Center
             submission package, not a directly installable consumer download.

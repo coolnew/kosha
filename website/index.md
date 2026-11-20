@@ -21,6 +21,11 @@ search, and a scriptable CLI into one fast, local toolkit.
 Windows · Linux · Experimental macOS
 { .platforms }
 
+macOS: drag the DMG’s app to Applications. Not Apple-notarized; a trusted
+download may need **Privacy & Security → Open Anyway** after trying to open it.
+[macOS setup and warning details](../docs/manual/macos.md).
+{ .hero-assurance }
+
 Open source · Read-only scanning · No model required
 { .hero-assurance }
 
@@ -210,6 +215,32 @@ the query before relying on the results.
 <span>files created last week</span>
 <span>images larger than 10 MB</span>
 <span>Your phrase → a query you can inspect</span>
+</div>
+
+</section>
+
+<section class="support-panel" markdown="1">
+
+<div markdown="1">
+
+<p class="eyebrow">BUILT WITH YOUR FEEDBACK</p>
+
+## Help shape Kosha.
+
+Report something that does not work, or suggest an improvement. A short guided
+form helps you share the details needed to investigate.
+
+[Report a bug ↗](https://github.com/coolnew/kosha/issues/new?template=bug_report.yml){ .button .primary }
+[Suggest a feature ↗](https://github.com/coolnew/kosha/issues/new?template=feature_request.yml){ .button .secondary }
+[Browse existing issues](https://github.com/coolnew/kosha/issues)
+
+</div>
+<div class="support-note" markdown="1">
+
+GitHub sign-in is required to submit. Reports are public: remove personal paths,
+file names and sensitive logs before sharing. Please report security concerns
+through our [private security contact](https://github.com/coolnew/kosha/security/policy).
+
 </div>
 
 </section>

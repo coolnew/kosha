@@ -104,6 +104,9 @@ table { display: block; max-width: 100%; overflow-x: auto; }
 .download-panel h2 { font-size: clamp(2.5rem, 5vw, 4rem); }
 .download-panel .platforms { margin-top: 1.5rem; }
 .trust-links { padding-top: 2.5rem; text-align: center; font-size: .85rem; }
+.support-panel { display: grid; grid-template-columns: 1.5fr 1fr; gap: 2rem; align-items: center; margin-bottom: 3rem; padding: 2rem; border: 1px solid var(--kosha-border); border-left: 4px solid var(--kosha-accent); border-radius: 12px; background: var(--kosha-surface); }
+.support-panel p:not(.eyebrow), .support-note { color: var(--kosha-muted); }
+.support-note { font-size: .85rem; }
 .trust-links .fine-print { margin-inline: auto; }
 footer { margin-top: 4rem; padding-block: 2.5rem; border-top: 1px solid var(--kosha-border); text-align: left; color: var(--kosha-muted); }
 .kosha-footer { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: .85rem; }
@@ -118,7 +121,7 @@ footer { margin-top: 4rem; padding-block: 2.5rem; border-top: 1px solid var(--ko
   .navbar .nav-link { font-size: .78rem; }
 }
 @media (max-width: 800px) {
-  .hero, .workflow-panel, .cli-section, .recipe-panel { grid-template-columns: 1fr; }
+  .hero, .workflow-panel, .cli-section, .recipe-panel, .support-panel { grid-template-columns: 1fr; }
   .hero { padding: 1.8rem 0 3rem; gap: 2.5rem; }
   .hero h1 { font-size: clamp(3rem, 9vw, 4.5rem); }
   .hero-preview { transform: none; }
