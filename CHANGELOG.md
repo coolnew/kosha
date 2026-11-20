@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Add guarded treemap context actions and delayed folder previews showing up
+  to six largest recorded children, with cancellable workers and a bounded
+  scan-specific cache.
 - Add file-list context actions and a platform Trash shortcut with background
   previews, confirmation, Read-write requirements and stale-scan guards.
 - Explain review-only cluster slack without promising automatic recovery, and

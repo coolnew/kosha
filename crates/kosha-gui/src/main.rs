@@ -41,6 +41,7 @@ mod snapshots;
 mod state;
 mod theme;
 mod treemap;
+mod treemap_preview;
 mod ui;
 mod window_chrome;
 

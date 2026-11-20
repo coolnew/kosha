@@ -33,6 +33,8 @@ application controls what happens after opening.
 The file-opening and entry context actions are additions after 0.10.7.
 You can also choose **Open with default application** from an entry's
 right-click menu; opening a file does not require Read-write mode.
+The same context actions are available on treemap rectangles. Pausing over a
+folder rectangle previews its largest recorded children without entering it.
 
 ![A synthetic Markdown search result on macOS with its Open with default application context action](images/gui-macos-file-open-menu.png)
 

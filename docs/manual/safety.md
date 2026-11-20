@@ -28,6 +28,10 @@ opens the same preview. Nothing is removed until you confirm the named plan.
 Preparing a preview runs in the background; Escape cancels it. A menu from an
 older scan cannot act on a replacement scan.
 
+Treemap rectangles offer the same guarded context actions. Right-click the
+specific rectangle you intend to act on; a nested rectangle targets its own
+file or folder. A folder action includes its contents, even in a filtered search.
+
 These entry context actions are additions after 0.10.7. The examples below use
 synthetic files on macOS. The same Read-write and confirmation requirements
 apply on Windows and Linux.

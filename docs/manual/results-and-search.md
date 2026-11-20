@@ -74,6 +74,22 @@ cloud placeholders, and unreadable entries when a caveat applies.
 
 ### Treemap, volume bars, and scan status
 
+In builds after 0.10.7, pause over a treemap rectangle to see its recorded
+on-disk/apparent sizes and, for a folder, up to six largest immediate children.
+The preview does not open or rescan the folder. **+N more** counts children not
+shown in the preview; **No children recorded** does not promise an unreadable
+folder is empty. Sizes retain the scan's access/scope limitations.
+
+![Folder hover preview showing six largest immediate children and three more](images/gui-macos-treemap-preview.png)
+
+Right-click a rectangle for the same **Open with default application** and
+**Move to Trash…** controls as the file list. A folder action covers that folder,
+including its contents, rather than only the matching rows of a search. Trash
+still requires a live scan, Read-write mode and confirmation of the named plan.
+Opening files uses the current file on disk; snapshots/images require a live scan.
+
+![Treemap context menu with Trash unavailable in Read-only mode](images/gui-macos-treemap-menu.png)
+
 The treemap uses allocated bytes. **+N smaller** counts entries pooled
 because their tiles would be too small. Volume bars show space used and
 available as reported by the OS. The status bar's **entries** includes files,

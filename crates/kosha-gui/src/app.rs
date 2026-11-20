@@ -80,6 +80,8 @@ struct ColumnDrag {
 }
 
 pub struct KoshaApp {
+    treemap_previews: crate::treemap_preview::Store,
+    entry_menu: Option<gpui_kit::EntityId>,
     planning_action: Option<gpui_kit::Task<()>>,
     state: State,
     /// Discards background results after another location is requested.
@@ -374,6 +376,8 @@ impl KoshaApp {
         let startup_snapshots = kosha_core::snapshot::store::list_all();
 
         KoshaApp {
+            treemap_previews: Default::default(),
+            entry_menu: None,
             planning_action: None,
             state,
             load_generation: 0,
@@ -5081,6 +5085,9 @@ impl KoshaApp {
         let tree = Arc::clone(&ready.tree);
         let selected = ready.selected;
 
+        let previews = self.treemap_previews.for_tree(&tree);
+        let show_preview = self.entry_menu.is_none();
+
         let cells: Vec<_> = layout
             .tiles
             .iter()
@@ -5203,6 +5210,25 @@ impl KoshaApp {
                             cx.notify();
                         }
                     }))
+                    .when(show_preview, |tile| {
+                        tile.tooltip({
+                            let tree = Arc::clone(&tree);
+                            let previews = Arc::clone(&previews);
+                            let palette = *palette;
+                            move |window, cx| {
+                                crate::treemap_preview::tooltip(
+                                    Arc::clone(&tree),
+                                    id,
+                                    Arc::clone(&previews),
+                                    palette,
+                                    units,
+                                    window,
+                                    cx,
+                                )
+                            }
+                        })
+                    })
+                    .context_menu(entry_context_menu(id, Arc::clone(&tree), cx))
             })
             .collect();
 
@@ -6367,6 +6393,33 @@ fn entry_context_menu(
                 && ready.tree.stats().strategy != kosha_core::Strategy::DiskImage
         });
         let writable = live && state.state.mode().is_read_write();
+        // The tooltip layer paints above popups. Remove preview owners while
+        // an entry menu is open, including delayed previews not yet visible.
+        let menu_id = cx.entity_id();
+        view.update(cx, |app, cx| {
+            app.entry_menu = Some(menu_id);
+            cx.notify();
+        });
+        let dismissed = app.clone();
+        cx.subscribe(&cx.entity(), move |_, _, _: &gpui_kit::DismissEvent, cx| {
+            let _ = dismissed.update(cx, |app, cx| {
+                if app.entry_menu == Some(menu_id) {
+                    app.entry_menu = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        let released = app.clone();
+        cx.on_release(move |_, cx| {
+            let _ = released.update(cx, |app, cx| {
+                if app.entry_menu == Some(menu_id) {
+                    app.entry_menu = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         let opening = view.clone();
         let opened_tree = Arc::clone(&tree);
         let trashing = view.clone();
