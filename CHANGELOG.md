@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.10.9] — 2026-11-20
 
 ### Desktop workflow improvements
