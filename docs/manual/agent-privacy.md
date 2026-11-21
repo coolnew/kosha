@@ -124,11 +124,11 @@ These are background references, not tested Kosha launch recipes or a promise
 that every agent works in a particular sandbox. Verify the exact environment's
 behavior before relying on it to protect sensitive data.
 
-## Scoped metadata tools in development source
+## Scoped metadata tools in 0.12.0
 
-[Issue #10](https://github.com/coolnew/kosha/issues/10) tracks this work. Development
-source after 0.11.0 now implements the first CLI slice; **published 0.11.0 binaries
-do not include it**. Check `kosha view --help` in your installed build.
+[Issue #10](https://github.com/coolnew/kosha/issues/10) tracks this work. Kosha
+0.12.0 implements the first CLI slice; earlier binaries do not include it.
+Check `kosha view --help` in your installed build.
 
 - **Owner-approved metadata views:** select a recorded subtree and date fields, remove excluded
   data from the actual artifact, replace private root paths with a chosen label,

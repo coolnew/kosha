@@ -93,9 +93,9 @@ If you give an agent a snapshot, every recorded entry in that artifact is
 available to it; existing snapshots are not automatically redacted. Stronger
 privacy requires controlling the agent's execution environment and sharing only
 approved inputs. See [agent access and privacy](docs/manual/agent-privacy.md) for
-current behavior, snapshot handoff and the distinction from proposed features.
+current behavior, snapshot handoff and the limits of scoped metadata tools.
 
-Development source after 0.11.0 adds owner-published metadata views. Their new
+Kosha 0.12.0 adds owner-published metadata views. Their new
 artifacts contain only the selected recorded entries, a chosen root alias,
 mandatory sizes/types and source observation/coverage qualifiers; file dates
 are optional and owners/original source paths are omitted. The publisher reads

@@ -1,6 +1,6 @@
 # Share an approved metadata view
 
-**Development source after 0.11.0; not included in the published 0.11.0 binaries.**
+**Available starting with Kosha 0.12.0. Earlier binaries do not include these commands.**
 Check `kosha view --help` in your installed build. These tools are currently CLI
 only. They complement an isolated agent runtime; they do not create one. Read
 [agent access and privacy](agent-privacy.md) before delegating filesystem tools.

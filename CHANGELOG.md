@@ -1,21 +1,53 @@
 # Changelog
 
-## [Unreleased]
+## [0.12.0] — 2026-11-21
 
-### Delegated metadata views
+### Share selected metadata with coding agents
 
-- Add `kosha view`: owner-side preview and SHA-256-bound, no-clobber publication
-  of a selected snapshot subtree with an alias and optional file dates.
-- Physically omit unshared metadata and recompute totals from shared entries;
-  retain historical coverage and measured-versus-estimated allocation qualifiers.
-- Add inert view queries and a fixed-view JSONL session with allowlisted
-  operations and structured refusals. These are cooperative controls, not an
-  agent sandbox. GUI publication and live folder grants are not included.
+Kosha 0.12.0 adds `kosha view`: publish an explicitly chosen snapshot subtree as
+a separate `.koshaview` artifact, then query that approved historical subset.
+Excluded entries, original root paths, snapshot labels, owners and unused source
+buffers are physically omitted. Choose a portable root alias; file dates are
+opt-in. Directory totals are recomputed from the shared non-directory entries.
 
-### Documentation
+### Preview, approve and query
 
-- Explain agent access and privacy, current snapshot-sharing limits and proposed
-  metadata views, with a visible homepage guide and agent quickstart guidance.
+- Preview before publishing. Confirmation must match the exact preview's
+  SHA-256; changed views are refused and existing destinations are preserved.
+- Inspect a view or search it with DSL or built-in natural-language translation.
+  Results retain observation time, selected scope, interruption/read-error
+  qualifiers and measured-versus-estimated allocated sizes.
+- Use a fixed-view JSONL session for automation. Only inspect, describe, query
+  and close are supported; requests cannot change source, scan, load personal
+  recipes, hash contents, manage marketplace packs or write files.
+- Strict schema, graph, size and request limits reject malformed artifacts and
+  unsupported fields with structured errors. Unshared metadata stays unavailable.
+
+See the [metadata-view workflow and protocol](https://coolnew.github.io/kosha/manual/metadata-views/)
+and [agent privacy guide](https://coolnew.github.io/kosha/manual/agent-privacy/).
+
+### Scope and limitations
+
+This completes the agreed CLI scope of issue #10. These controls govern the
+approved metadata view; they do not sandbox an unrestricted parent agent.
+Contain the whole agent/runtime and its other tools when confidentiality matters.
+Ordinary CLI exports, snapshot saves and marketplace management retain their
+separate write capabilities. Existing `.kosha` snapshots remain whole records.
+
+GUI publication, confined live traversal, cross-view comparison and OS launchers
+remain follow-ups; issue #10 stays open. Views are plaintext metadata, not
+encrypted records or authentication tokens. The format currently allows up to
+250,000 entries and 64 MiB; unsupported folded-hardlink accounting is refused.
+
+### Downloads
+
+Windows portable ZIP and offline Setup contain static-CRT CLI/GUI binaries;
+the unsigned Store-upload MSIX is for Partner Center. Linux archives and the
+Apple Silicon DMG include CLI/GUI and offline documentation. Source archives,
+manifests and SHA-256 files are separate assets. Windows packages remain
+unsigned; macOS is experimental and ad-hoc signed without Developer ID or
+notarization. Follow the [macOS installation guide](https://coolnew.github.io/kosha/manual/macos/).
+This GitHub release does not submit an app to Microsoft Store.
 
 ## [0.11.0] — 2026-11-21
 
@@ -479,7 +511,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.12.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -504,3 +536,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.9]: https://github.com/coolnew/kosha/releases/tag/v0.10.9
 
 [0.11.0]: https://github.com/coolnew/kosha/releases/tag/v0.11.0
+
+[0.12.0]: https://github.com/coolnew/kosha/releases/tag/v0.12.0
