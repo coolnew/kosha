@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.11.0] — 2026-11-20
+## [0.11.0] — 2026-11-21
 
 ### Cleanup guidance for the workflows on your disk
 
