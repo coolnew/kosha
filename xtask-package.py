@@ -78,7 +78,7 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
     roots.update({"xtask-windows.py", "xtask-installer.py", "test_windows_distribution.py",
                   "installer/setup.nsi.in", "xtask-nsis.py"})
     roots.update({".github/ISSUE_TEMPLATE/bug_report.yml", ".github/ISSUE_TEMPLATE/feature_request.yml",
-                  ".github/ISSUE_TEMPLATE/config.yml"})
+                  ".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/scanning_sources.yml"})
     roots.update({"xtask-ci.py", "test_xtask_ci.py", "xtask-coverage.py",
                   "xtask-ci-evidence.py", "test_xtask_ci_evidence.py",
                   "test_xtask_coverage.py", "xtask-docs.py", "test_xtask_docs.py",
