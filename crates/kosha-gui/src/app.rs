@@ -36,7 +36,7 @@ use gpui_kit::{
 
 use kosha_analyze::{Confidence, Insight, Suggested};
 use kosha_core::{NodeId, Progress, Scanner, SizeTree, format};
-use kosha_fsops::{Action, ActionPlan, AuditLog};
+use kosha_fsops::{Action, ActionPlan, AuditLog, CloudConfirmed};
 
 use crate::columns::Column;
 use crate::commands;
@@ -3352,6 +3352,7 @@ impl KoshaApp {
                             title,
                             plan,
                             preview,
+                            tree: checked,
                         }
                     })
                     .await;
@@ -3435,10 +3436,12 @@ impl KoshaApp {
 
         let plan = ActionPlan::build(&ready.tree, &insight.nodes, action, &self.state.session);
         let preview = plan.dry_run();
+        let tree = Arc::clone(&ready.tree);
         self.state.pending = Some(PendingAction {
             title: insight.title.clone(),
             plan,
             preview,
+            tree,
         });
         cx.notify();
     }
@@ -3480,13 +3483,51 @@ impl KoshaApp {
     }
 
     pub(crate) fn confirm_action(&mut self, cx: &mut Context<Self>) {
+        self.run_pending(false, cx);
+    }
+
+    /// The button that names the cloud-only files was pressed. The one place
+    /// a `CloudConfirmed` is constructed.
+    pub(crate) fn confirm_action_including_cloud(&mut self, cx: &mut Context<Self>) {
+        self.run_pending(true, cx);
+    }
+
+    /// "Skip cloud-only items": rebuild the plan without them and show its own
+    /// preview. Nothing runs until that preview is confirmed in turn.
+    pub(crate) fn skip_cloud_only(&mut self, cx: &mut Context<Self>) {
+        let Some(pending) = self.state.pending.take() else {
+            return;
+        };
+        let plan = pending
+            .plan
+            .without_cloud_only(&pending.tree, &self.state.session);
+        let preview = plan.dry_run();
+        self.state.pending = Some(PendingAction {
+            title: pending.title,
+            plan,
+            preview,
+            tree: pending.tree,
+        });
+        cx.notify();
+    }
+
+    fn run_pending(&mut self, including_cloud: bool, cx: &mut Context<Self>) {
         let Some(pending) = self.state.pending.take() else {
             return;
         };
 
         let mut audit = AuditLog::open_default();
+        let warning = pending.plan.cloud_warning();
         let report = match self.state.session.grant() {
-            Ok(grant) => pending.plan.execute(&grant, &mut audit),
+            Ok(grant) => match (including_cloud, warning) {
+                (true, Some(warning)) => {
+                    let confirmed = CloudConfirmed::from_dialog_acceptance(&warning);
+                    pending
+                        .plan
+                        .execute_including_cloud(&grant, &confirmed, &mut audit)
+                }
+                _ => pending.plan.execute(&grant, &mut audit),
+            },
             Err(error) => {
                 self.state.notice = Some(error.to_string());
                 cx.notify();

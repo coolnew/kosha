@@ -1098,6 +1098,9 @@ pub struct PendingAction {
     pub title: String,
     pub plan: kosha_fsops::ActionPlan,
     pub preview: kosha_fsops::ExecutionReport,
+    /// The tree the plan was built from, so "Skip cloud-only items" can
+    /// rebuild it against the same scan.
+    pub tree: Arc<SizeTree>,
 }
 
 impl State {

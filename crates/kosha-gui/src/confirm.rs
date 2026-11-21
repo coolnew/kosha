@@ -149,6 +149,23 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
         .map(SharedString::from)
         .collect();
 
+    // Files stored only in the cloud. Every word comes from `kosha-fsops`, so
+    // this dialog can draw the warning but cannot leave it out or reword it,
+    // and the plan will not run without the token only its button makes. An
+    // ordinary plan has no warning and this adds nothing to the dialog.
+    let cloud = plan.cloud_warning();
+    let cloud_title: Option<SharedString> = cloud
+        .as_ref()
+        .map(|w| SharedString::from(w.title().to_string()));
+    let cloud_body: Option<SharedString> = cloud
+        .as_ref()
+        .map(|w| SharedString::from(w.body().to_string()));
+    let cloud_confirm: Option<SharedString> = cloud
+        .as_ref()
+        .map(|w| SharedString::from(w.confirm_label().to_string()));
+    let cloud_skip: Option<&'static str> = cloud.as_ref().and_then(|w| w.skip_label());
+    let ordinary = cloud_confirm.is_none();
+
     Some(
         ui::scrim("confirm-scrim", palette)
             .items_center()
@@ -219,6 +236,19 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                 .child("This cannot be undone from the trash."),
                         )
                     })
+                    .when_some(cloud_title, |this, title| {
+                        this.child(
+                            v_flex()
+                                .gap(px(4.0))
+                                .p(px(8.0))
+                                .rounded(px(metrics::RADIUS_SM))
+                                .bg(palette.danger.opacity(0.14))
+                                .text_color(palette.danger)
+                                .text_size(px(metrics::TEXT_SM))
+                                .child(title)
+                                .children(cloud_body),
+                        )
+                    })
                     .child(
                         v_flex()
                             .id("confirm-paths")
@@ -264,16 +294,36 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                     .child("Cancel")
                                     .on_click(cx.listener(|this, _, _, cx| this.cancel_action(cx))),
                             )
-                            .child(
-                                ui::primary("confirm-go", palette, irreversible)
-                                    .child(SharedString::from(format!(
-                                        "{verb} {}",
-                                        format::plural(preview.succeeded, "item")
-                                    )))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.confirm_action(cx)),
-                                    ),
-                            ),
+                            .when_some(cloud_skip, |this, label| {
+                                this.child(
+                                    ui::button("confirm-skip-cloud", palette)
+                                        .child(label)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.skip_cloud_only(cx)),
+                                        ),
+                                )
+                            })
+                            .when_some(cloud_confirm, |this, label| {
+                                this.child(
+                                    ui::primary("confirm-go-cloud", palette, true)
+                                        .child(label)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.confirm_action_including_cloud(cx)
+                                        })),
+                                )
+                            })
+                            .when(ordinary, |this| {
+                                this.child(
+                                    ui::primary("confirm-go", palette, irreversible)
+                                        .child(SharedString::from(format!(
+                                            "{verb} {}",
+                                            format::plural(preview.succeeded, "item")
+                                        )))
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.confirm_action(cx)),
+                                        ),
+                                )
+                            }),
                     ),
             )
             .into_any_element(),
