@@ -4,6 +4,67 @@
 
 Nothing yet.
 
+## [0.12.2] — 2026-11-21
+
+### Warning before moving cloud-only files to the Trash
+
+Sync apps such as OneDrive, Google Drive, iCloud Drive and Dropbox normally treat
+a local delete as a delete, so moving a file out of a synced folder can remove the
+online copy too. For a file whose data is stored only in the cloud, the local
+placeholder is the handle for what may be the only copy.
+
+When a Trash or permanent-delete plan includes files that your operating system
+marks as stored in the cloud, Kosha now says so before anything happens:
+
+- The confirmation names how many files are stored in the cloud, and explains that
+  moving them to the Trash usually deletes the online copies too and that they may
+  be the only copies.
+- The ordinary confirm button is replaced by one that names the count, such as
+  "Move everything, including 3 cloud-only files". Nothing in the plan runs
+  without it.
+- "Skip cloud-only items" removes them from the plan and acts only on the rest,
+  where something else would remain. Emptying a folder's contents has no skip.
+- The audit log records the number of cloud-only files and whether you confirmed.
+- Folders and files with no such marker see no change.
+
+The marker is the one the operating system sets on a placeholder, never a folder
+name. Files that are already downloaded in a synced folder carry no marker and get
+no warning: deleting them can still delete the online copy, so keep Read-only mode
+for synced folders you do not intend to clean and free space with the provider's
+own "free up space" or "online only" option. On Windows, files moved to tape or an
+archive use the same marker and are described the same way. Linux sets no marker.
+
+### Safer handling of names in snapshots from another system
+
+A `.kosha` snapshot records file names exactly as the system that took it stored
+them. Linux allows names that are not valid text; Windows cannot represent some of
+them. Opening such a snapshot on Windows, or opening a damaged or crafted record,
+could previously break an internal safety rule that Kosha relies on to read names.
+Names are now checked once, when a record is opened. A name your system cannot
+represent is shown with the replacement character, counted, and reported in the
+app notice or in a `note:` line on the command line. Every name that is valid on
+your system is kept exactly, and folder sizes and structure are unchanged. A
+comparison may report an affected entry as gone and new, and a metadata view
+refuses to share a replaced name. Upgrade if you open snapshots recorded on another
+operating system.
+
+### Release pages carry these notes
+
+The GitHub release page for each version is now built from the changelog section
+for that version, followed by the downloads and limitations text. Earlier releases
+that were published without this show only the generic downloads text.
+
+### Limitations
+
+The new Trash confirmation was checked in the Windows desktop app on synthetic
+placeholder files, and the snapshot fix was checked by opening a snapshot recorded
+on Linux with the Windows and macOS builds. It has not been checked on real provider
+placeholders or in the macOS app, and Google Drive for desktop has not been verified.
+After "Skip cloud-only items" the dialog title still names the original folder even
+though only the remaining items would move; the listed items are what runs. Kosha
+still does not scan cloud accounts; it scans the local folder your sync app
+presents. Refs #12, which stays open.
+
 ## [0.12.2-rc.1] — 2026-11-21
 
 ### Warning before moving cloud-only files to the Trash
@@ -662,7 +723,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.12.2-rc.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.12.2...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -695,3 +756,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.12.1]: https://github.com/coolnew/kosha/releases/tag/v0.12.1
 
 [0.12.2-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.12.2-rc.1
+
+[0.12.2]: https://github.com/coolnew/kosha/releases/tag/v0.12.2
