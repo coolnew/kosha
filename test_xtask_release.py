@@ -741,5 +741,84 @@ class ReleaseAssetTests(unittest.TestCase):
                     release.verify_release_assets(root, self.commit)
 
 
+class ReleaseBodyTests(unittest.TestCase):
+    TEXT = (
+        "# Changelog\n\n## [Unreleased]\n\nNothing yet.\n\n"
+        "## [0.12.1] — 2026-11-21\n\n### Fixed\n\nFinal note.\n\n"
+        "## [0.12.1-rc.1] — 2026-11-21\n\nRC note.\n\n"
+        "## [0.12.0] — 2026-11-20\n\nOlder.\n\n"
+        "[Unreleased]: https://example.test/u\n[0.12.0]: https://example.test/0\n")
+
+    def test_section_extraction_stops_at_next_heading_and_handles_rc(self):
+        self.assertEqual(release.changelog_section(self.TEXT, "0.12.1"), "### Fixed\n\nFinal note.")
+        self.assertEqual(release.changelog_section(self.TEXT, "0.12.1-rc.1"), "RC note.")
+        self.assertEqual(release.changelog_section(self.TEXT, "0.12.0"), "Older.")
+        self.assertEqual(release.changelog_section(self.TEXT.replace("\n", "\r\n"), "0.12.0"), "Older.")
+
+    def test_missing_empty_or_duplicate_sections_are_rejected(self):
+        for text, version in [(self.TEXT, "0.9.9"), (self.TEXT, "0.12"), ("## [1.0.0]\n\n## [0.9.0]\n\nx\n", "1.0.0"),
+                              ("## [1.0.0]\n\n[1.0.0]: https://example.test\n", "1.0.0"),
+                              ("## [1.0.0]\n\na\n\n## [1.0.0]\n\nb\n", "1.0.0")]:
+            with self.subTest(text=text, version=version), self.assertRaises(ValueError):
+                release.changelog_section(text, version)
+
+    def test_regular_body_has_downloads_links_and_no_preview_or_draft_sentences(self):
+        body = release.release_body("0.12.1", self.TEXT, "regular", "v0.12.1", "v0.12.0")
+        self.assertTrue(body.startswith("### Fixed\n\nFinal note.\n\n### Downloads and verification\n"))
+        self.assertNotIn("RC note", body)
+        self.assertIn("unsigned Partner Center", body)
+        self.assertIn("ad-hoc bundle seal", body)
+        self.assertIn("assets/README.md", body)
+        for stale in ["remain drafts", "pre-release", "Numbered alpha"]:
+            self.assertNotIn(stale, body)
+        self.assertTrue(body.endswith(
+            "[Full changelog](https://github.com/coolnew/kosha/blob/v0.12.1/CHANGELOG.md) · "
+            "[Compare](https://github.com/coolnew/kosha/compare/v0.12.0...v0.12.1) · "
+            "[User manual](https://coolnew.github.io/kosha/manual/)\n"))
+
+    def test_preview_body_states_testing_channel_and_compare_can_be_omitted(self):
+        body = release.release_body("0.12.1-rc.1", self.TEXT, "preview", "v0.12.1-rc.1", None)
+        self.assertIn("numbered testing pre-release", body)
+        self.assertIn("never marked Latest", body)
+        self.assertIn("no Store MSIX", body)
+        self.assertNotIn("[Compare]", body)
+        self.assertNotIn("Partner Center", body)
+
+    def test_channel_tag_and_version_must_agree(self):
+        for args in [("0.12.1", "preview", "v0.12.1"), ("0.12.1-rc.1", "regular", "v0.12.1-rc.1"),
+                     ("0.12.1", "regular", "v0.12.0"), ("0.12.1", "other", "v0.12.1")]:
+            with self.subTest(args=args), self.assertRaises(ValueError):
+                release.release_body(args[0], self.TEXT, args[1], args[2])
+
+    def test_previous_tag_choice(self):
+        tags = ["v0.11.0", "v0.12.0", "v0.12.1-rc.1", "v0.12.1-rc.2", "v0.12.1", "v0.13.0-rc.1", "junk", "v0.12.1-x"]
+        self.assertEqual(release.previous_release_tag("v0.12.1", tags), "v0.12.0")
+        self.assertEqual(release.previous_release_tag("v0.12.1-rc.2", tags), "v0.12.1-rc.1")
+        self.assertEqual(release.previous_release_tag("v0.12.1-rc.1", tags), "v0.12.0")
+        self.assertEqual(release.previous_release_tag("v0.13.0-rc.1", tags), "v0.12.1")
+        self.assertIsNone(release.previous_release_tag("v0.11.0", ["v0.11.0"]))
+
+    def test_write_release_body_reads_the_tagged_checkout_and_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            git(root, "init", "-q")
+            for name in ["v0.12.0", "v0.12.1"]:
+                git(root, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", name)
+                git(root, "tag", name)
+            (root / "CHANGELOG.md").write_text(self.TEXT, encoding="utf-8", newline="\n")
+            out = release.write_release_body(root, "v0.12.1", root / "target/body.md")
+            text = out.read_bytes().decode("utf-8")
+            self.assertIn("Final note.", text)
+            self.assertIn("compare/v0.12.0...v0.12.1", text)
+            self.assertNotIn("\r", text)
+            with self.assertRaises(ValueError):
+                release.write_release_body(root, "v0.9.9", root / "target/other.md")
+            self.assertFalse((root / "target/other.md").exists())
+
+    def test_real_changelog_has_a_body_for_the_current_version(self):
+        text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertTrue(release.changelog_section(text, "0.12.1"))
+
+
 if __name__ == "__main__":
     unittest.main()

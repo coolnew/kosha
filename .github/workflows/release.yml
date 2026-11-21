@@ -262,6 +262,14 @@ jobs:
           import os, runpy
           runpy.run_path("xtask-release.py")["require_unpublished_release"](os.environ["GITHUB_REF_NAME"])
           PY
+      - name: Build release notes from the changelog section
+        run: |
+          python3 - <<'PY'
+          import os, runpy, subprocess
+          from pathlib import Path
+          subprocess.run(["git", "fetch", "--tags", "--force", "--quiet", "origin"], check=True)
+          runpy.run_path("xtask-release.py")["write_release_body"](Path("."), os.environ["GITHUB_REF_NAME"], Path("target/release-body.md"))
+          PY
       - uses: softprops/action-gh-release@v3
         id: upload
         with:
@@ -270,28 +278,7 @@ jobs:
           make_latest: 'false'
           fail_on_unmatched_files: true
           files: target/release-artifacts/*
-          generate_release_notes: true
-          body: |
-            Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
-            manuals, SHA-256 sidecars, and a manifest for each host build.
-            Both executables report their version, commit, and target with `--version`.
-            Windows includes a portable ZIP and an offline NSIS Setup EXE with
-            per-user/all-users scope and optional PATH integration. Both use
-            static-CRT binaries with no Visual C++ Redistributable prerequisite.
-
-            When included, `*-x64-store-upload.msix` is an unsigned Partner Center
-            submission package, not a directly installable consumer download.
-            It retains the registered Store identity and restricted capabilities;
-            Microsoft certification/approval is separate from this build.
-
-            Windows binaries are unsigned and SmartScreen may warn. The macOS app
-            has an ad-hoc bundle seal, but no Developer ID signature or notarization;
-            macOS is experimental and Gatekeeper may block downloaded apps.
-            Linux desktop prerequisites and integration are described in `assets/README.md`.
-            Numbered alpha/beta/rc previews publish after automated checks, never as Latest.
-            Preview builds omit Store MSIX. Native interaction and issue confirmation
-            may still be pending; a pre-release is for testing, not proof of resolution.
-            Suffix-free releases remain drafts for maintainer review.
+          body_path: target/release-body.md
       - name: Verify uploaded inventory before publication
         env:
           RELEASE_ID: ${{ steps.upload.outputs.id }}

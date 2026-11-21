@@ -243,6 +243,120 @@ def updated_changelog(text: str, version: str, notes: str, today: str) -> str:
     return result
 
 
+REPOSITORY_URL = "https://github.com/coolnew/kosha"
+MANUAL_URL = "https://coolnew.github.io/kosha/manual/"
+
+
+def changelog_section(text: str, version: str) -> str:
+    """Return the body of the `## [version]` section; reject a missing or empty one.
+
+    Line-based on purpose: the section ends at the next `## ` heading (never at
+    `### `), and trailing link-reference definitions are not part of the notes.
+    """
+    semver_key(version)
+    heading = re.compile(r"## \[?" + re.escape(version) + r"(?:\]|\s|$)")
+    lines = text.replace("\r\n", "\n").split("\n")
+    starts = [i for i, line in enumerate(lines) if heading.match(line)]
+    if len(starts) != 1:
+        raise ValueError(f"CHANGELOG.md needs exactly one section for {version}")
+    body: list[str] = []
+    for line in lines[starts[0] + 1:]:
+        if line.startswith("## "):
+            break
+        body.append(line)
+    while body and (not body[-1].strip() or re.match(r"\[[^\]]+\]:\s", body[-1])):
+        body.pop()
+    result = "\n".join(body).strip("\n")
+    if not result.strip():
+        raise ValueError(f"CHANGELOG.md section for {version} is empty")
+    return result
+
+
+def previous_release_tag(tag: str, tags: list[str]) -> str | None:
+    """Previous regular tag for a final, previous tag of any kind for a preview."""
+    version = tag.removeprefix("v")
+    key = semver_key(version)
+    final = not is_prerelease(version)
+    best = None
+    for other in tags:
+        if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", other):
+            continue
+        other_key = semver_key(other[1:])
+        if other_key >= key or (final and not other_key[1]):
+            continue
+        if best is None or other_key > semver_key(best[1:]):
+            best = other
+    return best
+
+
+DOWNLOADS_REGULAR = """### Downloads and verification
+
+Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
+manuals, SHA-256 sidecars, and a manifest for each host build.
+Both executables report their version, commit, and target with `--version`.
+Windows includes a portable ZIP and an offline NSIS Setup EXE with
+per-user/all-users scope and optional PATH integration. Both use
+static-CRT binaries with no Visual C++ Redistributable prerequisite.
+
+When included, `*-x64-store-upload.msix` is an unsigned Partner Center
+submission package, not a directly installable consumer download.
+It retains the registered Store identity and restricted capabilities;
+Microsoft certification/approval is separate from this build.
+
+Windows binaries are unsigned and SmartScreen may warn. The macOS app
+has an ad-hoc bundle seal, but no Developer ID signature or notarization;
+macOS is experimental and Gatekeeper may block downloaded apps.
+Linux desktop prerequisites and integration are described in `assets/README.md`."""
+
+DOWNLOADS_PREVIEW = """### Downloads and verification
+
+This is a numbered testing pre-release. It is never marked Latest and
+contains no Store MSIX package. Native interaction testing and issue
+confirmation may still be pending; a pre-release is for testing, not proof
+of resolution.
+
+Includes `kosha` (CLI), `kosha-gui` (desktop), source archives, offline
+manuals, SHA-256 sidecars, and a manifest for each host build.
+Both executables report their version, commit, and target with `--version`.
+Windows includes a portable ZIP and an offline NSIS Setup EXE with
+per-user/all-users scope and optional PATH integration. Both use
+static-CRT binaries with no Visual C++ Redistributable prerequisite.
+
+Windows binaries are unsigned and SmartScreen may warn. The macOS app
+has an ad-hoc bundle seal, but no Developer ID signature or notarization;
+macOS is experimental and Gatekeeper may block downloaded apps.
+Linux desktop prerequisites and integration are described in `assets/README.md`."""
+
+
+def release_body(version: str, changelog_text: str, channel: str, tag: str,
+                 previous_tag: str | None = None) -> str:
+    """Build a release body: changelog section, downloads text and links; pure."""
+    if channel not in {"regular", "preview"}:
+        raise ValueError("Channel must be regular or preview")
+    if tag != "v" + version or (channel == "preview") != is_prerelease(version):
+        raise ValueError("Tag, version and channel disagree")
+    section = changelog_section(changelog_text, version)
+    links = [f"[Full changelog]({REPOSITORY_URL}/blob/{tag}/CHANGELOG.md)"]
+    if previous_tag:
+        links.append(f"[Compare]({REPOSITORY_URL}/compare/{previous_tag}...{tag})")
+    links.append(f"[User manual]({MANUAL_URL})")
+    downloads = DOWNLOADS_PREVIEW if channel == "preview" else DOWNLOADS_REGULAR
+    return section + "\n\n" + downloads + "\n\n" + " · ".join(links) + "\n"
+
+
+def write_release_body(root: Path, tag: str, out: Path) -> Path:
+    """Workflow step: build the body for a tagged checkout; fail on a bad section."""
+    version = tag.removeprefix("v")
+    channel = "preview" if github_release_policy(version)["prerelease"] else "regular"
+    tags = subprocess.run(["git", "tag", "--list", "v*"], cwd=root, check=True,
+                          capture_output=True, text=True).stdout.split()
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    body = release_body(version, text, channel, tag, previous_release_tag(tag, tags))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(body, encoding="utf-8", newline="\n")
+    return out
+
+
 def preparation(root: Path, version: str, notes: str, today: str) -> dict[str, bytes]:
     manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
     workspace = manifest["workspace"]
