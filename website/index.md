@@ -186,10 +186,40 @@ toolkit interactively or give your coding agent a concise CLI guide.
 [Explore the CLI →](../docs/manual/command-line.md){ .button .primary }
 [Read the agent guide](../LLMS.md){ .button .secondary }
 
+Using an agent? [Understand its access and privacy boundaries →](../docs/manual/agent-privacy.md)
+
 </div>
 <div class="cli-preview" markdown="1">
 
 ![Kosha CLI showing disk analysis and structured output for automation](../docs/manual/images/cli-agent-dark.png)
+
+</div>
+
+</section>
+
+<section class="support-panel" id="agent-privacy" aria-labelledby="agent-privacy-heading" markdown="1">
+
+<div markdown="1">
+
+<p class="eyebrow">AGENT ACCESS &amp; PRIVACY</p>
+
+<h2 id="agent-privacy-heading">Choose what your agent can see.</h2>
+
+Kosha runs with the access granted to its process. Read-only scanning still
+reveals metadata; Kosha does not sandbox an agent running under your account.
+Contain the agent and its tools, and share only the workspace or recorded
+metadata you intend it to inspect.
+
+[Read the agent privacy guide →](../docs/manual/agent-privacy.md){ .button .primary }
+
+</div>
+<div class="support-note" markdown="1">
+
+**Available today:** search a deliberately shared snapshot without rescanning
+its original folder. The entire snapshot remains readable to its recipient.
+
+**Under design:** owner-approved metadata views and explicit scope for
+cooperative automation. These are not isolation features available in 0.11.0.
 
 </div>
 
@@ -264,6 +294,7 @@ Windows · Linux · Experimental macOS · MIT OR Apache-2.0
 <div class="trust-links" markdown="1">
 
 [Safety and privacy](../docs/manual/safety.md) ·
+[Agent access and privacy](../docs/manual/agent-privacy.md) ·
 [Tests and quality](../docs/manual/quality-and-coverage.md) ·
 [Measured coverage](https://coolnew.github.io/kosha/coverage/) ·
 [Source on GitHub](https://github.com/coolnew/kosha)

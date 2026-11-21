@@ -28,6 +28,7 @@ scanning, queries, exports, and comparisons.
 19. [Install and run on macOS](macos.md)
 20. [Use and author review-only insight packs](insight-packs.md)
 21. [Workflow cleanup guide and AI handoff](cleanup-guide.md)
+22. [Using Kosha with agents: access and privacy](agent-privacy.md)
 
 These pages describe the current source version. An older installed release
 may have different controls. Include your version when reporting a problem.

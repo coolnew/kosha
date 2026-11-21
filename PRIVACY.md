@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective date: 20 November 2026**
+**Effective date: 21 November 2026**
 
 This policy covers the official Kosha CLI (`kosha`), desktop app (`kosha-gui`,
 also named **KoshaApp** in Microsoft Store packaging), and the Kosha website.
@@ -76,6 +76,20 @@ them with your operating-system account permissions, device encryption, and
 backup controls. Other users or software with access to those locations may be
 able to read them. Saving to a shared drive, or using OS backup/cloud-sync
 software, can copy data elsewhere under your chosen provider's policies.
+
+## Agents and access boundaries
+
+Kosha uses the OS permissions available to its process. It does not identify AI
+callers or enforce per-agent folder grants. An agent running with unrestricted
+access under your account can use Kosha or other tools to inspect accessible
+files. Read-only scanning does not make names, paths or other metadata private.
+Query filters select results; they do not confine the underlying scan.
+
+If you give an agent a snapshot, every recorded entry in that artifact is
+available to it; existing snapshots are not automatically redacted. Stronger
+privacy requires controlling the agent's execution environment and sharing only
+approved inputs. See [agent access and privacy](docs/manual/agent-privacy.md) for
+current behavior, snapshot handoff and the distinction from proposed features.
 
 ## Optional marketplace network requests
 

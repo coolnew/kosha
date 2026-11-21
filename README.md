@@ -87,6 +87,12 @@ and inspect whether the result is incomplete or access-limited. JSON exports
 carry integer byte sizes and coverage metadata. Data goes to stdout and
 diagnostics to stderr, so pipelines can consume results without scraping a UI.
 
+**Agent access and privacy:** Kosha uses the permissions of its process; it does
+not sandbox an agent running under your account. Query filters do not restrict
+what a scan reads. Isolate the agent and share only deliberately approved inputs;
+an existing snapshot is not a redacted view. Read the
+[agent privacy guide](https://coolnew.github.io/kosha/manual/agent-privacy/).
+
 ![Kosha CLI explaining a query without opening a source, then exporting matches with incomplete, access-limited, and lower-bound flags](docs/manual/images/cli-agent-dark.png)
 
 *Real JSON with selected fields and the first matching entry shown. The full

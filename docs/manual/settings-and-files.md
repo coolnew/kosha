@@ -3,6 +3,9 @@
 The [privacy policy](../../PRIVACY.md) explains local filesystem information,
 optional marketplace requests, website services, and support information.
 
+For agents and automation, also read [agent access and privacy](agent-privacy.md).
+Read-only scanning does not isolate an agent or hide filesystem metadata from it.
+
 ## Preferences
 
 Open the gear control or find **Settings** in the palette. Preferences include

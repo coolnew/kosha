@@ -2,7 +2,10 @@
 
 ## [Unreleased]
 
-Nothing yet.
+### Documentation
+
+- Explain agent access and privacy, current snapshot-sharing limits and proposed
+  metadata views, with a visible homepage guide and agent quickstart guidance.
 
 ## [0.11.0] — 2026-11-21
 

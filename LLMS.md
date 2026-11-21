@@ -4,6 +4,13 @@
 > (`kosha.exe` on Windows) from any directory; no repository checkout or model
 > service is required. The separate desktop app is `kosha-gui`.
 
+**Access and privacy:** Kosha uses its process's OS permissions; it does not
+sandbox an agent or enforce per-agent folder grants. Query filters do not limit
+what a scan reads. Contain the whole agent/runtime and expose only deliberately
+approved inputs. A snapshot is historical metadata, not a redacted view; its
+recipient can read all recorded entries. See the
+[agent privacy guide](https://coolnew.github.io/kosha/manual/agent-privacy/).
+
 ## Discover and run
 
 Use installed help as the authority for the available version:

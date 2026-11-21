@@ -1,5 +1,9 @@
 # Command-line guide
 
+Using the CLI through an agent? Read [agent access and privacy](agent-privacy.md).
+Kosha uses the process's OS permissions; a scan path or query filter is not a
+per-agent access restriction.
+
 For owning-tool advice on recorded workflow locations, use
 `kosha "PATH" --cleanup-guide`. It does not execute cleanup; see
 [the cleanup guide](cleanup-guide.md) for supported locations and limitations.
