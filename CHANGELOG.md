@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.12.0] — 2026-11-21
 
 ### Share selected metadata with coding agents
