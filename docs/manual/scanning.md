@@ -40,9 +40,20 @@ sizes and report how many files were skipped, because reading a file would
 download it. The same applies to fragmentation checks.
 
 Deleting a placeholder can delete the only copy, because the local entry is the
-handle for the online file. Treat these entries as review-only: use the
+handle for the online file. From Kosha 0.12.2, a Trash or permanent-delete plan
+that includes flagged files shows a warning that names how many, says that
+moving them to the Trash usually deletes the online copies too, and requires a
+button that names the count; **Skip cloud-only items** is offered as an
+alternative. See [cloud placeholders](safety.md#cloud-placeholders). Versions
+before 0.12.2 do not warn.
+
+Fully downloaded files in synced folders carry no marker and look like ordinary
+local files to Kosha, so they get **no warning**, and sync apps normally treat a
+local delete as a delete. On Windows, tape or archive (hierarchical storage)
+files use the same marker and are also described as stored in the cloud. Use the
 provider's own software to free space, for example by choosing to keep files
-online only, rather than deleting them here.
+online only, and check its recycle bin and retention. Keep Kosha in Read-only
+mode when you scan synced folders that you do not intend to clean.
 
 Two limits to keep in mind:
 

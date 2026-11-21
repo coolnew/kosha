@@ -28,7 +28,9 @@ change, or other processes keep files open.
 You can also right-click an entry in the file list or search results and choose
 **Move to Trash…**. Enable Read-write first; a live scan is required. With the
 list focused, **Ctrl+Delete** on Windows/Linux or **Command+Delete** on macOS
-opens the same preview. Nothing is removed until you confirm the named plan.
+opens the same preview. Nothing is removed until you confirm the named plan. If
+the plan includes files stored in the cloud, the preview adds a warning and a
+separate confirm button; see [cloud placeholders](#cloud-placeholders).
 Preparing a preview runs in the background; Escape cancels it. A menu from an
 older scan cannot act on a replacement scan.
 
@@ -61,10 +63,50 @@ the state observed during its scan until you rescan.
 
 ## Cloud placeholders
 
-A file stored in the cloud has only a local placeholder. Deleting the placeholder
-can delete the only copy, so treat these entries as review-only and free space
-with the provider's own software. See
-[cloud-synced folders](scanning.md#cloud-synced-folders).
+Sync apps such as OneDrive, Google Drive, iCloud Drive and Dropbox normally treat
+a local delete as a delete, so moving a file to the Trash or Recycle Bin from a
+synced folder can remove the online copy too. A file stored only in the cloud has
+just a local placeholder, and deleting that placeholder may remove the only copy.
+
+**From Kosha 0.12.2**, when a Trash (or permanent delete) plan includes files
+stored in the cloud, the confirmation says so:
+
+- It names how many files are stored in the cloud, for example "3 files in this
+  folder are stored in the cloud".
+- It explains that they are not kept on this computer, that moving them to the
+  Trash usually deletes the online copies too, and that they may be the only
+  copies. Kosha cannot see what your sync app will do, so this says "usually" and
+  "may".
+- The ordinary confirm button is replaced by one that names the count, such as
+  **Move everything, including 3 cloud-only files** or **Move 1 cloud-only file
+  to the Trash**. Nothing in the plan is removed unless you press it.
+- **Skip cloud-only items** is offered as an alternative when something else
+  would remain in the plan. It drops the cloud-only files; a folder that holds one
+  stays on disk, and its other contents are planned. It is not offered for
+  **Empty contents**, which stays gated by the cloud confirmation.
+- Folders and files with no such files see no change to the dialog.
+- The audit log records the cloud risk (the number of cloud-only files) and
+  whether you confirmed it. See [Audit history](#audit-history).
+
+Versions before 0.12.2 do not warn.
+
+Limits to keep in mind:
+
+- The warning rests on the marker the operating system sets on a placeholder
+  ([cloud-synced folders](scanning.md#cloud-synced-folders)). Files that are
+  **already downloaded** in a synced folder carry no marker, look like ordinary
+  local files, and get **no warning**. Deleting them can still delete the online
+  copy.
+- On Windows, files moved to tape or an archive (hierarchical storage) use the
+  same marker, so they are described as stored in the cloud too.
+- Linux has no marker, so nothing is flagged there.
+
+So:
+
+- To free space, use the provider's own software, for example "Free up space" or
+  "online only", and check the provider's own recycle bin and retention.
+- Keep Kosha in Read-only mode when you scan synced folders that you do not
+  intend to clean.
 
 ## Historical and incomplete views
 
@@ -78,4 +120,6 @@ relying on totals or findings.
 File-changing operations are recorded in `audit.jsonl` in the application-data
 directory. The palette can show the log's location. It is an operation record,
 not a backup or undo mechanism, and can contain affected paths and filesystem
-metadata. See [settings and stored files](settings-and-files.md).
+metadata. From 0.12.2, an entry that included cloud-only files also records how
+many there were and whether you confirmed the cloud warning. See
+[settings and stored files](settings-and-files.md).

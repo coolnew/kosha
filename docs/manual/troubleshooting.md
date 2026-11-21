@@ -87,6 +87,28 @@ not been verified with kosha, and on Windows its streamed files might not be
 recognized as placeholders, so avoid duplicate searches on such a folder. See
 [cloud-synced folders](scanning.md#cloud-synced-folders).
 
+## Can Kosha delete my online files?
+
+Possibly, if you move them to the Trash or Recycle Bin in Read-write mode. Sync
+apps (OneDrive, Google Drive, iCloud Drive, Dropbox) normally treat a local
+delete as a delete, so the online copy can be removed, and for a file stored only
+in the cloud it may be the only copy.
+
+From Kosha 0.12.2, when a Trash plan includes files stored in the cloud, the
+confirmation names how many, says that moving them to the Trash usually deletes
+the online copies too, and requires a button that names the count. **Skip
+cloud-only items** leaves them out. Ordinary folders see no change, and versions
+before 0.12.2 do not warn.
+
+The warning has limits. Files already downloaded in a synced folder carry no
+marker, so they get **no warning**. On Windows, tape or archive files use the same
+marker and are also described as stored in the cloud. Kosha cannot see what your
+sync app will do. To free space, use the provider's own option such as "Free up
+space" or "online only", and check its recycle bin and retention. Keep Kosha in
+Read-only mode when scanning synced folders you do not intend to clean. See
+[cloud placeholders](safety.md#cloud-placeholders) and
+[cloud-synced folders](scanning.md#cloud-synced-folders).
+
 ## An action is unavailable
 
 Check Read-only mode, historical snapshot views, confidence, and protected-path
