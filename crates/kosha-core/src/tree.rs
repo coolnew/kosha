@@ -353,6 +353,17 @@ pub struct SizeTree {
     pub(crate) created: Vec<u64>,
     pub(crate) root_path: PathBuf,
     pub(crate) stats: ScanStats,
+    /// Nodes, ascending, whose recorded names this platform could not
+    /// represent and which [`SizeTree::from_parts`] replaced with a lossy
+    /// rendering. Empty for every tree the scanner builds.
+    ///
+    /// **The invariant the name accessors rely on**: every node's
+    /// `name_off..name_off + name_len` span holds bytes that satisfy
+    /// [`crate::names::is_valid_encoded_name`]. They read names without
+    /// checking, so every constructor establishes it: the walk and the MFT and
+    /// ext4 builders by storing only `as_encoded_bytes` or
+    /// [`NameArena::push_bytes`] output, everything else through `from_parts`.
+    pub(crate) replaced_names: Vec<u32>,
 }
 
 impl SizeTree {
@@ -398,11 +409,20 @@ impl SizeTree {
 
     /// Rebuild a tree from parts that came out of a file rather than a disk.
     ///
-    /// Every invariant the accessors assume — a parent above its child,
-    /// children inside the arena, a name inside the name arena — is the
-    /// caller's to have checked. The scanner cannot produce a bad arena; a
-    /// reader can, which is why `snapshot::validate` exists and runs before
-    /// this is called.
+    /// The structural invariants the accessors assume — a parent above its
+    /// child, children inside the arena, a name inside the name arena — are
+    /// the caller's to have checked; breaking them makes an accessor panic.
+    /// The scanner cannot produce a bad arena; a reader can, which is why
+    /// `snapshot::validate` exists and runs before this is called.
+    ///
+    /// **The names' encoding is checked here**, because reading a name that
+    /// is not valid on this platform would be undefined behaviour rather than
+    /// a panic. Every span that this platform cannot represent — a Linux name
+    /// that is not UTF-8, on Windows — is given a lossy UTF-8 rendering with
+    /// U+FFFD where the bytes were, and recorded: see
+    /// [`names_replaced`](Self::names_replaced). Every other name is kept
+    /// exactly. On Unix every byte string is a valid name and nothing is
+    /// checked or replaced.
     pub fn from_parts(
         nodes: Vec<Node>,
         names: NameArena,
@@ -410,6 +430,37 @@ impl SizeTree {
         root_path: PathBuf,
         stats: ScanStats,
     ) -> SizeTree {
+        if crate::names::EVERY_BYTE_STRING_IS_A_NAME {
+            return SizeTree {
+                nodes,
+                names,
+                owners,
+                created: Vec::new(),
+                root_path,
+                stats,
+                replaced_names: Vec::new(),
+            };
+        }
+        Self::from_parts_with_name_check(nodes, names, owners, root_path, stats, |_| true)
+    }
+
+    /// [`from_parts`](Self::from_parts), additionally replacing every name
+    /// `accept` refuses.
+    ///
+    /// For tests: passing [`crate::is_well_formed_wtf8`] shows on any
+    /// platform what a Windows build does with a snapshot from Linux. The
+    /// platform's own rule always applies as well, so this can only replace
+    /// more names than `from_parts` would, never fewer.
+    #[doc(hidden)]
+    pub fn from_parts_with_name_check(
+        mut nodes: Vec<Node>,
+        mut names: NameArena,
+        owners: Owners,
+        root_path: PathBuf,
+        stats: ScanStats,
+        accept: impl Fn(&[u8]) -> bool,
+    ) -> SizeTree {
+        let replaced_names = crate::names::replace_invalid_names(&mut nodes, &mut names, accept);
         SizeTree {
             nodes,
             names,
@@ -417,7 +468,35 @@ impl SizeTree {
             created: Vec::new(),
             root_path,
             stats,
+            replaced_names,
         }
+    }
+
+    /// How many recorded names could not be represented on this platform and
+    /// were replaced when the tree was built from parts.
+    ///
+    /// Zero for every scan, and for every snapshot opened on the kind of
+    /// system that took it. A snapshot taken on Linux of a name that is not
+    /// UTF-8 and opened on Windows is where this is not zero; the front ends
+    /// say so (see [`crate::snapshot::replaced_names_note`]).
+    #[inline]
+    pub fn names_replaced(&self) -> usize {
+        self.replaced_names.len()
+    }
+
+    /// Whether this node's recorded name was replaced. See
+    /// [`names_replaced`](Self::names_replaced).
+    pub fn name_replaced(&self, id: NodeId) -> bool {
+        self.replaced_names.binary_search(&id.0).is_ok()
+    }
+
+    /// A node's name, through the unchecked path.
+    #[inline]
+    fn name_of(&self, n: &Node) -> &OsStr {
+        // SAFETY: every node's span satisfies `is_valid_encoded_name`; see
+        // `replaced_names` for how each constructor establishes it. Nodes and
+        // names are private and never change after construction.
+        unsafe { self.names.get_unchecked(n.name_off, n.name_len) }
     }
 
     /// Number of entries, including the root.
@@ -476,7 +555,7 @@ impl SizeTree {
     #[inline]
     pub fn name(&self, id: NodeId) -> &OsStr {
         let n = &self.nodes[id.index()];
-        self.names.get(n.name_off, n.name_len)
+        self.name_of(n)
     }
 
     /// The name as UTF-8, replacing anything unrepresentable. For display only
@@ -527,7 +606,7 @@ impl SizeTree {
         let mut path = self.root_path.clone();
         for &i in chain.iter().rev() {
             let n = &self.nodes[i as usize];
-            path.push(self.names.get(n.name_off, n.name_len));
+            path.push(self.name_of(n));
         }
         path
     }
@@ -573,12 +652,36 @@ impl SizeTree {
     /// `OsStr` orders by those same bytes, so this is a binary search over a
     /// contiguous slice rather than a scan. Rules that ask "is there a
     /// `Cargo.toml` next to this `target/`?" do it once per candidate.
+    ///
+    /// **A replaced name breaks that order** for its own directory: the lossy
+    /// rendering sorts where the original bytes did not. Such a directory is
+    /// searched linearly instead; every other directory, and every tree with
+    /// no replaced names, keeps the binary search.
     pub fn child_named(&self, parent: NodeId, name: &OsStr) -> Option<NodeId> {
         let range = self.nodes[parent.index()].child_range();
-        let found = self.nodes[range.clone()]
-            .binary_search_by(|n| self.names.get(n.name_off, n.name_len).cmp(name))
-            .ok()?;
+        let children = &self.nodes[range.clone()];
+        let found = if self.children_sorted(range.clone()) {
+            children
+                .binary_search_by(|n| self.name_of(n).cmp(name))
+                .ok()?
+        } else {
+            children.iter().position(|n| self.name_of(n) == name)?
+        };
         Some(NodeId::from_index(range.start + found))
+    }
+
+    /// Whether the children in `range` are still in the scan's name order:
+    /// true unless one of them had its name replaced.
+    pub(crate) fn children_sorted(&self, range: std::ops::Range<usize>) -> bool {
+        if self.replaced_names.is_empty() {
+            return true;
+        }
+        let first = self
+            .replaced_names
+            .partition_point(|&index| (index as usize) < range.start);
+        self.replaced_names
+            .get(first)
+            .is_none_or(|&index| index as usize >= range.end)
     }
 
     /// Whether a sibling of `id` carries this name — the marker-file test that

@@ -474,6 +474,9 @@ fn join(
         created: Vec::new(),
         root_path: root_path.to_path_buf(),
         stats,
+        // Every span came from `NameArena::push` or `push_bytes`, which store
+        // only names this platform can hold.
+        replaced_names: Vec::new(),
     }
 }
 

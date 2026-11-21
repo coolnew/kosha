@@ -361,3 +361,46 @@ fn file_parents_backwards_parent_groups_and_numeric_overflow_are_refused() {
     overflow.entries.push(second);
     assert!(prepare(overflow).err().unwrap().contains("overflow"));
 }
+
+/// A name the snapshot reader replaced — here a Latin-1 Linux name under the
+/// Windows rule, which reads back as valid UTF-8 with U+FFFD in it — is a
+/// rewrite, and a view refuses it like any other unportable name rather than
+/// sharing the rewrite as if it had been recorded.
+#[test]
+fn a_name_the_reader_replaced_is_refused_not_shared() {
+    let base = source(20, false);
+    let mut nodes = base.nodes_slice().to_vec();
+    let mut names = NameArena::from_bytes(base.names_bytes().to_vec());
+    let latin1 = b"caf\xe9.md";
+    nodes[3].name_off = names.append_raw(latin1);
+    nodes[3].name_len = latin1.len() as u16;
+    let tree = SizeTree::from_parts_with_name_check(
+        nodes,
+        names,
+        Owners::default(),
+        PathBuf::from("/HOST_SECRET/drive"),
+        ScanStats::default(),
+        kosha_core::is_well_formed_wtf8,
+    );
+    assert_eq!(tree.names_replaced(), 1);
+    assert_eq!(
+        tree.name(kosha_core::NodeId::from_index(3)).to_str(),
+        Some("caf\u{FFFD}.md")
+    );
+    let Err(error) = publish(
+        &tree,
+        10000,
+        Selection {
+            root: "project",
+            alias: "shared",
+            excludes: &["private".into()],
+            fields: Fields::default(),
+        },
+    ) else {
+        panic!("a replaced name was shared");
+    };
+    assert!(
+        error.to_string().starts_with("selection_invalid"),
+        "{error}"
+    );
+}

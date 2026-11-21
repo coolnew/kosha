@@ -69,7 +69,7 @@ pub mod vhdx;
 mod xfs;
 
 pub use error::ScanError;
-pub use names::NameArena;
+pub use names::{NameArena, is_valid_encoded_name, is_well_formed_wtf8};
 pub use node::{Flags, Node, NodeId};
 pub use owner::{Owner, OwnerId, OwnerKind, Owners, Share};
 pub use platform::wsl;

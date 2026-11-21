@@ -306,6 +306,7 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let (meta, tree) = snapshot::store::open(&path)
                 .map_err(|e| format!("could not load {}: {e}", path.display()))?;
             super::snapshots::report_source(&path, &meta);
+            super::snapshots::report_replaced_names(&tree);
             if !document_stdout {
                 super::print_snapshot_header(&meta);
             }

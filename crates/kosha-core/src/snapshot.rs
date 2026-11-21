@@ -492,10 +492,34 @@ fn cut_short(what: &'static str) -> impl Fn(ReadError) -> ReadError {
     }
 }
 
+/// What to tell somebody when a snapshot's names could not all be shown as
+/// recorded. `None` when they could.
+///
+/// One sentence for both front ends, so they agree about what happened.
+pub fn replaced_names_note(tree: &SizeTree) -> Option<String> {
+    let count = tree.names_replaced();
+    (count > 0).then(|| {
+        format!(
+            "{} in this snapshot cannot be represented on this system \
+             and {} shown with \u{FFFD} in place of the original characters.",
+            crate::format::plural(count, "name"),
+            if count == 1 { "is" } else { "are" },
+        )
+    })
+}
+
 const BEFORE_HEADER: &str = "it ends before its header does";
 const BEFORE_TREE: &str = "it ends before its tree does";
 
 /// Read a snapshot back into a browsable tree.
+///
+/// **Names are the bytes the recording system used**, and a snapshot is made
+/// to be copied between systems. A name that is not valid on this one — a
+/// Linux name that is not UTF-8, opened on Windows — is not trusted: it is
+/// shown with U+FFFD where the bytes were, and counted in
+/// [`SizeTree::names_replaced`]. Front ends say so with
+/// [`replaced_names_note`]. Every name valid here is kept byte for byte,
+/// including a Windows name with an unpaired surrogate opened on Linux.
 pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
     let (format, header) = read_header_bytes(&mut input).map_err(cut_short(BEFORE_HEADER))?;
     let meta = decode_header(&header)?;

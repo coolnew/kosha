@@ -277,6 +277,9 @@ fn name_of(raw: &[u8], (at, len): (u32, u16)) -> &[u8] {
         .unwrap_or(&[])
 }
 
+/// An XFS name is the bytes Linux stored. `push_bytes` keeps them exactly
+/// where they are a valid name here and, on Windows, stores bytes that are not
+/// well-formed WTF-8 lossily, with U+FFFD, much as the ext4 reader does.
 fn push_name(names: &mut NameArena, name: &[u8]) -> (u32, u16) {
     names.push_bytes(name)
 }

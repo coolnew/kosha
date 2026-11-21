@@ -592,7 +592,12 @@ impl Scanner {
                 for (i, entry) in batch.entries.iter().enumerate() {
                     if allowed[i] {
                         let idx = first_child + i as u32;
-                        let name = names.get(name_base + entry.name_off, entry.name_len);
+                        // SAFETY: this span is one whole name from
+                        // `as_encoded_bytes`, appended by `append_raw` above
+                        // at `name_base`.
+                        let name = unsafe {
+                            names.get_unchecked(name_base + entry.name_off, entry.name_len)
+                        };
                         next.push((idx, parent_path.join(name)));
                     }
                 }
@@ -632,6 +637,9 @@ impl Scanner {
         stats.bytes_allocated = nodes[0].allocated;
         stats.duration = started.elapsed();
 
+        // Every name span came from `as_encoded_bytes` of a name the OS gave
+        // the walk, appended whole, so the tree's name invariant holds with
+        // nothing to check.
         Ok(SizeTree {
             nodes,
             names,
@@ -639,6 +647,7 @@ impl Scanner {
             created,
             root_path,
             stats,
+            replaced_names: Vec::new(),
         })
     }
 

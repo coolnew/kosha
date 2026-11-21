@@ -462,6 +462,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         let (meta, tree) = snapshot::store::open(&args.path)
             .map_err(|e| format!("{}: {e}", args.path.display()))?;
         snapshots::report_source(&args.path, &meta);
+        snapshots::report_replaced_names(&tree);
         if !args.document_on_stdout() {
             print_snapshot_header(&meta);
         }
@@ -783,6 +784,7 @@ fn print_changes(
         let (meta, past) = snapshot::store::open(baseline_path)
             .map_err(|e| format!("{}: {e}", baseline_path.display()))?;
         snapshots::report_source(baseline_path, &meta);
+        snapshots::report_replaced_names(&past);
         taken_at = Some(meta.taken);
         // A snapshot knows which folder it is of, so a comparison against
         // another folder can be *said* rather than merely performed. Comparing

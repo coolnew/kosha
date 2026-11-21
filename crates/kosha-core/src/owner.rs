@@ -576,6 +576,7 @@ mod tests {
             created: Vec::new(),
             root_path: std::path::PathBuf::from("C:\\"),
             stats: ScanStats::default(),
+            replaced_names: Vec::new(),
         }
     }
 

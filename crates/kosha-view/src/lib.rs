@@ -154,8 +154,14 @@ pub fn publish(
         let name = if position == 0 {
             selection.alias.to_owned()
         } else {
-            tree.name(id)
-                .to_str()
+            // A name the snapshot reader had to replace is a rewrite, not the
+            // recorded name, and is refused like any other unportable name.
+            let recorded = if tree.name_replaced(id) {
+                None
+            } else {
+                tree.name(id).to_str()
+            };
+            recorded
                 .filter(|s| name_ok(s))
                 .ok_or("selection_invalid: selected name is not portable UTF-8")?
                 .to_owned()

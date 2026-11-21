@@ -1349,3 +1349,280 @@ fn a_record_from_before_the_rule_does_not_claim_one() {
         Some(true)
     );
 }
+
+// ------------------------------------------- names from another platform
+
+/// A tree whose names are exactly these bytes, built without `from_parts`
+/// so that nothing checks them: the bytes a snapshot from another system
+/// carries. Only written, never read through a name accessor.
+fn foreign_tree(children: &[&[u8]]) -> SizeTree {
+    use crate::node::Flags;
+
+    let mut raw = Vec::new();
+    let mut nodes = Vec::new();
+    let node = |name_off: u32, name_len: u16, parent: u32, depth: u8, flags: Flags| Node {
+        logical: 1,
+        allocated: 1,
+        parent,
+        first_child: 0,
+        child_count: 0,
+        subtree_files: u32::from(depth > 0),
+        name_off,
+        mtime: 0,
+        name_len,
+        flags,
+        depth,
+    };
+    let mut root = node(0, 0, 0, 0, Flags::DIR);
+    root.first_child = 1;
+    root.child_count = children.len() as u32;
+    root.logical = children.len() as u64;
+    root.allocated = children.len() as u64;
+    root.subtree_files = children.len() as u32;
+    nodes.push(root);
+    for name in children {
+        let off = raw.len() as u32;
+        raw.extend_from_slice(name);
+        nodes.push(node(off, name.len() as u16, 0, 1, Flags::default()));
+    }
+    let stats = ScanStats {
+        entries: nodes.len() as u64,
+        files: children.len() as u64,
+        dirs: 1,
+        ..ScanStats::default()
+    };
+    SizeTree {
+        nodes,
+        names: NameArena::from_bytes(raw),
+        owners: Owners::default(),
+        created: Vec::new(),
+        root_path: PathBuf::from("recorded-elsewhere"),
+        stats,
+        replaced_names: Vec::new(),
+    }
+}
+
+const PLAIN: &[u8] = b"plain.txt";
+/// Latin-1, as Linux will store a name if that is what it was given.
+const LATIN1: &[u8] = b"caf\xe9.txt";
+/// `odd-` and a lone high surrogate: a legal NTFS name, in WTF-8.
+const LONE_SURROGATE: &[u8] = b"odd-\xed\xa0\x80";
+/// A surrogate pair written as two halves: a legal Linux name, and not
+/// something Windows can hold.
+const SPLIT_PAIR: &[u8] = b"\xed\xa0\x80\xed\xb0\x80";
+
+/// What opening a snapshot from another system does on *this* one: every name
+/// valid here comes back byte for byte; on Unix that is every name. Where a
+/// name is not valid (Windows), it is shown lossily, marked and counted.
+#[test]
+fn names_from_another_system_are_kept_or_replaced_and_counted() {
+    let original = foreign_tree(&[PLAIN, LATIN1, LONE_SURROGATE, SPLIT_PAIR]);
+    let (_meta, restored) = round_trip(&original);
+    let name = |index: usize| {
+        restored
+            .name(NodeId::from_index(index))
+            .as_encoded_bytes()
+            .to_vec()
+    };
+
+    for index in 0..restored.len() {
+        assert!(crate::is_valid_encoded_name(&name(index)), "at {index}");
+    }
+    assert_eq!(name(1), PLAIN);
+    assert!(!restored.name_replaced(NodeId::from_index(1)));
+    if cfg!(any(unix, windows)) {
+        assert_eq!(name(3), LONE_SURROGATE, "valid on both, so kept exactly");
+    }
+
+    if crate::names::EVERY_BYTE_STRING_IS_A_NAME {
+        assert_eq!(name(2), LATIN1);
+        assert_eq!(name(4), SPLIT_PAIR);
+        assert_eq!(restored.names_replaced(), 0);
+        assert_eq!(replaced_names_note(&restored), None);
+    } else {
+        assert_eq!(name(2), "caf\u{FFFD}.txt".as_bytes());
+        assert_eq!(name(4), String::from_utf8_lossy(SPLIT_PAIR).as_bytes());
+        assert!(restored.name_replaced(NodeId::from_index(2)));
+        assert!(restored.name_replaced(NodeId::from_index(4)));
+        assert_eq!(restored.names_replaced(), 2);
+        let note = replaced_names_note(&restored).unwrap();
+        assert!(note.starts_with("2 names in this snapshot"), "{note}");
+    }
+    // The shape and the numbers are untouched either way.
+    assert_eq!(restored.len(), original.len());
+    assert_eq!(restored.total_allocated(), original.total_allocated());
+}
+
+/// The same snapshot under the Windows rule, on every platform: what a Linux
+/// record looks like when it is opened on Windows.
+#[test]
+fn a_linux_snapshot_opened_under_the_windows_rule() {
+    let original = foreign_tree(&[PLAIN, LATIN1, LONE_SURROGATE, SPLIT_PAIR]);
+    let (_meta, restored) = round_trip(&original);
+    let simulated = SizeTree::from_parts_with_name_check(
+        restored.nodes_slice().to_vec(),
+        NameArena::from_bytes(restored.names_bytes().to_vec()),
+        Owners::default(),
+        restored.root_path().to_path_buf(),
+        restored.stats().clone(),
+        crate::is_well_formed_wtf8,
+    );
+    let name = |index: usize| {
+        simulated
+            .name(NodeId::from_index(index))
+            .as_encoded_bytes()
+            .to_vec()
+    };
+    for index in 0..simulated.len() {
+        assert!(crate::is_well_formed_wtf8(&name(index)), "at {index}");
+    }
+    assert_eq!(name(1), PLAIN);
+    if cfg!(any(unix, windows)) {
+        assert_eq!(name(3), LONE_SURROGATE);
+    }
+    assert_eq!(name(2), "caf\u{FFFD}.txt".as_bytes());
+    assert_eq!(name(4), String::from_utf8_lossy(SPLIT_PAIR).as_bytes());
+    // Counted once: by the reader where the platform refuses them, by the
+    // simulation where it does not.
+    assert_eq!(restored.names_replaced() + simulated.names_replaced(), 2);
+}
+
+/// `from_parts` is safe, so no arena and no span can make it hand back a name
+/// this platform cannot hold. Every span of an arena of hostile bytes.
+#[test]
+fn from_parts_never_yields_a_name_this_platform_cannot_hold() {
+    let hostile: Vec<u8> =
+        b"a\xc3\xa9\xff\xed\xa0\x80\xed\xb0\x80\xf0\x9f\x98\x80\xe2\x82".to_vec();
+    let original = foreign_tree(&[]);
+    let mut nodes = original.nodes_slice().to_vec();
+    nodes[0].child_count = 0;
+    for start in 0..=hostile.len() {
+        for end in start..=hostile.len() {
+            let mut child = nodes[0];
+            child.name_off = start as u32;
+            child.name_len = (end - start) as u16;
+            child.depth = 1;
+            child.flags = crate::node::Flags::default();
+            nodes.push(child);
+        }
+    }
+    nodes[0].first_child = 1;
+    nodes[0].child_count = (nodes.len() - 1) as u32;
+    let tree = SizeTree::from_parts(
+        nodes,
+        NameArena::from_bytes(hostile),
+        Owners::default(),
+        PathBuf::from("hostile"),
+        ScanStats::default(),
+    );
+    for index in 0..tree.len() {
+        let id = NodeId::from_index(index);
+        assert!(crate::is_valid_encoded_name(
+            tree.name(id).as_encoded_bytes()
+        ));
+        let _ = tree.path_of(id);
+    }
+    if crate::names::EVERY_BYTE_STRING_IS_A_NAME {
+        assert_eq!(tree.names_replaced(), 0);
+    } else {
+        assert!(tree.names_replaced() > 0);
+    }
+}
+
+/// Children in the scan's byte order, the last of which (`b` and 0xFF) is
+/// replaced under the Windows rule by `b` and U+FFFD — bytes EF BF BD, which
+/// sort *before* the two siblings ahead of it. A binary search for the
+/// replaced name, or past it, would miss.
+const SORTED: [&[u8]; 6] = [
+    b"a.txt",
+    b"b\xc3\xa9",
+    b"b\xf0\x9f\x98\x80",
+    b"b\xf3\xa0\x80\x80",
+    b"b\xf4\x80\x80\x80",
+    b"b\xff",
+];
+
+/// Open `foreign`, a tree whose names are still the raw bytes another system
+/// wrote, under the Windows rule. It must start from the raw tree and not from
+/// one that was round-tripped through a snapshot: on Windows a snapshot read
+/// has already replaced the name and recorded it, so a second pass would find
+/// nothing to replace and record nothing, and the folder would look sorted.
+fn under_the_windows_rule(foreign: &SizeTree) -> SizeTree {
+    SizeTree::from_parts_with_name_check(
+        foreign.nodes_slice().to_vec(),
+        NameArena::from_bytes(foreign.names_bytes().to_vec()),
+        Owners::default(),
+        foreign.root_path().to_path_buf(),
+        foreign.stats().clone(),
+        crate::is_well_formed_wtf8,
+    )
+}
+
+#[test]
+fn every_sibling_of_a_replaced_name_is_still_found_by_name() {
+    let tree = under_the_windows_rule(&foreign_tree(&SORTED));
+    assert_eq!(tree.names_replaced(), 1);
+    let replaced = tree
+        .name(NodeId::from_index(SORTED.len()))
+        .as_encoded_bytes()
+        .to_vec();
+    assert_eq!(replaced, "b\u{FFFD}".as_bytes());
+    assert!(
+        replaced.as_slice() < SORTED[2],
+        "the fixture must put the replacement out of order"
+    );
+    assert!(!tree.children_sorted(tree.node(tree.root()).child_range()));
+
+    for index in 1..tree.len() {
+        let id = NodeId::from_index(index);
+        assert_eq!(
+            tree.child_named(tree.root(), tree.name(id)),
+            Some(id),
+            "at {index}"
+        );
+        assert!(tree.has_sibling_named(NodeId::from_index(1), tree.name(id)));
+    }
+    assert_eq!(
+        tree.child_named(tree.root(), std::ffi::OsStr::new("missing")),
+        None
+    );
+}
+
+/// The fast path stays: a tree with no replaced names, and a directory with
+/// none in it, are searched in order.
+#[test]
+fn directories_without_a_replaced_name_keep_the_binary_search() {
+    let (_dir, scanned) = fixture();
+    assert_eq!(scanned.names_replaced(), 0);
+    for index in 0..scanned.len() {
+        let range = scanned.node(NodeId::from_index(index)).child_range();
+        assert!(scanned.children_sorted(range));
+    }
+
+    // A replaced name at index 6 leaves ranges that do not include it alone.
+    let tree = under_the_windows_rule(&foreign_tree(&SORTED));
+    assert!(tree.children_sorted(1..6));
+    assert!(tree.children_sorted(7..9));
+    assert!(tree.children_sorted(0..0));
+    assert!(!tree.children_sorted(6..7));
+    assert!(!tree.children_sorted(1..7));
+}
+
+/// Comparing a record against itself opened under the Windows rule finds
+/// nothing: comparison is by path text, and the replaced name's text is what
+/// the original bytes always displayed as. Nothing else appears or vanishes.
+#[test]
+fn a_replaced_name_adds_no_spurious_changes_to_a_comparison() {
+    let original = foreign_tree(&SORTED);
+    let (_meta, restored) = round_trip(&original);
+    let tree = under_the_windows_rule(&original);
+    let baseline = crate::compare::Baseline::of_tree(&restored);
+    let options = crate::compare::Options {
+        min_delta: 0,
+        directories: true,
+        files: true,
+    };
+    let report = crate::compare::compare(&baseline, &tree, &options);
+    assert!(report.changes.is_empty(), "{:?}", report.changes);
+    assert_eq!(report.net, 0);
+}

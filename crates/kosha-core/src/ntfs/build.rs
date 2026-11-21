@@ -581,6 +581,9 @@ pub fn build(
         created,
         root_path: root.path.to_path_buf(),
         stats,
+        // Every span came from `NameArena::push_bytes`, which stores only
+        // names this platform can hold.
+        replaced_names: Vec::new(),
     }
 }
 

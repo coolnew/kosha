@@ -2226,6 +2226,7 @@ impl KoshaApp {
         cx: &mut Context<Self>,
     ) {
         let taken = crate::snapshots::when(&meta);
+        let replaced = kosha_core::snapshot::replaced_names_note(&tree);
         // The session follows the snapshot's root so that the breadcrumb and
         // the window title say what is being looked at. It stays read-only:
         // `Session::new` starts that way, and a snapshot cannot be acted on
@@ -2239,9 +2240,15 @@ impl KoshaApp {
                 automatic,
             })),
         ));
-        self.state.notice = (!automatic).then(|| {
+        let opened = (!automatic).then(|| {
             format!("Showing a snapshot taken {taken}. Nothing here is the disk as it is now.")
         });
+        // Names this system cannot represent are said every time, automatic
+        // record or not: they are shown altered and nothing else would say so.
+        self.state.notice = match (opened, replaced) {
+            (Some(opened), Some(replaced)) => Some(format!("{opened} {replaced}")),
+            (opened, replaced) => opened.or(replaced),
+        };
         self.apply_pending(cx);
         cx.notify();
 

@@ -23,6 +23,14 @@ pub fn report_source(path: &Path, meta: &snapshot::Meta) {
     );
 }
 
+/// Say, on stderr, when some of a snapshot's names could not be shown as
+/// recorded. Silent otherwise.
+pub fn report_replaced_names(tree: &kosha_core::SizeTree) {
+    if let Some(note) = snapshot::replaced_names_note(tree) {
+        eprintln!("note: {note}");
+    }
+}
+
 fn resolve_in(path: &Path, store: Option<&Path>) -> io::Result<PathBuf> {
     let mut components = path.components();
     let Some(store) = store.filter(|_| {
