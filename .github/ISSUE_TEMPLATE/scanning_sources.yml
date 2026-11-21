@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
+
+name: Suggest a scanning source
+description: Tell us about cloud storage, another machine or another tool whose files you want Kosha to cover.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kosha scans folders and disks on this computer and opens saved snapshots. See
+        [cloud storage and other machines](https://coolnew.github.io/kosha/manual/cloud-and-other-machines/)
+        for what works today.
+        This request will be public. Do not paste private paths, account names or file names.
+  - type: dropdown
+    id: source
+    attributes:
+      label: Which provider or tool?
+      multiple: true
+      options:
+        - Cloud storage service
+        - Other machine over SSH
+        - Another disk-usage tool's export
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Name of the service or tool (optional)
+      description: For example a cloud storage service, a NAS, or the other tool's name.
+  - type: input
+    id: version
+    attributes:
+      label: Kosha version
+      description: From Settings → Version or `kosha --version`, if available.
+      placeholder: e.g. 0.12.2, or unknown
+  - type: dropdown
+    id: system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Other or unsure
+    validations:
+      required: true
+  - type: input
+    id: size
+    attributes:
+      label: Rough size of the tree
+      description: Approximate number of files and total size, for example "about 200,000 files, 150 GB".
+      placeholder: e.g. about 200,000 files, 150 GB
+  - type: textarea
+    id: tried
+    attributes:
+      label: What do you do today?
+      description: What you tried and what happened, with private information removed.
+    validations:
+      required: true
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What would you want Kosha to do?
+      description: A few lines are enough.
+    validations:
+      required: true
