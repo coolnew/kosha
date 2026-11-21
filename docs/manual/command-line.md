@@ -4,6 +4,11 @@ Using the CLI through an agent? Read [agent access and privacy](agent-privacy.md
 Kosha uses the process's OS permissions; a scan path or query filter is not a
 per-agent access restriction.
 
+The CLI is not filesystem-write-free: `--out FILE` can replace an existing
+destination, snapshots write records, and marketplace management writes local
+state or removes installed packs. These operations do not use the desktop's
+Read-write confirmation. See [write-capable operations](agent-privacy.md#what-the-existing-controls-do).
+
 For owning-tool advice on recorded workflow locations, use
 `kosha "PATH" --cleanup-guide`. It does not execute cleanup; see
 [the cleanup guide](cleanup-guide.md) for supported locations and limitations.
@@ -299,7 +304,8 @@ argument, translation, source, cancellation, or I/O error. Partial or incomplete
 data can still produce a successful report: inspect JSON metadata and stderr
 instead of treating an empty match list as proof that a protected file does not
 exist. Sizes are integer bytes. The tool reads metadata; search does not read
-file contents or modify/delete matched files.
+file contents as part of matching. An explicit `--out` can still replace its
+destination, including a matched file if that is the path you choose.
 
 ## Launch the desktop app
 

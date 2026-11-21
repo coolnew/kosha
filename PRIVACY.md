@@ -27,8 +27,12 @@ ML model or a cloud search service. There is no Kosha account or sign-in.
 Windows desktop capabilities support filesystem access, user-requested elevation
 for NTFS analysis, and application-data storage. Administrator access can expose
 more local metadata. These capabilities do not mean scan data is uploaded.
-Scanning is read-only by default; file-changing actions require the app's
-explicit Read-write mode and confirmation. See [safe cleanup](docs/manual/safety.md).
+Scanning does not intentionally rewrite scanned file contents. Desktop cleanup
+actions require explicit Read-write mode and confirmation. CLI exports can
+replace their destination files, snapshots write records, and marketplace
+management writes local state or removes installed packs without that desktop
+mode switch. See [safe cleanup](docs/manual/safety.md) and
+[CLI write-capable operations](docs/manual/agent-privacy.md#what-the-existing-controls-do).
 
 ## Optional cleanup guide and AI handoff
 

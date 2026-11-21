@@ -112,8 +112,9 @@ drive scan with its age visible, then rescan when you want a fresh view.
 
 ## Start with understanding.
 
-Scanning is read-only. In the desktop app, cleanup needs an explicit mode
-change and review. The CLI has no delete command.
+Scanning does not intentionally rewrite scanned file contents. In the desktop
+app, cleanup needs an explicit mode change and review. CLI exports, snapshots
+and marketplace management can still create, replace or remove files.
 
 [How Kosha protects your files →](../docs/manual/safety.md)
 

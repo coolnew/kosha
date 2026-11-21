@@ -79,7 +79,7 @@ files; sizes and timings are illustrative, not a performance benchmark.*
 | Explore a space map and exact file table together | Export JSON, JSONL, CSV, or full-path TXT |
 | Ask a supported question and inspect its interpretation | Use `search --describe --json` before opening a scan source |
 | Browse a saved scan and compare observations | Search a snapshot without rescanning its original filesystem |
-| Review explanations before choosing cleanup | Read explicit coverage flags and diagnostics; the CLI has no delete command |
+| Review explanations before choosing cleanup | Read coverage flags and diagnostics; CLI output and pack management can still change files |
 | Add phrases that fit your workflow | Share the same deterministic recipe vocabulary across GUI and CLI |
 
 An agent can explain a phrase first, execute it against an explicit source,

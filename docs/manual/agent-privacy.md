@@ -4,10 +4,11 @@
 available to its process. It does not distinguish a person from an agent running
 under the same account, and it has no enforced per-agent folder allowlist.
 
-Read-only scanning prevents changes to your source files; it does not make their
-metadata private. Names, paths, sizes, dates and owners can reveal personal or
-confidential information. Giving an agent a command-line tool is a decision
-about what that agent may learn, even when the tool has no delete command.
+Scanning and querying do not intentionally rewrite the scanned file contents,
+but the CLI as a whole can create, replace and remove files through other
+operations. It is not a read-only filesystem sandbox. Names, paths, sizes, dates
+and owners can also reveal personal or confidential information. Consider both
+what an agent may learn and which write-capable operations it can invoke.
 
 ## Choose the access you mean to give
 
@@ -66,8 +67,26 @@ they can inspect are also deliberately available to that agent.
 | A `.kosha` snapshot | Sharing a historical metadata record without live scanning | Redaction of unselected rows, or permission enforcement based on its recorded root |
 | Ask AI's reviewed prompt | Choosing which local metadata to copy, with names and paths omitted by default | Containing the assistant you paste it into |
 
-The CLI has no cleanup/delete command, but requested exports, snapshots and
-marketplace management can write files. `--duplicates` reads file contents.
+The CLI has no general-purpose delete or Trash command for scan results. It
+does have filesystem-changing operations:
+
+- `--export FORMAT --out FILE` creates an export and can **replace an existing
+  destination file** when permissions and filesystem behavior allow it. Choosing
+  a valuable file as the output can destroy its previous contents, even if that
+  file is also part of the scan or comparison input. There is no GUI Read-write
+  mode confirmation for CLI exports.
+- `--snapshot` (also implied by `--label`) writes a saved record and may create
+  its storage directories.
+- `marketplace sync` writes the local catalog; `get` and `install` write installed
+  pack files; `uninstall` **removes an installed pack file**. Installation and
+  export writers also use lock/temporary files and may remove temporary files
+  when an operation fails.
+- Shell redirection such as `> report.json` can create or truncate a file before
+  Kosha runs; that write is performed by the shell.
+
+Do not authorize arbitrary CLI arguments on the assumption that no filesystem
+changes are possible. A delegated interface needs separate write restrictions
+as well as read/disclosure limits. `--duplicates` reads file contents.
 Snapshot recognition and rejected-file image diagnostics can read file headers;
 image scans read their backing files, and an elevated NTFS MFT folder scan reads
 volume metadata before selecting the subtree. These are reasons to review the
