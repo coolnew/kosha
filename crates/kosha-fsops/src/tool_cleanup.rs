@@ -281,7 +281,7 @@ fn native_hash(path: &Path) -> Result<blake3::Hash, String> {
 
 fn find_uv() -> Result<PathBuf, String> {
     let name = if cfg!(windows) { "uv.exe" } else { "uv" };
-    let mut directories: Vec<_> = std::env::var_os("PATH")
+    let directories: Vec<_> = std::env::var_os("PATH")
         .map(|path| {
             std::env::split_paths(&path)
                 .filter(|path| path.is_absolute())
@@ -289,7 +289,8 @@ fn find_uv() -> Result<PathBuf, String> {
         })
         .unwrap_or_default();
     #[cfg(unix)]
-    {
+    let directories = {
+        let mut directories = directories;
         directories.extend([
             PathBuf::from("/opt/homebrew/bin"),
             PathBuf::from("/usr/local/bin"),
@@ -300,7 +301,8 @@ fn find_uv() -> Result<PathBuf, String> {
         {
             directories.push(home.join(".local/bin"));
         }
-    }
+        directories
+    };
     for directory in directories {
         let candidate = directory.join(name);
         if let Ok(resolved) = fs::canonicalize(candidate)
