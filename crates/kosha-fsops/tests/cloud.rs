@@ -113,13 +113,21 @@ fn writable(root: &Path) -> Session {
 /// Paths relative to the scanned root, with `/` separators, sorted.
 fn relative(paths: impl IntoIterator<Item = PathBuf>, root: &Path) -> Vec<String> {
     // A plan holds resolved paths, and a temporary directory can sit behind a
-    // link (`/var` on macOS), so either spelling of the root may prefix them.
+    // link (`/var` on macOS) or behind a Windows 8.3 short name (`RUNNER~1` on
+    // the hosted runners), so several spellings of the root may prefix them.
+    // `canonicalize` on Windows returns a verbatim `\\?\C:\...` path while the
+    // plan holds the plain `C:\...` spelling, so that one is tried as well.
     let canonical = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut bases = vec![canonical.clone(), root.to_path_buf()];
+    if let Some(plain) = canonical.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        bases.push(PathBuf::from(plain));
+    }
     let mut out: Vec<String> = paths
         .into_iter()
         .map(|p| {
-            p.strip_prefix(&canonical)
-                .or_else(|_| p.strip_prefix(root))
+            bases
+                .iter()
+                .find_map(|base| p.strip_prefix(base).ok())
                 .unwrap_or(&p)
                 .to_string_lossy()
                 .replace('\\', "/")
