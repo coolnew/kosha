@@ -165,6 +165,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
         .map(|w| SharedString::from(w.confirm_label().to_string()));
     let cloud_skip: Option<&'static str> = cloud.as_ref().and_then(|w| w.skip_label());
     let ordinary = cloud_confirm.is_none();
+    let skipped_note: Option<SharedString> = plan.skipped_cloud_note().map(SharedString::from);
 
     Some(
         ui::scrim("confirm-scrim", palette)
@@ -181,6 +182,17 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             .text_color(palette.text)
                             .child(SharedString::from(pending.title.clone())),
                     )
+                    // After "Skip cloud-only items" the title still names the
+                    // whole folder; this says part of it stays. The words and
+                    // the count come from `kosha-fsops`.
+                    .when_some(skipped_note, |this, note| {
+                        this.child(
+                            div()
+                                .text_size(px(metrics::TEXT_SM))
+                                .text_color(palette.text_dim)
+                                .child(note),
+                        )
+                    })
                     .child(div().text_color(palette.text_dim).child(SharedString::from(
                         if compressing {
                             // No figure promised. How much compression
