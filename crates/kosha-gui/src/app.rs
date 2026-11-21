@@ -80,6 +80,8 @@ struct ColumnDrag {
 }
 
 pub struct KoshaApp {
+    pub(crate) handoff: Option<crate::handoff::Panel>,
+    handoff_task: Option<gpui_kit::Task<()>>,
     treemap_previews: crate::treemap_preview::Store,
     entry_menu: Option<gpui_kit::EntityId>,
     planning_action: Option<gpui_kit::Task<()>>,
@@ -416,6 +418,8 @@ impl KoshaApp {
             filter_open: start.query.is_some(),
             settings: loaded.settings,
             settings_unusable,
+            handoff: None,
+            handoff_task: None,
             settings_open: false,
             details_open: false,
             fragmentation: None,
@@ -1669,6 +1673,14 @@ impl KoshaApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .handoff
+            .as_ref()
+            .is_some_and(|panel| panel.tool_run.is_some())
+        {
+            self.close_handoff(cx);
+            return;
+        }
         // Closed first, so an action that opens something else — the search
         // box, the help panel — is not immediately covered by the palette it
         // came from, and so focus ends up where the action put it.
@@ -1711,6 +1723,13 @@ impl KoshaApp {
             commands::Action::SaveQuery(query) => self.save_query(&query, window, cx),
             commands::Action::ForgetQuery(query) => self.forget_query(&query, window, cx),
             commands::Action::OpenHelp => self.open_help(window, cx),
+            commands::Action::CleanupGuide => self.open_handoff(None, cx),
+            commands::Action::AskAi => {
+                if let Some(ready) = self.state.ready() {
+                    let id = ready.selected.unwrap_or(ready.focus);
+                    self.open_handoff(Some(id), cx);
+                }
+            }
             commands::Action::FindDuplicates => self.find_duplicates(cx),
             commands::Action::TakeSnapshot => self.take_snapshot(cx),
             commands::Action::CompareWithLatest(path) => self.compare_with_snapshot(path, cx),
@@ -3049,7 +3068,9 @@ impl KoshaApp {
     fn on_scan_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // Capture Escape before a focused input can consume it. Other keys
         // retain normal bubbling and overlay dismissal keeps its usual order.
-        if event.keystroke.key == "escape" && self.is_scanning() {
+        if event.keystroke.key == "escape"
+            && (self.is_scanning() || self.handoff.is_some() || self.handoff_task.is_some())
+        {
             self.on_key(event, window, cx);
             cx.stop_propagation();
         }
@@ -3058,6 +3079,13 @@ impl KoshaApp {
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modified = event.keystroke.modifiers.secondary();
+
+        if self.handoff.is_some() || self.handoff_task.is_some() {
+            if key == "escape" {
+                self.close_handoff(cx);
+            }
+            return;
+        }
 
         if key == "escape" && self.planning_action.take().is_some() {
             self.state.notice = Some("Cleanup preview cancelled.".into());
@@ -3607,6 +3635,7 @@ impl Render for KoshaApp {
         let owners_panel = self
             .owners_open
             .then(|| crate::owners::panel(self, &palette, cx));
+        let handoff_panel = crate::handoff::render(self, &palette, cx);
 
         // What fits. The table is sized first and the rails take what is
         // left: see `metrics::rails_for`. Read from the viewport on every
@@ -3657,6 +3686,7 @@ impl Render for KoshaApp {
             .children(settings_panel)
             .children(help_panel)
             .children(owners_panel)
+            .children(handoff_panel)
             .children(command_palette)
             .children(dialog)
             .children(unlock)
@@ -6403,6 +6433,8 @@ fn entry_context_menu(
         let opened_tree = Arc::clone(&tree);
         let trashing = view.clone();
         let trashed_tree = Arc::clone(&tree);
+        let asking = view.clone();
+        let asked_tree = Arc::clone(&tree);
         menu.item(
             PopupMenuItem::new("Open with default application")
                 .disabled(!live || tree.node(id).is_dir())
@@ -6417,6 +6449,19 @@ fn entry_context_menu(
                         }
                     })
                 }),
+        )
+        .item(
+            PopupMenuItem::new("Ask AI… (review prompt)").on_click(move |_, _, cx| {
+                asking.update(cx, |app, cx| {
+                    if app
+                        .state
+                        .ready()
+                        .is_some_and(|ready| Arc::ptr_eq(&ready.tree, &asked_tree))
+                    {
+                        app.open_handoff(Some(id), cx);
+                    }
+                })
+            }),
         )
         .separator()
         .item(
@@ -6445,6 +6490,226 @@ fn entry_context_menu(
 // ------------------------------------------------------------------ insights
 
 impl KoshaApp {
+    fn open_handoff(&mut self, entry: Option<NodeId>, cx: &mut Context<Self>) {
+        let Some(ready) = self.state.ready() else {
+            return;
+        };
+        let tree = Arc::clone(&ready.tree);
+        let historical =
+            ready.source.is_past() || tree.stats().strategy == kosha_core::Strategy::DiskImage;
+        self.handoff = None;
+        self.state.notice = Some("Preparing local review… Escape cancels.".into());
+        self.handoff_task = Some(cx.spawn(async move |this, cx| {
+            let (tree, guides, ai) = cx
+                .background_spawn(async move {
+                    let (guides, ai) = if let Some(id) = entry {
+                        (
+                            Vec::new(),
+                            Some((
+                                kosha_analyze::cleanup::ai_brief(&tree, id, false, historical),
+                                kosha_analyze::cleanup::ai_brief(&tree, id, true, historical),
+                            )),
+                        )
+                    } else {
+                        (
+                            kosha_analyze::cleanup::guides(
+                                &tree,
+                                &kosha_analyze::Context::detect(),
+                            ),
+                            None,
+                        )
+                    };
+                    (tree, guides, ai)
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                app.handoff_task = None;
+                if app
+                    .state
+                    .ready()
+                    .is_some_and(|ready| Arc::ptr_eq(&ready.tree, &tree))
+                {
+                    app.handoff = Some(crate::handoff::Panel {
+                        tree,
+                        guides,
+                        ai,
+                        include_names: false,
+                        workflow: None,
+                        historical,
+                        scroll: gpui_kit::ScrollHandle::new(),
+                        tool_plan: None,
+                        tool_run: None,
+                        tool_result: None,
+                        tool_finished: false,
+                    });
+                    app.state.notice = None;
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    pub(crate) fn close_handoff(&mut self, cx: &mut Context<Self>) {
+        if let Some(run) = self
+            .handoff
+            .as_ref()
+            .and_then(|panel| panel.tool_run.as_ref())
+        {
+            run.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.state.notice =
+                Some("Stopping uv cleanup; completed work cannot be undone.".into());
+            cx.notify();
+            return;
+        }
+        let rescan = self
+            .handoff
+            .as_ref()
+            .is_some_and(|panel| panel.tool_finished);
+        self.handoff_task = None;
+        self.handoff = None;
+        if rescan {
+            self.rescan(cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn handoff_copied(&mut self, cx: &mut Context<Self>) {
+        self.state.notice = Some("Copied reviewed prompt. Nothing sent to an AI.".into());
+        self.close_handoff(cx);
+    }
+
+    pub(crate) fn handoff_writable(&self, tree: &Arc<SizeTree>) -> bool {
+        !kosha_core::elevated()
+            && self.state.mode().is_read_write()
+            && self.state.ready().is_some_and(|ready| {
+                Arc::ptr_eq(&ready.tree, tree)
+                    && !ready.source.is_past()
+                    && !tree.is_incomplete()
+                    && tree.stats().strategy != kosha_core::Strategy::DiskImage
+            })
+    }
+
+    pub(crate) fn prepare_uv_prune(&mut self, id: NodeId, cx: &mut Context<Self>) {
+        let Some(panel) = &self.handoff else { return };
+        if !self.handoff_writable(&panel.tree)
+            || !panel
+                .guides
+                .iter()
+                .any(|guide| guide.node == id && guide.uv_prune)
+        {
+            return;
+        }
+        let tree = Arc::clone(&panel.tree);
+        let root = self.state.session.root().to_path_buf();
+        let path = tree.path_of(id);
+        self.state.notice = Some("Inspecting installed uv and cache for preview…".into());
+        self.handoff_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    kosha_fsops::tool_cleanup::UvPrunePlan::prepare(&path, &root)
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                app.handoff_task = None;
+                if !app.handoff_writable(&tree) {
+                    return;
+                }
+                if let Some(panel) = app.handoff.as_mut()
+                    && Arc::ptr_eq(&panel.tree, &tree)
+                {
+                    match result {
+                        Ok(plan) => {
+                            panel.tool_plan = Some(plan);
+                            app.state.notice = None;
+                        }
+                        Err(error) => {
+                            panel.tool_result = Some(error);
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    pub(crate) fn confirm_uv_prune(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.handoff.as_ref() else {
+            return;
+        };
+        if !self.handoff_writable(&panel.tree) {
+            return;
+        }
+        let Some(panel) = self.handoff.as_mut() else {
+            return;
+        };
+        let Some(plan) = panel.tool_plan.take() else {
+            return;
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        panel.tool_run = Some(crate::handoff::CancelOnDrop(Arc::clone(&cancel)));
+        let mut session = kosha_fsops::Session::new(self.state.session.root());
+        // This branch is reached only by the exact plan's confirm button,
+        // after checking the real current session is still Read-write. Move
+        // that human-approved operation to a worker; do not enable the UI's
+        // session or persist its mode. The modal blocks further operations.
+        session.enable_read_write(kosha_fsops::UserConfirmed::from_dialog_acceptance());
+        self.handoff_task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let mut audit = AuditLog::open_default();
+                    plan.execute(
+                        &session.grant().expect("confirmed tool operation"),
+                        &mut audit,
+                        &cancel,
+                    )
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                app.handoff_task = None;
+                if let Some(panel) = app.handoff.as_mut() {
+                    panel.tool_run = None;
+                    panel.tool_result = Some(match result {
+                        Ok(()) => "uv cache prune completed. Rescan to measure the result.".into(),
+                        Err(error) => error,
+                    });
+                    panel.tool_finished = true;
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    pub(crate) fn finish_tool_handoff(&mut self, cx: &mut Context<Self>) {
+        self.close_handoff(cx);
+        if !self.is_scanning() {
+            self.rescan(cx);
+        }
+    }
+
+    pub(crate) fn handoff_reveal(
+        &mut self,
+        id: NodeId,
+        tree: &Arc<SizeTree>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ready) = self.state.ready_mut()
+            && Arc::ptr_eq(&ready.tree, tree)
+        {
+            ready.reveal(id);
+            self.sync_query_input(window, cx);
+        } else {
+            self.state.notice = Some("The displayed scan changed; open the guide again.".into());
+        }
+        self.close_handoff(cx);
+    }
+
     fn render_insights(&self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         // Quick look takes the top of this rail rather than floating over the
         // table. The first version was an overlay anchored above the rows, and
@@ -6468,6 +6733,13 @@ impl KoshaApp {
             .gap(px(8.0))
             .children(details)
             .child(crate::ui::section_label(palette, "INSIGHTS"))
+            .when(self.state.ready().is_some(), |panel| {
+                panel.child(
+                    crate::ui::button("cleanup-guide", palette)
+                        .child("Cleanup guide…")
+                        .on_click(cx.listener(|app, _, _, cx| app.open_handoff(None, cx))),
+                )
+            })
             .child(self.render_duplicates_button(palette, cx))
             .children(self.render_snapshot_button(palette, cx));
 
@@ -7437,8 +7709,19 @@ pub fn open(
         // would be a worse bug than the one it was protecting against.
         let closing = view.clone();
         window.on_window_should_close(cx, move |window, cx| {
-            closing.update(cx, |app, _| app.remember_geometry(window));
-            true
+            closing.update(cx, |app, cx| {
+                if app
+                    .handoff
+                    .as_ref()
+                    .is_some_and(|panel| panel.tool_run.is_some())
+                {
+                    app.close_handoff(cx);
+                    false
+                } else {
+                    app.remember_geometry(window);
+                    true
+                }
+            })
         });
 
         cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))

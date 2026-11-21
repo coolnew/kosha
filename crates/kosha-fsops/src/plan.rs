@@ -104,7 +104,7 @@ pub struct Fingerprint {
 }
 
 impl Fingerprint {
-    fn of(path: &Path) -> std::io::Result<Self> {
+    pub(crate) fn of(path: &Path) -> std::io::Result<Self> {
         let md = fs::symlink_metadata(path)?;
         Ok(Fingerprint {
             len: md.len(),

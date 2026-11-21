@@ -15,6 +15,10 @@ do not automatically enable Read-write mode.
 
 ## Review the plan
 
+For workflow-specific advice and reviewed AI prompts, see [the cleanup
+guide](cleanup-guide.md). Browser history time ranges belong in the browser's
+own controls. The guide does not execute cleanup or bypass modes.
+
 An actionable finding offers an appropriate operation. Review the named paths,
 estimated effect, and plan before confirming. The app checks file identity again
 before changing files and refuses protected system locations, filesystem roots,

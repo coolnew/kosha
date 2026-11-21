@@ -43,6 +43,8 @@ OPTIONS:
     --top N          Show the N largest entries at the root (default 15)
     --stats          Print scan timing and memory statistics
     --insights       Run the analysis rules and print the findings
+    --cleanup-guide  Show recorded workflow locations and owning-tool cleanup
+                     instructions; never executes cleanup or sends data to AI
     --owners         Report how much disk each account is using
     --duplicates     Hunt for duplicate file contents (reads file data)
     --dupe-min N     Smallest file the hunt considers, in bytes (default 1 MiB);
@@ -142,6 +144,7 @@ struct Args {
     top: usize,
     stats: bool,
     insights: bool,
+    cleanup_guide: bool,
     /// Report disk use per account. Turns on `ScanOptions::collect_owners`,
     /// because there is no point asking afterwards for something the scan had
     /// to record as it went.
@@ -501,6 +504,25 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
         if args.insights {
             print_insights(&tree, args);
+        }
+        if args.cleanup_guide {
+            sayln!("\nCLEANUP GUIDE — recorded data, not guaranteed savings");
+            let guides = kosha_analyze::cleanup::guides(&tree, &Context::detect());
+            if guides.is_empty() {
+                sayln!("  No supported locations recorded. Custom locations may not be detected.");
+            }
+            for guide in guides {
+                sayln!(
+                    "  {} · {} · {} recorded",
+                    guide.workflow.label(),
+                    guide.title,
+                    format::bytes_in(tree.node(guide.node).allocated, args.units)
+                );
+                sayln!("    {}\n    {}", guide.steps, guide.documentation);
+            }
+            sayln!(
+                "  Use the owning application's controls and rescan afterwards. No commands were executed."
+            );
         }
         if args.owners {
             print_owners(&tree, args);
@@ -1586,6 +1608,7 @@ where
         top: 15,
         stats: false,
         insights: false,
+        cleanup_guide: false,
         owners: false,
         duplicates: false,
         dupe_min: DuplicateOptions::default().min_size,
@@ -1643,6 +1666,7 @@ where
             "-V" | "--version" => return Ok(Parsed::Version),
             "--stats" => args.stats = true,
             "--insights" => args.insights = true,
+            "--cleanup-guide" => args.cleanup_guide = true,
             "--owners" => {
                 args.owners = true;
                 args.scan.collect_owners = true;
@@ -1803,6 +1827,17 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("`{line}` parsed, but should not have"),
         }
+    }
+
+    #[test]
+    fn cleanup_guide_operates_on_records_without_changing_scan_or_export_policy() {
+        let parsed = args(". --cleanup-guide");
+        assert!(parsed.cleanup_guide);
+        assert!(parsed.scan.max_depth.is_none());
+        assert!(parsed.scan_only_flag().is_none());
+        assert!(!parsed.document_on_stdout());
+        let parsed = args(". --cleanup-guide --export json");
+        assert!(parsed.document_on_stdout());
     }
 
     // ------------------------------------------------------ the help screen

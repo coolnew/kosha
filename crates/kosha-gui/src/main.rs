@@ -27,6 +27,7 @@ mod details;
 mod drive_history;
 mod elevate;
 mod geometry;
+mod handoff;
 mod icons;
 mod native_menu;
 mod owners;

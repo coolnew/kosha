@@ -15,6 +15,10 @@ infer your profession or inspect conversations.
 
 ## Use and manage packs
 
+The [cleanup guide](cleanup-guide.md) adds built-in owning-tool guidance and an
+optional guarded uv operation. Insight packs cannot define executable commands,
+AI calls, shell arguments or cleanup URLs; a location finding stays review-only.
+
 ```sh
 kosha marketplace sync
 kosha marketplace search sessions

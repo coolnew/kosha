@@ -37,6 +37,7 @@ mod compress;
 pub mod guard;
 mod mode;
 mod plan;
+pub mod tool_cleanup;
 
 pub use audit::AuditLog;
 pub use guard::Refusal;

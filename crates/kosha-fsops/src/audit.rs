@@ -64,6 +64,28 @@ impl AuditLog {
         self.file.is_some()
     }
 
+    /// Typed tool operation. Bytes reclaimed are deliberately unknown until a
+    /// rescan, rather than copied from a profile's total size.
+    pub(crate) fn record_tool(
+        &mut self,
+        cache: &Path,
+        executable: &Path,
+        outcome: &str,
+    ) -> std::io::Result<()> {
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("audit log unavailable"))?;
+        let line = format!(
+            "{{\"time\":\"{}\",\"action\":\"uv cache prune\",\"reversible\":false,\"bytes\":null,\"outcome\":{},\"path\":{},\"executable\":{}}}\n",
+            timestamp(),
+            json_string(outcome),
+            json_string(&cache.to_string_lossy()),
+            json_string(&executable.to_string_lossy())
+        );
+        file.write_all(line.as_bytes())
+    }
+
     pub fn record(&mut self, path: &Path, action: Action, bytes: u64, outcome: &Outcome) {
         let Some(file) = self.file.as_mut() else {
             return;

@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Effective date: 19 November 2026**
+**Effective date: 20 November 2026**
 
 This policy covers the official Kosha CLI (`kosha`), desktop app (`kosha-gui`,
 also named **KoshaApp** in Microsoft Store packaging), and the Kosha website.
@@ -29,6 +29,26 @@ for NTFS analysis, and application-data storage. Administrator access can expose
 more local metadata. These capabilities do not mean scan data is uploaded.
 Scanning is read-only by default; file-changing actions require the app's
 explicit Read-write mode and confirmation. See [safe cleanup](docs/manual/safety.md).
+
+## Optional cleanup guide and AI handoff
+
+The cleanup guide matches known application locations in recorded metadata.
+It does not read browser history or conversations or infer your identity.
+The optional desktop uv cache-prune action invokes your trusted installed uv
+offline with a specific cache path, after Read-write and exact-plan confirmation.
+An operation-owned temporary HOME/workspace isolates default profile lookups.
+No API keys or inherited tool configuration are passed; audit records include
+the executable, target and outcome. External executable behavior is governed
+by that tool; Kosha does not sandbox it. Other cleanup guidance does not run
+commands. Official-documentation links open only when you
+choose them, and the destination receives ordinary web connection information.
+
+Ask AI prepares a local metadata prompt without contacting an AI provider.
+Names and paths default off; you can explicitly preview them before copying.
+Clipboard contents may be accessible to other apps or sync through your OS.
+If you paste the prompt into another service, that service receives the data
+under its own policy. Kosha does not send it, store an AI key or read contents
+for this feature. Inspect even name-free metadata before sharing.
 
 ## Information saved on your device
 

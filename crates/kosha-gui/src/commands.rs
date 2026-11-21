@@ -103,6 +103,8 @@ pub enum Action {
     PinScope(PathBuf),
     UnpinScope(PathBuf),
     OpenHelp,
+    CleanupGuide,
+    AskAi,
     /// Show the log of everything this application has changed.
     ///
     /// The safety model calls the audit log one of its layers and says it is
@@ -338,6 +340,24 @@ pub fn all(
     });
 
     if situation.have_tree {
+        commands.push(Command {
+            label: "Cleanup guide…".into(),
+            detail: "Review development, browser and AI session locations; use the owning tool"
+                .into(),
+            binding: None,
+            keywords: &[
+                "persona", "workflow", "cache", "history", "uv", "npm", "browser", "claude",
+                "codex",
+            ],
+            action: Action::CleanupGuide,
+        });
+        commands.push(Command {
+            label: "Ask AI about the selection…".into(),
+            detail: "Preview and copy a metadata-only prompt; nothing is sent automatically".into(),
+            binding: None,
+            keywords: &["assistant", "claude", "codex", "chatgpt", "prompt", "copy"],
+            action: Action::AskAi,
+        });
         commands.push(Command {
             label: "Rescan this folder".into(),
             detail: "Read it again from disk".into(),
@@ -1080,6 +1100,24 @@ mod tests {
             can_go_up: true,
             has_selection: true,
             ..Situation::default()
+        }
+    }
+
+    #[test]
+    fn cleanup_and_ai_handoffs_require_a_recorded_tree_and_are_discoverable() {
+        let empty = all(&Situation::default(), &[], &[], &[], &[]);
+        assert!(
+            !empty
+                .iter()
+                .any(|command| matches!(command.action, Action::CleanupGuide | Action::AskAi))
+        );
+        let commands = all(&browsing(), &[], &[], &[], &[]);
+        for (query, action) in [
+            ("cleanup guide", Action::CleanupGuide),
+            ("Ask AI", Action::AskAi),
+        ] {
+            let found = search(&commands, query, LIMIT);
+            assert!(found.iter().any(|&index| commands[index].action == action));
         }
     }
 

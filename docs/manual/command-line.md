@@ -1,5 +1,9 @@
 # Command-line guide
 
+For owning-tool advice on recorded workflow locations, use
+`kosha "PATH" --cleanup-guide`. It does not execute cleanup; see
+[the cleanup guide](cleanup-guide.md) for supported locations and limitations.
+
 For publisher-qualified package IDs, generic catalog compatibility, typed
 templates and regex extraction, see [marketplace formats](marketplace.md).
 

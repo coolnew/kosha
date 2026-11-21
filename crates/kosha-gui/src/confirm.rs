@@ -81,7 +81,8 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             })
                             .child("Empty a cache directory — permanent")
                             .child("Delete permanently — permanent")
-                            .child("Compress — reversible, and loses nothing"),
+                            .child("Compress — reversible, and loses nothing")
+                            .child("Prune unused uv cache — permanent, separate tool preview"),
                     )
                     .child(
                         div()

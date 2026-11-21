@@ -1,8 +1,62 @@
 # Changelog
 
-## [Unreleased]
+## [0.11.0] — 2026-11-20
 
-Nothing yet.
+### Cleanup guidance for the workflows on your disk
+
+- Open **Cleanup guide** from Insights or the command palette to review known
+  uv/npm cache, Chrome/Firefox profile and Claude/Codex session locations. Filter
+  Development, Browsing or AI sessions without inferring a person's identity.
+- Use `kosha "PATH" --cleanup-guide` for the same owning-tool advice in the CLI.
+  Normal paths still scan freshly; snapshots remain historical and cache reads
+  stay opt-in. Structured exports remain clean when combined with this flag.
+- Review browser time ranges and data types in the browser's own controls.
+  Profile sizes include valuable data and are not promised cleanup savings.
+  AI session histories remain review-only rather than disposable caches.
+
+### Guarded owning-tool cleanup
+
+The desktop can now run **uv cache prune** for a detected default uv cache.
+It requires a non-admin/root session, Read-write mode, a live complete scan and
+an exact executable/cache preview followed by explicit confirmation. Kosha uses
+your installed trusted native uv with fixed offline/no-config arguments, an
+isolated temporary HOME/workspace, executable-hash and cache-evidence rechecks,
+a required audit log, Stop support and a five-minute timeout. No shell commands
+or executable instructions can come from marketplace packs.
+
+Pruning is permanent; Stop cannot undo work already completed. Closing a finished
+result rescans before further file actions. Recorded cache size is not a recovery
+estimate. Custom caches and other tools remain guidance-only. The external tool
+is trusted code, not sandboxed; Unix setuid/setgid executables are refused and
+preview paths are quoted to distinguish untrusted filenames from instructions.
+
+### Ask AI without automatic sharing
+
+Right-click a treemap tile, file-list entry or search result to prepare a local
+AI prompt. Review type, byte sizes and up to six largest immediate children.
+Names and paths default off; explicitly preview them before copying if useful.
+Paste the reviewed prompt into your chosen assistant yourself. Kosha makes no
+AI-provider request, reads no contents for the prompt and requires no API key.
+The clipboard can be visible to other apps or sync through OS services.
+
+These changes complete the agreed scope of issue #6 alongside the treemap
+Trash actions, immediate-child hover previews and marketplace review packs
+introduced in 0.10.9. Read-only defaults and confirmation safeguards remain.
+See the [illustrated cleanup guide](https://coolnew.github.io/kosha/manual/cleanup-guide/).
+
+### Downloads and limitations
+
+Windows portable ZIP and offline Setup contain static-CRT binaries; the unsigned
+Store-upload MSIX is intended for Partner Center. Linux archives and the Apple
+Silicon DMG include CLI/GUI and offline documentation. Source archives, manifests
+and SHA-256 files are separate assets. Windows packages remain unsigned; macOS
+is experimental and ad-hoc signed without Developer ID/notarization. See the
+[macOS installation guide](https://coolnew.github.io/kosha/manual/macos/).
+
+Browser-history database mutation, automatic persona profiling, arbitrary tool
+executors and direct AI-provider integration are not included. Issue #1 remains
+open for macOS download trust. No Microsoft Store submission is performed by
+this GitHub release.
 
 ## [0.10.9] — 2026-11-20
 
@@ -408,7 +462,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.10.9...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.11.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -431,3 +485,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.10.8]: https://github.com/coolnew/kosha/releases/tag/v0.10.8
 
 [0.10.9]: https://github.com/coolnew/kosha/releases/tag/v0.10.9
+
+[0.11.0]: https://github.com/coolnew/kosha/releases/tag/v0.11.0

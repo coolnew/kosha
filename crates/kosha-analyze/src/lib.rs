@@ -25,6 +25,7 @@
 //! This crate cannot modify the filesystem. It does not depend on
 //! `kosha-fsops`, which is the only crate that can.
 
+pub mod cleanup;
 pub mod context;
 pub mod duplicates;
 mod engine;
