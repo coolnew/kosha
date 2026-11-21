@@ -6,11 +6,14 @@ New snapshots use format 2 and retain filesystem creation dates where the scan
 recorded them. Format 1 records still open, with creation dates marked unknown.
 Keeping an older automatic record preserves its original metadata; it does not
 invent missing dates. Older kosha builds cannot open format 2 records.
+From Kosha 0.13.0, imported listings use format 3, so an older Kosha refuses
+them instead of showing them as its own scans.
 
 | Record | Created by | In snapshot list | Retention |
 | --- | --- | --- | --- |
 | Automatic drive scan | Finished drive-root scan in the desktop app | No | One replaceable slot per drive root |
 | Explicit snapshot | **Keep a snapshot**, or CLI `--snapshot` | Yes | Kept until removed |
+| Imported listing (from 0.13.0) | CLI `kosha import` | Yes | Kept until removed |
 
 The CLI lists these separately: `kosha --snapshots` shows explicit snapshots;
 `kosha --caches` shows automatic drive records and their age without rescanning.
@@ -82,6 +85,52 @@ refuses to share a replaced name.
 
 To bring a snapshot from another machine, see
 [cloud storage and other machines](cloud-and-other-machines.md#other-machines).
+
+## Imported listings
+
+From Kosha 0.13.0, `kosha import --from ncdu FILE` keeps an
+[ncdu](https://dev.yorhel.nl/ncdu) JSON export as a record; see the
+[command-line guide](command-line.md#import-an-ncdu-listing) for the command.
+ncdu can run on a machine where Kosha is not installed, and its export can be
+copied or piped here. Kosha reads only the file you name (or standard input),
+starts no program and makes no network request.
+
+An imported record is not a Kosha scan, and every view says so: the CLI header,
+`--stats`, the `--snapshots` list and search print
+`Imported from ncdu 2.9 (export 2026-11-20 14:02 UTC). Not measured by Kosha.`
+with the tool and date from the file. In the desktop app the chip beside the
+breadcrumb reads **Imported · ncdu** and the status bar repeats the sentence.
+If the export has no timestamp, the line says `observed: unknown` and gives the
+import date.
+
+What is recorded, from the export:
+
+- Names, the folder structure, apparent size (`asize`) and ncdu's disk usage
+  (`dsize`). If the export records no disk usage at all, on-disk sizes are
+  stored equal to apparent sizes and every view says they were not recorded.
+- Modification times, only when ncdu exported them (`ncdu -e`). Otherwise date
+  conditions in searches match nothing in the record.
+- Hard links: entries with the same device and inode count once, as ncdu does.
+- Entries ncdu could not read, excluded or did not cross into are kept and
+  flagged; totals are then shown as lower bounds.
+- Creation dates and owners are not recorded.
+
+An imported record allows no file action of any kind, in any mode: no deletion,
+Trash, open, reveal, duplicate search or rescan. Its root is a label for a
+place on another machine, not a path on this one. Insights may still describe
+build output or caches, as advice about the source machine; rules about this
+machine's allocation (cluster slack, sparse files, compression) do not run.
+Comparisons with imported records work and warn that the sizes came from
+another tool.
+
+Limits: ncdu's binary export (`ncdu -O`) is not read; export JSON with
+`ncdu -o` instead. An export with file names that are not valid UTF-8 is not
+valid JSON and is refused; convert it first, for example with `iconv`. Imports
+are refused above 8 GiB of input or decompressed data (raise with
+`--max-input-bytes`), 50 million entries, 120 directory levels, 4096-byte
+names, or a zstd window larger than 8 MiB. Names that would step outside their
+folder (`.`, `..`, a `/` or NUL) are refused, naming the entry. A refused
+import writes nothing.
 
 ## Compare observations
 

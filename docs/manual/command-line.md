@@ -217,6 +217,42 @@ the observations, distinguishes directory and file changes, and shows new,
 grown, shrunk, or gone paths. The net is across file changes, including
 changes below the display threshold. Directory totals can overlap their children.
 
+### Import an ncdu listing
+
+From Kosha 0.13.0, `kosha import` keeps a listing written by
+[ncdu](https://dev.yorhel.nl/ncdu) as a record in the snapshot folder:
+
+```sh
+ncdu -o srv.json /srv
+kosha import --from ncdu srv.json --label "build-box /srv"
+ssh build-box ncdu -co- /srv | kosha import --from ncdu - --label "build-box /srv"
+kosha --snapshots
+kosha "SAVED.kosha" --stats
+```
+
+The input is an ncdu JSON export (`ncdu -o`), uncompressed, gzip-compressed or
+zstd-compressed (`ncdu -c`). Use `-` to read standard input. The command prints
+counts, the provenance line and an `imported to` path. You run ncdu yourself,
+on this machine or another; Kosha starts no program, makes no network request,
+and never opens a path named inside the listing.
+
+| Option | Meaning |
+| --- | --- |
+| `--from ncdu` | Required. ncdu JSON is the only supported format. |
+| `--label TEXT` | Name the record. |
+| `--max-input-bytes N` | Refuse input, or decompressed input, larger than `N` bytes. The default is 8 GiB. |
+
+An imported record opens like a snapshot, with `--stats`, `--query`,
+`--insights`, `search --load` and `--since`. Every view states
+`Imported from ncdu 2.9 (export 2026-11-20 14:02 UTC). Not measured by Kosha.`
+(with the tool and date from the file), and stderr reports
+`source: imported; measured_by_kosha=false`. JSON exports add
+`"imported": true` and `"measured_by_kosha": false`. Insights are advice about
+the source machine and never offer an action; rules about this machine's
+allocation do not run. `--duplicates`, `--snapshot` and scan options are refused.
+See [importing listings](snapshots.md#imported-listings) for limits and what is
+recorded.
+
 ## Exports
 
 ```sh
@@ -277,6 +313,7 @@ The root is contextual metadata and is excluded from entry export rows.
 | `access_limited`, `unreadable_entries` | Whether access was limited and how many unreadable entries were recorded. |
 | `incomplete`, `cancelled`, `depth_limited` | Whether the scan is unfinished, and whether cancellation or depth caused it. |
 | `partial`, `lower_bound` | Compatibility coverage flag and explicit lower-bound flag. Check the more specific fields for the cause. |
+| `imported`, `measured_by_kosha` | Present only for an imported listing (from Kosha 0.13.0): `true` and `false`. The sizes are what the source tool reported. |
 
 ## Use from an LLM or script
 

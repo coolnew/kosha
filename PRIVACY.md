@@ -16,6 +16,9 @@ third-party network services, explained below.
 ## Information the app accesses and uses
 
 Kosha reads the drives, folders, snapshots, or disk images you choose to inspect.
+From Kosha 0.13.0 it also reads listings written by another tool (ncdu JSON
+exports) that you choose to import; it reads only that file or standard input,
+and never opens the paths named inside it.
 It uses file and folder names, paths, sizes, timestamps, filesystem attributes,
 and ownership information when available or enabled. Names, paths, and owner
 identifiers can identify people or reveal sensitive information about them.
@@ -29,7 +32,7 @@ for NTFS analysis, and application-data storage. Administrator access can expose
 more local metadata. These capabilities do not mean scan data is uploaded.
 Scanning does not intentionally rewrite scanned file contents. Desktop cleanup
 actions require explicit Read-write mode and confirmation. CLI exports can
-replace their destination files, snapshots write records, and marketplace
+replace their destination files, snapshots and imports write records, and marketplace
 management writes local state or removes installed packs without that desktop
 mode switch. See [safe cleanup](docs/manual/safety.md) and
 [CLI write-capable operations](docs/manual/agent-privacy.md#what-the-existing-controls-do).
@@ -59,8 +62,9 @@ for this feature. Inspect even name-free metadata before sharing.
 Kosha can save the following in its application directories or locations you select:
 
 - Preferences, pinned paths, saved queries, and custom search recipes.
-- Explicit snapshots and automatic saved drive scans containing filesystem
-  metadata, including names, paths, sizes, timestamps, and collected ownership data.
+- Explicit snapshots, imported listings and automatic saved drive scans
+  containing filesystem metadata, including names, paths, sizes, timestamps,
+  and collected ownership data.
 - Exported results or comparisons and an audit log of file-changing operations,
   which can include affected paths and metadata.
 - Downloaded marketplace catalogs, recipe packs and review-only insight packs.

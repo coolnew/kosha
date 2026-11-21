@@ -71,7 +71,9 @@ treat what happens there as untested.
 ## Other machines
 
 Kosha cannot scan another machine from inside Kosha. The workflow that works
-today uses Kosha on both machines and a snapshot file:
+today uses Kosha on both machines and a snapshot file. From Kosha 0.13.0, a
+listing made by ncdu on the other machine can be imported instead; see
+[without Kosha on the other machine](#without-kosha-on-the-other-machine).
 
 1. Install Kosha on the other machine and scan there, keeping a snapshot:
 
@@ -115,11 +117,27 @@ recorded it. From 0.12.2, opening a Linux snapshot on Windows replaces file
 names that Windows cannot represent with the replacement character and reports
 how many; see [snapshots from another system](snapshots.md#snapshots-from-another-system).
 
+### Without Kosha on the other machine
+
+From Kosha 0.13.0, run [ncdu](https://dev.yorhel.nl/ncdu) there and import its
+JSON export here:
+
+```sh
+ssh build-box ncdu -co- /srv | kosha import --from ncdu - --label "build-box /srv"
+kosha --snapshots
+```
+
+You open the SSH session and run ncdu; Kosha only reads what arrives on its
+standard input (or a file you name), starts no program and makes no network
+request. The record says everywhere that it was imported and not measured by
+Kosha. See [imported listings](snapshots.md#imported-listings).
+
 ## What is not available yet
 
 - Scanning online accounts directly.
 - Scanning other machines from inside Kosha.
-- Importing scans made by other tools.
+- Importing listings from tools other than ncdu, such as rclone or QDirStat.
+  Importing ncdu JSON exports is available from Kosha 0.13.0.
 
 ## Tell us what is missing
 
