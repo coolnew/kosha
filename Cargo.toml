@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/kosha-core",
+    "crates/kosha-view",
     "crates/kosha-analyze",
     "crates/kosha-fsops",
     "crates/kosha-query",
@@ -21,6 +22,7 @@ authors = ["Neeraj Sharma <neerajsharma.9@outlook.com>"]
 
 [workspace.dependencies]
 kosha-core = { path = "crates/kosha-core", version = "0.11.0" }
+kosha-view = { path = "crates/kosha-view", version = "0.11.0" }
 kosha-analyze = { path = "crates/kosha-analyze", version = "0.11.0" }
 kosha-fsops = { path = "crates/kosha-fsops", version = "0.11.0" }
 kosha-query = { path = "crates/kosha-query", version = "0.11.0" }

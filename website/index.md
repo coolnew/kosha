@@ -219,8 +219,9 @@ metadata you intend it to inspect.
 **Available today:** search a deliberately shared snapshot without rescanning
 its original folder. The entire snapshot remains readable to its recipient.
 
-**Under design:** owner-approved metadata views and explicit scope for
-cooperative automation. These are not isolation features available in 0.11.0.
+**In development source after 0.11.0:** owner-published metadata views and
+fixed-view automation sessions. [See commands and limits →](../docs/manual/metadata-views.md)
+These are not agent sandboxes or features in the published 0.11.0 binaries.
 
 </div>
 

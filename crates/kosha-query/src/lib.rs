@@ -269,6 +269,12 @@ impl Query {
         eval::matches(&self.expr, tree, id, now, self.needs_path)
     }
 
+    /// Evaluate recorded metadata with an explicit logical path, e.g. a portable
+    /// view alias. The path is data only; no filesystem resolution takes place.
+    pub fn matches_with_path(&self, tree: &SizeTree, id: NodeId, now: u32, path: &str) -> bool {
+        eval::matches_with_path(&self.expr, tree, id, now, path)
+    }
+
     /// Run the query: what matched, how much of it there is, and the biggest.
     ///
     /// One pass over the arena. Asking for the matches and the total separately

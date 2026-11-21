@@ -23,6 +23,10 @@ the GUI cache. A depth limit requires an explicit `--depth` flag.
 
 ## Scan and query
 
+For deliberately shared metadata and a fixed-source automation session, see
+[`kosha view`](metadata-views.md), available in development source after 0.11.0.
+It uses a distinct artifact and does not alter ordinary scan/export behavior.
+
 ```sh
 kosha --version
 kosha --help

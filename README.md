@@ -93,6 +93,11 @@ what a scan reads. Isolate the agent and share only deliberately approved inputs
 an existing snapshot is not a redacted view. Read the
 [agent privacy guide](https://coolnew.github.io/kosha/manual/agent-privacy/).
 
+Development source after 0.11.0 adds **owner-approved metadata views** and a
+fixed-view JSONL session. Excluded entries are absent from the artifact itself;
+the consumer never reopens live source paths. This complements agent isolation,
+not replaces it. [Commands and limits](docs/manual/metadata-views.md).
+
 ![Kosha CLI explaining a query without opening a source, then exporting matches with incomplete, access-limited, and lower-bound flags](docs/manual/images/cli-agent-dark.png)
 
 *Real JSON with selected fields and the first matching entry shown. The full

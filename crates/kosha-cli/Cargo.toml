@@ -19,13 +19,17 @@ path = "src/main.rs"
 
 [dependencies]
 kosha-core.workspace = true
+kosha-view.workspace = true
 kosha-analyze.workspace = true
 kosha-query.workspace = true
 kosha-search.workspace = true
 kosha-marketplace.workspace = true
 ctrlc = "3"
 serde_json.workspace = true
-
-# For the temporary tree the broken-pipe test exports; see tests/pipe.rs.
-[dev-dependencies]
+serde.workspace = true
+sha2 = "0.10"
+# New view artifacts use atomic no-clobber publication; also used by fixtures.
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

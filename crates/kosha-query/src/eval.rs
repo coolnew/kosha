@@ -29,6 +29,16 @@ pub(crate) fn matches(
     evaluate(expr, tree, id, now, path.as_deref()) == Some(true)
 }
 
+pub(crate) fn matches_with_path(
+    expr: &Expr,
+    tree: &SizeTree,
+    id: NodeId,
+    now: u32,
+    path: &str,
+) -> bool {
+    evaluate(expr, tree, id, now, Some(path)) == Some(true)
+}
+
 // Unknown birth times propagate through NOT. AND/OR retain short-circuit
 // three-valued logic: false AND unknown is false; true OR unknown is true.
 fn evaluate(

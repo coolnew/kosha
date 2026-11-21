@@ -24,6 +24,7 @@ mod cache;
 mod marketplace;
 mod search;
 mod snapshots;
+mod views;
 
 const USAGE: &str = "\
 kosha — scan a directory tree and report what is in it
@@ -38,6 +39,7 @@ USAGE:
     kosha search --path PATH \"files ending with md\"
     kosha search --help             natural-language search options
     kosha marketplace --help       install and manage marketplace packs
+    kosha view --help              publish and query scoped metadata views
 
 OPTIONS:
     --top N          Show the N largest entries at the root (default 15)
@@ -212,6 +214,7 @@ impl Args {
 fn main() -> ExitCode {
     let result = match parse() {
         Ok(Parsed::Run(args)) => run(*args),
+        Ok(Parsed::View(args)) => return views::run(&args),
         Ok(Parsed::Caches(args)) => cache::list(&args),
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
@@ -1556,6 +1559,7 @@ QUERY LANGUAGE
 /// reported two passes and no failures.
 #[derive(Debug)]
 enum Parsed {
+    View(Vec<String>),
     /// Boxed because `Args` is far larger than the other arms and this is
     /// returned by value.
     Run(Box<Args>),
@@ -1589,6 +1593,10 @@ where
 {
     let original: Vec<_> = argv.into_iter().collect();
     let mut argv = original.clone().into_iter().peekable();
+    if argv.peek().is_some_and(|arg| arg == "view") {
+        argv.next();
+        return Ok(Parsed::View(argv.collect()));
+    }
     if argv.peek().is_some_and(|arg| arg == "marketplace") {
         argv.next();
         return Ok(Parsed::Marketplace(argv.collect()));

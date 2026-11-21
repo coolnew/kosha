@@ -11,6 +11,14 @@ approved inputs. A snapshot is historical metadata, not a redacted view; its
 recipient can read all recorded entries. See the
 [agent privacy guide](https://coolnew.github.io/kosha/manual/agent-privacy/).
 
+Development source after 0.11.0 adds `kosha view --help`: an owner publisher and
+inert metadata consumer. Prefer an explicitly approved `.koshaview` with
+`kosha view session --input FILE` for a bound JSONL query session; its requests
+cannot scan, choose another source or write files. Use only inspect/describe/
+query/close, built-in translation and shared fields. This does not isolate the
+parent agent. These commands are absent from published 0.11.0; see the
+[view workflow and protocol](https://coolnew.github.io/kosha/manual/metadata-views/).
+
 ## Discover and run
 
 Use installed help as the authority for the available version:

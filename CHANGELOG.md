@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Delegated metadata views
+
+- Add `kosha view`: owner-side preview and SHA-256-bound, no-clobber publication
+  of a selected snapshot subtree with an alias and optional file dates.
+- Physically omit unshared metadata and recompute totals from shared entries;
+  retain historical coverage and measured-versus-estimated allocation qualifiers.
+- Add inert view queries and a fixed-view JSONL session with allowlisted
+  operations and structured refusals. These are cooperative controls, not an
+  agent sandbox. GUI publication and live folder grants are not included.
+
 ### Documentation
 
 - Explain agent access and privacy, current snapshot-sharing limits and proposed

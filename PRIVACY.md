@@ -95,6 +95,18 @@ privacy requires controlling the agent's execution environment and sharing only
 approved inputs. See [agent access and privacy](docs/manual/agent-privacy.md) for
 current behavior, snapshot handoff and the distinction from proposed features.
 
+Development source after 0.11.0 adds owner-published metadata views. Their new
+artifacts contain only the selected recorded entries, a chosen root alias,
+mandatory sizes/types and source observation/coverage qualifiers; file dates
+are optional and owners/original source paths are omitted. The publisher reads
+the explicitly supplied snapshot before projection and writes a new artifact
+only after preview-digest confirmation. View consumers and their fixed-source
+session operate on the supplied artifact without reopening live source paths,
+loading personal recipes or contacting an AI provider. All included metadata
+remains readable to the recipient. This does not sandbox the agent or change
+ordinary CLI write capabilities. See [metadata views](docs/manual/metadata-views.md)
+for current-source availability, limits and retention/sharing responsibilities.
+
 ## Optional marketplace network requests
 
 When you request a marketplace sync or download a recipe or insight pack, Kosha makes HTTPS

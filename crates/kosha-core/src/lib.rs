@@ -25,8 +25,9 @@
 //! * The arena is in breadth-first order, so `child_index > parent_index`
 //!   always holds, and size aggregation is one reverse linear pass.
 //!
-//! This crate performs no writes. Nothing here can modify the filesystem; that
-//! capability lives in `kosha-fsops` and is gated behind read-write mode.
+//! Scanning does not rewrite source contents. Requested exports and snapshots
+//! do write files; export destinations can be replaced. Cleanup of scanned
+//! files lives in `kosha-fsops` and is gated behind read-write mode.
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 

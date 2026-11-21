@@ -78,7 +78,7 @@ jobs:
       # Fail early on logic; the GUI is tested separately below, once.
       - name: Check core crates
         run: >
-          cargo clippy --locked -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          cargo clippy --locked -p kosha-core -p kosha-view -p kosha-analyze -p kosha-query -p kosha-search
           -p kosha-fsops -p kosha-cli --all-targets
 
       - name: Test core crates
@@ -143,7 +143,7 @@ jobs:
           CC_x86_64_unknown_linux_musl: musl-gcc
         run: >
           cargo check --locked --target x86_64-unknown-linux-musl --all-targets
-          -p kosha-core -p kosha-analyze -p kosha-query -p kosha-search
+          -p kosha-core -p kosha-view -p kosha-analyze -p kosha-query -p kosha-search
           -p kosha-fsops -p kosha-cli
 
   hygiene:
@@ -235,7 +235,7 @@ jobs:
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked -p kosha-query -p kosha-search
+      - run: cargo test --locked -p kosha-view -p kosha-query -p kosha-search
       - run: cargo build --locked -p kosha-cli
       - run: python scripts/check-recipe-authoring-manual.py --cli target/debug/kosha
 

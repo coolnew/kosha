@@ -124,20 +124,28 @@ These are background references, not tested Kosha launch recipes or a promise
 that every agent works in a particular sandbox. Verify the exact environment's
 behavior before relying on it to protect sensitive data.
 
-## What Kosha can improve
+## Scoped metadata tools in development source
 
-[Issue #10](https://github.com/coolnew/kosha/issues/10) tracks the design. The
-following are **proposals, not features in 0.11.0**:
+[Issue #10](https://github.com/coolnew/kosha/issues/10) tracks this work. Development
+source after 0.11.0 now implements the first CLI slice; **published 0.11.0 binaries
+do not include it**. Check `kosha view --help` in your installed build.
 
-- **Owner-approved metadata views:** select entries and fields, remove excluded
+- **Owner-approved metadata views:** select a recorded subtree and date fields, remove excluded
   data from the actual artifact, replace private root paths with a chosen label,
-  and recalculate totals from shared entries only. Searching a view would not
-  reopen live paths or discover other records.
-- **Explicit scope for cooperative automation:** consistently reject unapproved
-  operations and report clear machine-readable refusals. This could reduce
-  mistakes through Kosha; it would not contain an unrestricted host agent.
-- **Clear scope and freshness:** make it clear whether a result covers an approved
-  subset, is historical, was interrupted or encountered unreadable entries.
+  and recalculate totals from shared entries only. Publication previews the
+  artifact, requires its reviewed SHA-256 and never replaces an existing file.
+  Searching a view does not reopen live paths or discover other records.
+- **Explicit scope for cooperative automation:** a fixed-view stdio session accepts
+  only inspect/describe/query/close requests and returns structured refusals for
+  other operations or unshared fields. It does not contain an unrestricted host agent.
+- **Clear scope and freshness:** results identify an approved
+  historical subset, source interruptions/read failures, unknown mount contents
+  and measured-versus-estimated allocation sizes.
+
+See [the metadata-view workflow](metadata-views.md) for commands, limits and
+the distinction between the owner-side publisher and read-only consumer.
+Live traversal controls, GUI publication and cross-view comparison remain
+separate follow-ups. No general live-folder sandbox has been implemented.
 
 The intended direction preserves normal human CLI use. It does not rely on
 guessing whether a caller is AI. Stronger delegated workflows need both limited
