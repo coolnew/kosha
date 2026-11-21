@@ -33,11 +33,9 @@ Open source · Read-only scanning · No model required
 
 <div class="hero-preview" markdown="1">
 
-<div class="window-label"><span></span><span></span><span></span><span class="window-title">Your disk, understood.</span></div>
+[![Kosha exploring a synthetic workspace: colorful Projects, Downloads, Models and Media folders in the space map, with exact sizes and explained cleanup findings](../docs/manual/images/gui-workspace-dark.png)](https://coolnew.github.io/kosha/manual/images/gui-workspace-dark.png)
 
-![Kosha desktop with disk usage treemap, file list and ranked findings](../docs/manual/images/gui-overview-dark.png)
-
-<div class="preview-caption"><span class="status-dot"></span> One scan. A map, searchable files, and useful findings.</div>
+<div class="preview-caption"><span class="status-dot"></span> Spot the largest folders. Review what’s inside. Click to enlarge.<span class="preview-context">Real app · Synthetic workspace · Read-only</span></div>
 
 </div>
 
