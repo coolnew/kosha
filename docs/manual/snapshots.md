@@ -68,6 +68,18 @@ A newly saved stopped scan retains **Incomplete scan** when reopened. Older
 snapshot formats may lack that specific cancellation detail. Prefer a finished
 scan when making a baseline with full traversal coverage.
 
+## Snapshots from another system
+
+A `.kosha` file can be opened on a different operating system from the one
+that recorded it. Names are kept exactly as recorded wherever the opening
+system can represent them. Linux allows file names that are not valid UTF-8
+text, and Windows cannot represent some of them. When such a snapshot is opened
+on Windows, those names are shown with the replacement character � and the
+app's notice (or a `note:` line on the CLI's standard error) says how many names
+were affected. Sizes and the folder structure are unchanged. A comparison may
+report those entries as gone and new, and a [metadata view](metadata-views.md)
+refuses to share a replaced name.
+
 ## Compare observations
 
 The snapshot sidebar offers **All** and **This location**. This location shows
