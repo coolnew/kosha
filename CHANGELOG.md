@@ -4,6 +4,84 @@
 
 Nothing yet.
 
+## [0.13.0] — 2026-11-22
+
+### Import an ncdu listing
+
+`kosha import` keeps a listing written by [ncdu](https://dev.yorhel.nl/ncdu) as a
+record in the snapshot folder, so a machine where Kosha is not installed can still
+be explored with Kosha's views, insights and search:
+
+```sh
+ncdu -o srv.json /srv
+kosha import --from ncdu srv.json --label "build-box /srv"
+ssh build-box ncdu -co- /srv | kosha import --from ncdu - --label "build-box /srv"
+```
+
+The input is an ncdu JSON export (`ncdu -o`), plain, gzip-compressed or
+zstd-compressed (`ncdu -c`), from a file or standard input. You run ncdu yourself;
+Kosha starts no program, makes no network request and never opens a path named
+inside the listing. The imported record opens like a snapshot, with `--stats`,
+`--query`, `--insights`, `search --load` and `--since`.
+
+An import is never presented as something Kosha measured. Every view says
+"Imported from ncdu 2.9 (export 2026-11-20 14:02 UTC). Not measured by Kosha.", the
+desktop app shows an **Imported · ncdu** chip, and JSON exports gain
+`"imported": true` and `"measured_by_kosha": false`. Imported records use a new
+snapshot format that older versions of Kosha refuse instead of mislabelling.
+
+An imported record allows no file action of any kind, in any mode, and has no
+rescan. Sizes are what ncdu reported: apparent size and, when the export has it,
+ncdu's disk usage; modification times only if ncdu exported them (`ncdu -e`);
+entries ncdu could not read are flagged and totals are then lower bounds. Insights
+are advice about the source machine and rules about this machine's allocation do
+not run.
+
+### How imports are kept safe
+
+An import is untrusted input. It is read as a stream within hard limits: 8 GiB of
+input or decompressed data (adjustable with `--max-input-bytes`), 50 million
+entries, 120 directory levels, 4096-byte names, and an 8 MiB zstd window that is
+checked before any memory is reserved. Names that would step outside their folder
+(`.`, `..`, a slash or NUL) are refused and named, as are truncated or malformed
+files, double compression and ncdu's binary export (`ncdu -O`). A refused import
+writes nothing. Zstd is decoded with a pure-Rust library pinned to a version that
+fixes a known decompression-bomb advisory, in a worker thread, with the checksum
+verified by Kosha. Duplicate names, which some tools allow, are kept and counted
+and never merged.
+
+### Imported listings in the desktop app
+
+Opening an imported listing now says plainly that it came from another tool, that
+nothing in it can be acted on, and that it is not the disk as it is now. The
+Trash entry explains why it is unavailable instead of only being greyed out.
+
+### A clearer Trash dialog after Skip
+
+After "Skip cloud-only items" the dialog now says how many cloud-only files were
+left out and that they stay where they are, instead of leaving the original folder
+name as the only hint.
+
+### Documentation
+
+A new manual page, [Cloud storage and other machines](https://coolnew.github.io/kosha/manual/cloud-and-other-machines/),
+explains what works today for synced cloud folders, warns about mounted cloud
+filesystems, and shows how to keep a snapshot on another machine and open it here.
+A new issue form, "Suggest a scanning source", asks which provider or tool you want
+covered. The privacy policy notes that imports read only the listing you name and
+write a record, like snapshots.
+
+### Limitations
+
+Only ncdu JSON is supported; other tools' formats are not. An export whose file
+names are not valid UTF-8 is not valid JSON and is refused (convert it first, for
+example with `iconv`). Imports were tested with synthetic fixtures and with real
+exports from ncdu 2.9.1 (plain, extended and zstd-compressed); peak memory with millions
+of entries has not been measured. The coverage-guided fuzz targets compile but have
+not been run; a short random-mutation test runs in the normal test suite. On
+Windows, a Linux name such as `a:b` can display oddly. Kosha still does not scan
+cloud accounts or other machines by itself. Refs #12, which stays open.
+
 ## [0.13.0-rc.1] — 2026-11-22
 
 ### Import an ncdu listing
@@ -797,7 +875,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.0-rc.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -834,3 +912,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.12.2]: https://github.com/coolnew/kosha/releases/tag/v0.12.2
 
 [0.13.0-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.13.0-rc.1
+
+[0.13.0]: https://github.com/coolnew/kosha/releases/tag/v0.13.0
