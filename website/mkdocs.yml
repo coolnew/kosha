@@ -36,6 +36,7 @@ nav:
       - Scanning: manual/scanning.md
       - Search and findings: manual/results-and-search.md
       - Snapshots and comparisons: manual/snapshots.md
+      - Cloud storage and other machines: manual/cloud-and-other-machines.md
       - Safe cleanup: manual/safety.md
       - Cleanup guide and AI handoff: manual/cleanup-guide.md
       - Agent access and privacy: manual/agent-privacy.md

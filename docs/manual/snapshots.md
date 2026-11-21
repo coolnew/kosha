@@ -80,6 +80,9 @@ were affected. Sizes and the folder structure are unchanged. A comparison may
 report those entries as gone and new, and a [metadata view](metadata-views.md)
 refuses to share a replaced name.
 
+To bring a snapshot from another machine, see
+[cloud storage and other machines](cloud-and-other-machines.md#other-machines).
+
 ## Compare observations
 
 The snapshot sidebar offers **All** and **This location**. This location shows

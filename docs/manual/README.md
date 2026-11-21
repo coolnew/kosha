@@ -30,6 +30,7 @@ scanning, queries, exports, and comparisons.
 21. [Workflow cleanup guide and AI handoff](cleanup-guide.md)
 22. [Using Kosha with agents: access and privacy](agent-privacy.md)
 23. [Share an approved metadata view](metadata-views.md)
+24. [Cloud storage and other machines](cloud-and-other-machines.md)
 
 These pages describe the current source version. An older installed release
 may have different controls. Include your version when reporting a problem.

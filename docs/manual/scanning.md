@@ -68,6 +68,9 @@ Two limits to keep in mind:
   appear locally as small pointer files, so their online storage use is not
   visible. Treat Drive results as unverified until this page says otherwise.
 
+For mounted cloud filesystems and for files on other machines, see
+[cloud storage and other machines](cloud-and-other-machines.md).
+
 ## Speed and remaining time
 
 The scan view shows entries found and queued directories. An entry can be a file
