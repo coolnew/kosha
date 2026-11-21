@@ -75,9 +75,23 @@ use crate::tree::{ScanStats, SizeTree, Strategy};
 /// First eight bytes of every snapshot file.
 pub const MAGIC: &[u8; 8] = b"KOSHASNP";
 
-/// The format this build writes. Bumped when the layout below changes in a way
-/// an older reader would misread; a reader refuses anything it does not know.
+/// The format this build writes for a tree kosha measured. Bumped when the
+/// layout below changes in a way an older reader would misread; a reader
+/// refuses anything it does not know.
 pub const FORMAT: u32 = 2;
+
+/// The format an imported listing is written as.
+///
+/// **The body is the same as format 2; the number is the point.** An older
+/// kosha maps every strategy label it does not know to "Directory walk", so a
+/// record of another tool's listing written as format 2 would be shown by it
+/// as a scan kosha made. Format 3 makes that older reader refuse the file with
+/// "A newer kosha wrote it" instead. Native snapshots stay on [`FORMAT`] so
+/// that nothing else changes for them.
+pub const FORMAT_IMPORTED: u32 = 3;
+
+/// The newest format this build reads.
+pub const READS_UP_TO: u32 = FORMAT_IMPORTED;
 
 /// The file extension, without the dot.
 pub const EXTENSION: &str = "kosha";
@@ -97,7 +111,7 @@ pub enum ReadError {
     #[error("not a kosha snapshot")]
     NotASnapshot,
     #[error(
-        "this snapshot is version {found}, and this build of kosha reads up to {FORMAT}. \
+        "this snapshot is version {found}, and this build of kosha reads up to {READS_UP_TO}. \
          A newer kosha wrote it."
     )]
     Newer { found: u32 },
@@ -212,6 +226,113 @@ pub struct Meta {
     pub duration_ms: u64,
     /// The kosha that wrote it.
     pub tool: String,
+    /// Where the tree came from when kosha did not measure it: another tool's
+    /// listing, imported. `None` for every scan kosha made itself.
+    pub import: Option<Provenance>,
+}
+
+/// What an imported record says about where its numbers came from.
+///
+/// Every field is a statement about the *other* tool's file, never about this
+/// machine. Written as the header keys `origin = import`, `import-format`,
+/// `import-format-version`, `import-tool`, `observed`, `observed-basis`,
+/// `imported-at`, `import-source-name`, `allocated-known`, `mtime-known` and
+/// the counters `unknown-size`, `excluded-by-source`, `synthesized-dirs`,
+/// `lossy-names` and `duplicate-paths`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Provenance {
+    /// `ncdu-json`.
+    pub format: String,
+    /// The listing's own version, `1.2` for an ncdu export of major 1, minor 2.
+    pub format_version: String,
+    /// What the listing says wrote it, `ncdu 2.9`. Empty when it does not say.
+    pub tool: String,
+    /// When the source tool says the listing was made, as Unix seconds.
+    pub observed: Option<u64>,
+    /// `tool-timestamp` when `observed` came from the listing, `unknown`
+    /// otherwise.
+    pub observed_basis: String,
+    /// When kosha read it, as Unix seconds.
+    pub imported_at: u64,
+    /// The input's file name, never a full local path; `standard input` for a
+    /// pipe.
+    pub source_name: String,
+    /// Whether on-disk sizes came from the source. False means `allocated`
+    /// was stored equal to `logical` and is an apparent size only.
+    pub allocated_known: bool,
+    /// Whether the source recorded modification times at all.
+    pub mtime_known: bool,
+    /// Entries whose size the source did not record, stored as zero.
+    pub unknown_size: u64,
+    /// Entries the source tool left out by its own rules (an exclude pattern,
+    /// a firmlink). Their size is not in the totals.
+    pub excluded_by_source: u64,
+    /// Directories kosha had to create because the listing named a child
+    /// without its parent. Always zero for ncdu, which nests.
+    pub synthesized_dirs: u64,
+    /// Names that had to be rendered lossily. Always zero for JSON sources.
+    pub lossy_names: u64,
+    /// Names that appear twice in one directory. Kept and counted, never
+    /// merged.
+    pub duplicate_paths: u64,
+}
+
+impl Provenance {
+    /// The source tool's short name, for a chip: `ncdu`.
+    pub fn tool_short(&self) -> String {
+        let word = self
+            .tool
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(24)
+            .collect::<String>();
+        if word.is_empty() {
+            self.format
+                .split('-')
+                .next()
+                .unwrap_or("another tool")
+                .to_string()
+        } else {
+            crate::format::printable(&word).into_owned()
+        }
+    }
+
+    /// The one sentence every front end shows about an imported record:
+    /// `Imported from ncdu 2.9 (export 2026-11-20 14:02 UTC). Not measured by
+    /// Kosha.`
+    ///
+    /// Through `printable`, because the tool's name is text out of somebody
+    /// else's file.
+    pub fn sentence(&self) -> String {
+        let tool = if self.tool.trim().is_empty() {
+            self.tool_short()
+        } else {
+            let tool: String = self.tool.chars().take(64).collect();
+            crate::format::printable(&tool).into_owned()
+        };
+        let when = match self.observed {
+            Some(at) => format!("export {}", utc_minute(at)),
+            None => format!(
+                "observed: unknown, imported {}",
+                utc_minute(self.imported_at)
+            ),
+        };
+        format!("Imported from {tool} ({when}). Not measured by Kosha.")
+    }
+}
+
+/// `2026-11-20 14:02 UTC`.
+pub fn utc_minute(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let time = secs % 86_400;
+    let (year, month, day) = crate::format::civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        time / 3600,
+        (time % 3600) / 60
+    )
 }
 
 impl Meta {
@@ -248,7 +369,18 @@ impl Meta {
             max_depth: stats.max_depth,
             duration_ms: stats.duration.as_millis().min(u128::from(u64::MAX)) as u64,
             tool: crate::version::long(),
+            import: None,
         }
+    }
+
+    /// Whether this record is another tool's listing rather than a scan.
+    pub fn is_imported(&self) -> bool {
+        self.import.is_some()
+    }
+
+    /// The provenance sentence, for an imported record.
+    pub fn import_sentence(&self) -> Option<String> {
+        self.import.as_ref().map(Provenance::sentence)
     }
 
     /// When it was taken, in milliseconds since the epoch.
@@ -281,7 +413,12 @@ pub fn write<W: Write>(tree: &SizeTree, meta: &Meta, mut out: W) -> io::Result<(
     let header = encode_header(meta);
 
     out.write_all(MAGIC)?;
-    out.write_all(&FORMAT.to_le_bytes())?;
+    let format = if meta.import.is_some() {
+        FORMAT_IMPORTED
+    } else {
+        FORMAT
+    };
+    out.write_all(&format.to_le_bytes())?;
     out.write_all(&(header.len() as u32).to_le_bytes())?;
     out.write_all(&header)?;
 
@@ -426,6 +563,26 @@ fn encode_header(meta: &Meta) -> Vec<u8> {
     text("max-depth", &meta.max_depth.to_string());
     text("took-ms", &meta.duration_ms.to_string());
     text("tool", &meta.tool);
+    if let Some(import) = &meta.import {
+        let flag = |on: bool| if on { "1" } else { "0" };
+        text("origin", "import");
+        text("import-format", &import.format);
+        text("import-format-version", &import.format_version);
+        text("import-tool", &import.tool);
+        if let Some(observed) = import.observed {
+            text("observed", &observed.to_string());
+        }
+        text("observed-basis", &import.observed_basis);
+        text("imported-at", &import.imported_at.to_string());
+        text("import-source-name", &import.source_name);
+        text("allocated-known", flag(import.allocated_known));
+        text("mtime-known", flag(import.mtime_known));
+        text("unknown-size", &import.unknown_size.to_string());
+        text("excluded-by-source", &import.excluded_by_source.to_string());
+        text("synthesized-dirs", &import.synthesized_dirs.to_string());
+        text("lossy-names", &import.lossy_names.to_string());
+        text("duplicate-paths", &import.duplicate_paths.to_string());
+    }
     buf
 }
 
@@ -466,8 +623,8 @@ pub fn is_snapshot(path: &Path) -> bool {
 /// Stops at the end of the header, so listing a directory of snapshots costs
 /// one small read each rather than inflating every tree in it.
 pub fn read_meta<R: Read>(mut input: R) -> Result<Meta, ReadError> {
-    let (_, header) = read_header_bytes(&mut input).map_err(cut_short(BEFORE_HEADER))?;
-    decode_header(&header)
+    let (format, header) = read_header_bytes(&mut input).map_err(cut_short(BEFORE_HEADER))?;
+    decode_header(format, &header)
 }
 
 /// A file that stops in the middle, said the way this format says everything
@@ -522,7 +679,7 @@ const BEFORE_TREE: &str = "it ends before its tree does";
 /// including a Windows name with an unpaired surrogate opened on Linux.
 pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
     let (format, header) = read_header_bytes(&mut input).map_err(cut_short(BEFORE_HEADER))?;
-    let meta = decode_header(&header)?;
+    let meta = decode_header(format, &header)?;
     let mut body = ZlibDecoder::new(input);
     let tree = read_body(&meta, format, &mut body).map_err(cut_short(BEFORE_TREE))?;
 
@@ -561,6 +718,18 @@ pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
 }
 
 fn read_header_bytes<R: Read>(input: &mut R) -> Result<(u32, Vec<u8>), ReadError> {
+    read_header_bytes_up_to(input, READS_UP_TO)
+}
+
+/// The header, refusing any format above `newest`.
+///
+/// Separate so a test can stand in for an older build: a reader of format 2
+/// is this with `newest = 2`, which is exactly the check every released kosha
+/// before format 3 makes.
+fn read_header_bytes_up_to<R: Read>(
+    input: &mut R,
+    newest: u32,
+) -> Result<(u32, Vec<u8>), ReadError> {
     let mut magic = [0u8; 8];
     input.read_exact(&mut magic).map_err(|error| {
         if error.kind() == io::ErrorKind::UnexpectedEof {
@@ -574,7 +743,7 @@ fn read_header_bytes<R: Read>(input: &mut R) -> Result<(u32, Vec<u8>), ReadError
     }
 
     let format = read_u32(input)?;
-    if format > FORMAT {
+    if format > newest {
         return Err(ReadError::Newer { found: format });
     }
 
@@ -592,7 +761,7 @@ fn read_header_bytes<R: Read>(input: &mut R) -> Result<(u32, Vec<u8>), ReadError
     Ok((format, header))
 }
 
-fn decode_header(buf: &[u8]) -> Result<Meta, ReadError> {
+fn decode_header(format: u32, buf: &[u8]) -> Result<Meta, ReadError> {
     let mut meta = Meta {
         taken: 0,
         taken_ms: 0,
@@ -617,7 +786,10 @@ fn decode_header(buf: &[u8]) -> Result<Meta, ReadError> {
         max_depth: 0,
         duration_ms: 0,
         tool: String::new(),
+        import: None,
     };
+    let mut import = Provenance::default();
+    let mut origin_import = false;
 
     let mut at = 0usize;
     while at < buf.len() {
@@ -655,8 +827,41 @@ fn decode_header(buf: &[u8]) -> Result<Meta, ReadError> {
             "max-depth" => meta.max_depth = value.parse().unwrap_or(0),
             "took-ms" => meta.duration_ms = value.parse().unwrap_or(0),
             "tool" => meta.tool = value.to_string(),
+            "origin" => origin_import = value == "import",
+            "import-format" => import.format = value.to_string(),
+            "import-format-version" => import.format_version = value.to_string(),
+            "import-tool" => import.tool = value.to_string(),
+            "observed" => import.observed = value.parse().ok(),
+            "observed-basis" => import.observed_basis = value.to_string(),
+            "imported-at" => import.imported_at = value.parse().unwrap_or(0),
+            "import-source-name" => import.source_name = value.to_string(),
+            "allocated-known" => import.allocated_known = value == "1",
+            "mtime-known" => import.mtime_known = value == "1",
+            "unknown-size" => import.unknown_size = value.parse().unwrap_or(0),
+            "excluded-by-source" => import.excluded_by_source = value.parse().unwrap_or(0),
+            "synthesized-dirs" => import.synthesized_dirs = value.parse().unwrap_or(0),
+            "lossy-names" => import.lossy_names = value.parse().unwrap_or(0),
+            "duplicate-paths" => import.duplicate_paths = value.parse().unwrap_or(0),
             _ => {}
         }
+    }
+    // Format 3 exists only to carry imported records, so one that does not
+    // say where it came from is not a file this program wrote — and treating
+    // it as a scan is the one reading the format was made to prevent.
+    if format >= FORMAT_IMPORTED && !origin_import {
+        return Err(ReadError::Damaged(
+            "an imported record without its provenance",
+        ));
+    }
+    // Provenance wins over the strategy label in either direction: a record
+    // that says it was imported is shown as imported, whatever else it says
+    // about how it was "scanned".
+    if origin_import || meta.strategy == Strategy::Imported.label() {
+        if import.observed_basis.is_empty() {
+            import.observed_basis = "unknown".into();
+        }
+        meta.strategy = Strategy::Imported.label().to_string();
+        meta.import = Some(import);
     }
     Ok(meta)
 }
@@ -743,7 +948,7 @@ fn read_body<R: Read>(meta: &Meta, format: u32, input: &mut R) -> Result<SizeTre
     // on: every index in the arena is followed by the table, the treemap and
     // the query engine, and a damaged file must not become a panic three
     // screens later.
-    validate(&nodes, names_len)?;
+    validate(&nodes, names_len).map_err(ReadError::Damaged)?;
 
     Ok(SizeTree::from_parts(
         nodes,
@@ -811,30 +1016,30 @@ fn read_owners<R: Read>(nodes: usize, input: &mut R) -> Result<Owners, ReadError
 /// A snapshot is a file, and a file can be truncated by a full disk, corrupted
 /// by the medium, or edited by somebody curious. The arena's accessors index
 /// without checking because the scanner cannot produce a bad one; a reader can.
-fn validate(nodes: &[Node], names_len: usize) -> Result<(), ReadError> {
+pub(crate) fn validate(nodes: &[Node], names_len: usize) -> Result<(), &'static str> {
     if nodes.is_empty() {
-        return Err(ReadError::Damaged("a tree with no root"));
+        return Err("a tree with no root");
     }
     let count = nodes.len() as u64;
     for (index, node) in nodes.iter().enumerate() {
         if u64::from(node.parent) >= count {
-            return Err(ReadError::Damaged("a parent that is not an entry"));
+            return Err("a parent that is not an entry");
         }
         // The root is its own parent; everything else must point upward, which
         // is what makes walking to the root terminate.
         if index > 0 && u64::from(node.parent) >= index as u64 {
-            return Err(ReadError::Damaged("a parent that is not above its child"));
+            return Err("a parent that is not above its child");
         }
         if node.child_count > 0 {
             let first = u64::from(node.first_child);
             let end = first + u64::from(node.child_count);
             if first <= index as u64 || end > count {
-                return Err(ReadError::Damaged("children outside the arena"));
+                return Err("children outside the arena");
             }
         }
         let name_end = u64::from(node.name_off) + u64::from(node.name_len);
         if name_end > names_len as u64 {
-            return Err(ReadError::Damaged("a name outside the name arena"));
+            return Err("a name outside the name arena");
         }
     }
     Ok(())

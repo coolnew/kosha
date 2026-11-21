@@ -542,6 +542,9 @@ impl KoshaApp {
         }
         let needs_creation = crate::search_bar::needs_creation(query.expression());
         let past = ready.source.is_past();
+        // An imported listing's root is somewhere else; "Scan again" would
+        // scan a local path that only shares its name.
+        let imported = tree.stats().strategy == kosha_core::Strategy::Imported;
         let incomplete = tree.is_incomplete();
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(Arc::clone(&cancel));
@@ -573,7 +576,9 @@ impl KoshaApp {
                 let creation_unavailable = needs_creation && coverage.total > 0 && coverage.known == 0;
                 if needs_creation {
                     if creation_unavailable {
-                        warnings.push(if past {
+                        warnings.push(if imported {
+                            "Creation dates unavailable: imported listings do not record them.".into()
+                        } else if past {
                             format!("Creation dates unavailable: this saved scan recorded none for its {} entries. Scan again to collect available creation dates and rerun this search.", format::count(coverage.total as u64))
                         } else { "Creation dates unavailable in this scan. This source or scan method did not record them; modification dates are a separate field.".into() });
                     } else if coverage.known < coverage.total {
@@ -597,7 +602,7 @@ impl KoshaApp {
                 this.search_bar.update(cx, |bar, cx| {
                     bar.warning = (!warning.is_empty()).then_some(warning);
                     bar.creation_unavailable = creation_unavailable;
-                    bar.can_rescan_for_creation = creation_unavailable && past;
+                    bar.can_rescan_for_creation = creation_unavailable && past && !imported;
                     cx.notify();
                 });
                 cx.notify();
@@ -3395,10 +3400,18 @@ impl KoshaApp {
         // combination of choices that makes a tree from a file a safe thing to
         // delete from.
         if self.viewing_snapshot() {
-            self.state.notice = Some(
+            let imported = self
+                .state
+                .ready()
+                .is_some_and(|ready| ready.tree.stats().strategy == kosha_core::Strategy::Imported);
+            self.state.notice = Some(if imported {
+                "This is a listing imported from another tool, not measured by Kosha and not this \
+                 disk. Nothing in it can be acted on."
+                    .into()
+            } else {
                 "This is a snapshot, not the disk. Scan the folder to act on what is there now."
-                    .into(),
-            );
+                    .into()
+            });
             cx.notify();
             return;
         }
@@ -4048,6 +4061,13 @@ impl KoshaApp {
         let one = self.snapshot_source()?;
         let taken = crate::snapshots::when(&one.meta);
         let automatic = one.automatic;
+        // "Imported · ncdu", never "Snapshot": kosha did not measure it.
+        let kind: SharedString = match &one.meta.import {
+            Some(import) => format!("Imported · {}", import.tool_short()).into(),
+            None if automatic => "Saved scan".into(),
+            None => "Snapshot".into(),
+        };
+        let sentence = one.meta.import_sentence();
         let root = one.meta.root.clone();
 
         Some(
@@ -4061,13 +4081,20 @@ impl KoshaApp {
                 .gap(px(6.0))
                 .child(
                     chip()
+                        .id("snapshot-chip")
                         .flex_none()
                         .gap(px(6.0))
                         .border_color(palette.accent)
                         .bg(palette.accent.opacity(0.16))
                         .text_color(palette.accent)
-                        .child(if automatic { "Saved scan" } else { "Snapshot" })
-                        .child(div().text_color(palette.accent.opacity(0.75)).child(taken)),
+                        .child(kind)
+                        .child(div().text_color(palette.accent.opacity(0.75)).child(taken))
+                        .when_some(sentence, |chip, sentence| {
+                            let sentence: SharedString = sentence.into();
+                            chip.tooltip(move |window, cx| {
+                                tooltip(sentence.clone()).build(window, cx)
+                            })
+                        }),
                 )
                 .when(automatic, |view| {
                     view.child(
@@ -7273,18 +7300,32 @@ impl KoshaApp {
                     .snapshot()
                     .map(|one| crate::snapshots::when(&one.meta))
                     .unwrap_or_default();
-                format!(
-                    "{}Snapshot taken {taken} · {} · {approx}{} on disk then · \
-                     not the disk as it is now",
-                    if ready.tree.is_incomplete() {
-                        "Incomplete scan · "
-                    } else {
-                        ""
-                    },
-                    format::plural(stats.entries as usize, "entry"),
-                    self.bytes(ready.tree.total_allocated()),
-                )
-                .into()
+                let imported = ready
+                    .source
+                    .snapshot()
+                    .and_then(|one| one.meta.import_sentence());
+                if let Some(sentence) = imported {
+                    format!(
+                        "{sentence} · {} · {approx}{} on disk as reported · \
+                         not the disk as it is now",
+                        format::plural(stats.entries as usize, "entry"),
+                        self.bytes(ready.tree.total_allocated()),
+                    )
+                    .into()
+                } else {
+                    format!(
+                        "{}Snapshot taken {taken} · {} · {approx}{} on disk then · \
+                         not the disk as it is now",
+                        if ready.tree.is_incomplete() {
+                            "Incomplete scan · "
+                        } else {
+                            ""
+                        },
+                        format::plural(stats.entries as usize, "entry"),
+                        self.bytes(ready.tree.total_allocated()),
+                    )
+                    .into()
+                }
             }
             Phase::Ready(ready) => {
                 let stats = ready.tree.stats();

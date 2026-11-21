@@ -637,6 +637,7 @@ fn an_age_needs_a_clock_that_makes_sense() {
         max_depth: 0,
         duration_ms: 0,
         tool: String::new(),
+        import: None,
     };
 
     assert_eq!(meta.age(taken_at(1_600)), Some(Duration::from_secs(600)));
@@ -1335,7 +1336,7 @@ fn a_record_from_before_the_rule_does_not_claim_one() {
     pair(&mut header, "entries", &meta.entries.to_string());
     pair(&mut header, "cross-fs", "0");
 
-    let older = super::decode_header(&header).unwrap();
+    let older = super::decode_header(2, &header).unwrap();
     assert_eq!(older.exact_allocated, None, "a guess was made");
     assert_eq!(
         older.entries, meta.entries,
@@ -1345,7 +1346,7 @@ fn a_record_from_before_the_rule_does_not_claim_one() {
     // And a record that does say keeps what it said.
     pair(&mut header, "exact", "1");
     assert_eq!(
-        super::decode_header(&header).unwrap().exact_allocated,
+        super::decode_header(2, &header).unwrap().exact_allocated,
         Some(true)
     );
 }
@@ -1625,4 +1626,137 @@ fn a_replaced_name_adds_no_spurious_changes_to_a_comparison() {
     let report = crate::compare::compare(&baseline, &tree, &options);
     assert!(report.changes.is_empty(), "{:?}", report.changes);
     assert_eq!(report.net, 0);
+}
+
+// ------------------------------------------------------------ imported records
+
+fn imported_tree() -> (Meta, SizeTree) {
+    use crate::builder::{Entry, TreeBuilder};
+    let dir = Entry {
+        flags: Flags::DIR,
+        ..Entry::default()
+    };
+    let mut builder = TreeBuilder::new("srv", dir).unwrap();
+    let data = builder.push(0, "data", dir).unwrap();
+    builder
+        .push(
+            data,
+            "big.bin",
+            Entry {
+                logical: 5000,
+                allocated: 8192,
+                ..Entry::default()
+            },
+        )
+        .unwrap();
+    let stats = ScanStats {
+        strategy: Strategy::Imported,
+        dedup_hardlinks: true,
+        ..ScanStats::default()
+    };
+    let (tree, _) = builder.finish(PathBuf::from("/srv"), stats).unwrap();
+    let mut meta = Meta::of(&tree, taken_at(1_763_647_320), "build-box /srv");
+    meta.exact_allocated = None;
+    meta.import = Some(Provenance {
+        format: "ncdu-json".into(),
+        format_version: "1.2".into(),
+        tool: "ncdu 2.9".into(),
+        observed: Some(1_763_647_320),
+        observed_basis: "tool-timestamp".into(),
+        imported_at: 1_763_700_000,
+        source_name: "build-box.json".into(),
+        allocated_known: true,
+        mtime_known: false,
+        unknown_size: 2,
+        excluded_by_source: 3,
+        synthesized_dirs: 0,
+        lossy_names: 0,
+        duplicate_paths: 1,
+    });
+    (meta, tree)
+}
+
+#[test]
+fn an_imported_record_is_format_three_and_keeps_its_provenance() {
+    let (meta, tree) = imported_tree();
+    let mut bytes = Vec::new();
+    write(&tree, &meta, &mut bytes).unwrap();
+    assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 3);
+
+    let (back, restored) = read(&bytes[..]).unwrap();
+    assert_eq!(back, meta, "every provenance key and counter survives");
+    assert_eq!(back.strategy, "Imported");
+    assert_eq!(restored.stats().strategy, Strategy::Imported);
+    assert_eq!(restored.total_logical(), 5000);
+    assert_eq!(restored.total_allocated(), 8192);
+    assert_eq!(
+        back.import_sentence().unwrap(),
+        "Imported from ncdu 2.9 (export 2025-11-20 14:02 UTC). Not measured by Kosha."
+    );
+    assert_eq!(back.import.as_ref().unwrap().tool_short(), "ncdu");
+    assert_eq!(read_meta(&bytes[..]).unwrap(), meta);
+
+    // Native snapshots are unchanged: still format 2, no provenance.
+    let (_dir, scanned) = fixture();
+    let mut native = Vec::new();
+    let plain = Meta::of(&scanned, taken_at(1), "");
+    write(&scanned, &plain, &mut native).unwrap();
+    assert_eq!(
+        u32::from_le_bytes(native[8..12].try_into().unwrap()),
+        FORMAT
+    );
+    assert!(read_meta(&native[..]).unwrap().import.is_none());
+}
+
+#[test]
+fn an_older_reader_refuses_an_imported_record() {
+    let (meta, tree) = imported_tree();
+    let mut bytes = Vec::new();
+    write(&tree, &meta, &mut bytes).unwrap();
+    // Every released kosha before format 3 reads up to 2.
+    let mut input = &bytes[..];
+    match read_header_bytes_up_to(&mut input, 2) {
+        Err(ReadError::Newer { found }) => assert_eq!(found, 3),
+        other => panic!("an older reader accepted it: {:?}", other.map(|(f, _)| f)),
+    }
+    let message = ReadError::Newer { found: 3 }.to_string();
+    assert!(message.contains("A newer kosha wrote it"), "{message}");
+}
+
+#[test]
+fn format_three_without_provenance_is_refused_and_an_unknown_observation_says_so() {
+    let (meta, tree) = imported_tree();
+    // A format 3 header that does not say it was imported.
+    let mut bytes = Vec::new();
+    let mut plain = meta.clone();
+    plain.import = None;
+    write(&tree, &plain, &mut bytes).unwrap();
+    bytes[8..12].copy_from_slice(&3u32.to_le_bytes());
+    assert!(matches!(
+        read_meta(&bytes[..]),
+        Err(ReadError::Damaged(
+            "an imported record without its provenance"
+        ))
+    ));
+
+    let mut unknown = meta.import.clone().unwrap();
+    unknown.observed = None;
+    unknown.observed_basis = "unknown".into();
+    assert_eq!(
+        unknown.sentence(),
+        "Imported from ncdu 2.9 (observed: unknown, imported 2025-11-21 04:40 UTC). Not measured by Kosha."
+    );
+    unknown.tool = "ncdu\n\u{1b}[31m".into();
+    assert!(!unknown.sentence().chars().any(char::is_control));
+}
+
+#[test]
+fn a_strategy_label_cannot_hide_an_import() {
+    let (mut meta, tree) = imported_tree();
+    meta.strategy = "Directory walk".into();
+    let mut bytes = Vec::new();
+    write(&tree, &meta, &mut bytes).unwrap();
+    let (back, restored) = read(&bytes[..]).unwrap();
+    assert_eq!(back.strategy, "Imported");
+    assert_eq!(restored.stats().strategy, Strategy::Imported);
 }

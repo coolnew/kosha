@@ -125,6 +125,12 @@ pub fn candidates(tree: &SizeTree, options: &Options) -> Vec<NodeId> {
 /// includes every solid-state volume. A rail card that appears on every scan to
 /// report that things are fine is a card nobody reads.
 pub fn find(tree: &SizeTree, options: &Options) -> Option<Insight> {
+    // An imported listing's root names a place on another machine. Asking this
+    // machine about that path — its media type, then its files' extents —
+    // would read a local path that only shares the name.
+    if tree.stats().strategy == kosha_core::Strategy::Imported {
+        return None;
+    }
     // Asked once for the whole scan, before anything is opened. On solid state
     // this is where the pass ends.
     if kosha_core::media_type(tree.root_path()) != Some(MediaType::Spinning) {

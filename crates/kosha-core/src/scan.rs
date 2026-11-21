@@ -241,7 +241,7 @@ impl Scanner {
         {
             let outcome = match attempt {
                 Strategy::MasterFileTable => self.scan_by_mft(&root_path),
-                Strategy::DiskImage | Strategy::DirectoryWalk => continue,
+                Strategy::DiskImage | Strategy::DirectoryWalk | Strategy::Imported => continue,
             };
             match outcome {
                 Ok(tree) => return Ok(tree),

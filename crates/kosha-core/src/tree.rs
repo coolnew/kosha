@@ -31,6 +31,11 @@ pub enum Strategy {
     /// Named for the shape of the source rather than for the filesystem in
     /// it, because it is now more than one.
     DiskImage,
+    /// Not measured by kosha at all: a listing another tool wrote (an ncdu
+    /// JSON export), read by `kosha-import`. Its root is a label for a place
+    /// on some other machine, never a path to open here, and every front end
+    /// says that the numbers came from the other tool.
+    Imported,
 }
 
 impl Strategy {
@@ -40,6 +45,7 @@ impl Strategy {
             Strategy::DirectoryWalk => "Directory walk",
             Strategy::MasterFileTable => "Master File Table",
             Strategy::DiskImage => "Disk image",
+            Strategy::Imported => "Imported",
         }
     }
 
@@ -57,6 +63,7 @@ impl Strategy {
             // capitalised wherever it stands.
             Strategy::MasterFileTable => "Master File Table",
             Strategy::DiskImage => "disk image",
+            Strategy::Imported => "imported",
         }
     }
 
@@ -70,6 +77,7 @@ impl Strategy {
         match label {
             "Master File Table" => Strategy::MasterFileTable,
             "Disk image" => Strategy::DiskImage,
+            "Imported" => Strategy::Imported,
             _ => Strategy::DirectoryWalk,
         }
     }
@@ -815,6 +823,7 @@ mod tests {
             Strategy::DirectoryWalk,
             Strategy::MasterFileTable,
             Strategy::DiskImage,
+            Strategy::Imported,
         ] {
             assert_eq!(Strategy::from_label(strategy.label()), strategy);
         }

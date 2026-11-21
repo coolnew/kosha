@@ -31,6 +31,8 @@
 
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+/// Building a tree from another tool's listing, entry by entry.
+pub mod builder;
 /// Turning a broken-down date on a disk into seconds since 1970.
 mod calendar;
 pub mod compare;
@@ -68,6 +70,7 @@ pub mod vhdx;
 /// XFS, read out of a disk image.
 mod xfs;
 
+pub use builder::{BuildError, Entry, TreeBuilder};
 pub use error::ScanError;
 pub use names::{NameArena, is_valid_encoded_name, is_well_formed_wtf8};
 pub use node::{Flags, Node, NodeId};

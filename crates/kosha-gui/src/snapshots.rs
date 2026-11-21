@@ -484,6 +484,7 @@ mod tests {
             max_depth: 0,
             duration_ms: 0,
             tool: String::new(),
+            import: None,
         }
     }
 

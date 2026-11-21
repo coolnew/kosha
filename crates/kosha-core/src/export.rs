@@ -454,6 +454,11 @@ fn write_json<W: Write>(
     if root_lossy {
         head.push_str(",\n  \"root_lossy\": true");
     }
+    // A listing another tool wrote: its root is a label for somewhere else,
+    // and none of these numbers was measured by kosha.
+    if stats.strategy == crate::tree::Strategy::Imported {
+        head.push_str(",\n  \"imported\": true,\n  \"measured_by_kosha\": false");
+    }
     head.push_str(&format!(
         ",\n  \"entries_scanned\": {},\n  \"total_on_disk\": {},\n  \"total_apparent\": {},\n  \"partial\": {},\n  \"access_limited\": {},\n  \"incomplete\": {},\n  \"cancelled\": {},\n  \"depth_limited\": {},\n  \"unreadable_entries\": {},\n  \"lower_bound\": {},\n  \"entries\": [\n",
         stats.entries,
