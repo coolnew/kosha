@@ -552,6 +552,68 @@ fn a_trash_skip_preview_lists_only_ordinary_files() {
     );
 }
 
+/// A skip plan says how many cloud-only files it leaves out, from the same
+/// count as the warning, and no other plan says anything of the kind.
+#[test]
+fn a_skip_plan_says_how_many_cloud_only_files_it_leaves_out() {
+    let dir = fixture();
+    let tree = synthetic_tree(dir.path());
+    let session = Session::new(dir.path());
+
+    let plan = ActionPlan::build(&tree, &[node(&tree, "photos")], Action::Trash, &session);
+    // Before skipping: nothing is claimed, and the warning is unchanged.
+    assert_eq!(plan.skipped_cloud_only(), 0);
+    assert!(plan.skipped_cloud_note().is_none());
+    assert_eq!(plan.cloud_warning().unwrap().offline_files(), 3);
+
+    let skipped = plan.without_cloud_only(&tree, &session);
+    assert_eq!(skipped.skipped_cloud_only(), 3);
+    assert_eq!(
+        skipped.skipped_cloud_note().as_deref(),
+        Some("Skipped 3 cloud-only files. They stay where they are.")
+    );
+    // The preview is the other items only.
+    assert_eq!(
+        relative(would_do(&skipped.dry_run()), dir.path()),
+        vec!["photos/b.jpg", "photos/local-only", "photos/trip/d.jpg"]
+    );
+
+    // Singular wording.
+    let one = ActionPlan::build(
+        &tree,
+        &[
+            node(&tree, "photos/trip/deep"),
+            node(&tree, "photos/trip/d.jpg"),
+        ],
+        Action::Trash,
+        &session,
+    )
+    .without_cloud_only(&tree, &session);
+    assert_eq!(
+        one.skipped_cloud_note().as_deref(),
+        Some("Skipped 1 cloud-only file. It stays where it is.")
+    );
+    assert_eq!(
+        relative(would_do(&one.dry_run()), dir.path()),
+        vec!["photos/trip/d.jpg"]
+    );
+}
+
+#[test]
+fn plans_without_cloud_only_files_carry_no_skip_note() {
+    let dir = fixture();
+    let tree = synthetic_tree(dir.path());
+    let session = Session::new(dir.path());
+
+    let plan = ActionPlan::build(&tree, &[node(&tree, "plain")], Action::Trash, &session);
+    assert!(plan.skipped_cloud_note().is_none());
+    // Skipping a plan with nothing to skip is the same plan, with no note.
+    let same = plan.without_cloud_only(&tree, &session);
+    assert_eq!(same.skipped_cloud_only(), 0);
+    assert!(same.skipped_cloud_note().is_none());
+    assert!(kosha_fsops::cloud::skipped_note(0).is_none());
+}
+
 #[test]
 fn skipping_against_a_different_tree_plans_nothing_and_says_why() {
     let dir = fixture();

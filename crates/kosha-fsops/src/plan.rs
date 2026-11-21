@@ -155,6 +155,9 @@ pub struct ActionPlan {
     /// What is left to act on with the cloud-only files taken out, as nodes of
     /// the tree this plan was built from. Empty unless `cloud` is present.
     cloud_free: Vec<NodeId>,
+    /// Cloud-only files a [`without_cloud_only`](Self::without_cloud_only)
+    /// plan left out; 0 for every other plan.
+    skipped_cloud_only: u64,
     action: Action,
     /// Which tree `cloud_free` indexes: its root and its length.
     tree_root: PathBuf,
@@ -236,6 +239,7 @@ impl ActionPlan {
             rejected,
             cloud: risk,
             cloud_free,
+            skipped_cloud_only: 0,
             action,
             tree_root: tree.root_path().to_path_buf(),
             tree_len: tree.len(),
@@ -276,7 +280,21 @@ impl ActionPlan {
             ));
             return plan;
         }
-        ActionPlan::build(tree, &self.cloud_free, self.action, session)
+        let mut plan = ActionPlan::build(tree, &self.cloud_free, self.action, session);
+        plan.skipped_cloud_only = self.cloud.as_ref().map_or(0, |risk| risk.offline_files);
+        plan
+    }
+
+    /// Cloud-only files this plan leaves out because it came from
+    /// [`without_cloud_only`](Self::without_cloud_only); 0 for any other plan.
+    pub fn skipped_cloud_only(&self) -> u64 {
+        self.skipped_cloud_only
+    }
+
+    /// The words for [`skipped_cloud_only`](Self::skipped_cloud_only), or `None`
+    /// when nothing was skipped. A dialog draws this beside its title.
+    pub fn skipped_cloud_note(&self) -> Option<String> {
+        cloud::skipped_note(self.skipped_cloud_only)
     }
 
     pub fn items(&self) -> &[PlanItem] {

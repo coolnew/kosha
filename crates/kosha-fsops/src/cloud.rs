@@ -230,6 +230,21 @@ impl CloudWarning {
     }
 }
 
+/// The sentence a plan built by
+/// [`ActionPlan::without_cloud_only`](crate::ActionPlan::without_cloud_only)
+/// shows, so a title naming a whole folder is not read as "all of it moves".
+/// `None` for zero. The one place these words are written.
+pub fn skipped_note(skipped: u64) -> Option<String> {
+    match skipped {
+        0 => None,
+        1 => Some("Skipped 1 cloud-only file. It stays where it is.".to_string()),
+        n => Some(format!(
+            "Skipped {} cloud-only files. They stay where they are.",
+            format::count(n)
+        )),
+    }
+}
+
 /// Evidence that the user was shown a [`CloudWarning`] and chose to go ahead.
 ///
 /// No `Clone`, no `Default`, and the only constructor takes the warning, which
