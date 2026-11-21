@@ -1257,6 +1257,8 @@ old,old,file
         assert_eq!(flag_list(Flags::DIR), "");
         assert_eq!(flag_list(Flags::SPARSE), "sparse");
         assert_eq!(flag_list(Flags::SPARSE | Flags::PARTIAL), "sparse;partial");
+        // A cloud placeholder, from Windows attributes or macOS `SF_DATALESS`.
+        assert_eq!(flag_list(Flags::OFFLINE | Flags::SPARSE), "sparse;offline");
     }
 
     /// Raw Unix names, including bytes a host filesystem may refuse to create.

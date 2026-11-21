@@ -61,6 +61,13 @@ pub fn scan(
     // kosha reads inside it. Collapsing them into one message sent somebody
     // hunting for a corrupt image when what they actually had was an `xfs`
     // data disk that opened perfectly.
+    //
+    // **A cloud placeholder is never opened.** Reading the image would download
+    // it, which is not what asking to look inside a file means. Asked of the
+    // metadata first, so the refusal costs no fetch.
+    if crate::platform::is_placeholder(&image) {
+        return Err(ScanError::Strategy(Unavailable::ImageUnreadable));
+    }
     let file = File::open(&image).map_err(|_| ScanError::Strategy(Unavailable::ImageUnreadable))?;
     let mut disk = Disk::open(file).map_err(ScanError::Strategy)?;
 
@@ -329,6 +336,10 @@ fn read_ntfs(
 /// is the ordinary shape of a virtual machine's disk and the case where being
 /// told "no filesystem" is least believable.
 pub(crate) fn recognised_in(path: &Path) -> Option<&'static str> {
+    // Naming a file is not worth fetching it from the cloud.
+    if crate::platform::is_placeholder(path) {
+        return None;
+    }
     let file = File::open(path).ok()?;
     let mut disk = Disk::open(file).ok()?;
     crate::recognise::name_of(&mut disk)
@@ -344,6 +355,10 @@ pub(crate) fn recognised_in(path: &Path) -> Option<&'static str> {
 /// is the same parser the image reader uses, not a second opinion about the
 /// same bytes.
 pub(crate) fn is_partitioned(path: &Path) -> bool {
+    // A cloud placeholder is never opened to find out.
+    if crate::platform::is_placeholder(path) {
+        return false;
+    }
     let Ok(file) = File::open(path) else {
         return false;
     };

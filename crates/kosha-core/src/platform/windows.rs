@@ -220,6 +220,14 @@ pub(super) fn root_meta(root: &Path, ctx: &PlatformCtx) -> io::Result<EntryMeta>
     Ok(meta)
 }
 
+/// Whether the file at `path` is a cloud placeholder, from its attributes alone.
+pub(super) fn is_placeholder(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|md| {
+        let attrs = md.file_attributes();
+        attrs & FILE_ATTRIBUTE_DIRECTORY == 0 && attrs & NOT_RESIDENT != 0
+    })
+}
+
 fn from_metadata(md: &fs::Metadata, file_type: fs::FileType, ctx: &PlatformCtx) -> EntryMeta {
     let attrs = md.file_attributes();
     let is_dir = file_type.is_dir() || attrs & FILE_ATTRIBUTE_DIRECTORY != 0;

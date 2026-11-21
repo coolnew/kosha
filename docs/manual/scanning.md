@@ -11,6 +11,52 @@ By default, directory walks do not descend into other mounted filesystems.
 Scan settings can change this. Symbolic links are measured without following
 their targets. A scan describes its chosen scope, not necessarily an entire disk.
 
+## Cloud-synced folders
+
+Google Drive for desktop, iCloud Drive, OneDrive and Dropbox keep a local folder
+that mirrors an online account. Kosha scans that local folder like any other. It
+does not sign in to any account, contact the provider itself, or see files that
+exist only online and have no local entry. The provider's own software may fetch
+folder listings from its service while a folder is read; that is its behavior,
+not a request made by kosha.
+
+Some providers leave a **placeholder** for a file whose data is not stored on
+this computer. A placeholder reports the file's full length but occupies almost
+no disk space. Kosha recognizes placeholders only from a marker the operating
+system sets on the entry, never from a folder or file name:
+
+| System | Marker kosha reads | Status |
+| --- | --- | --- |
+| Windows | The offline and recall-on-open or recall-on-data-access file attributes, as used by OneDrive Files On-Demand | Tested with the offline attribute; not tested against a live cloud provider |
+| macOS | The `SF_DATALESS` flag that macOS File Provider folders (under `~/Library/CloudStorage`, and iCloud Drive) use for files whose data is not downloaded | Flag logic is unit tested on synthetic data; not yet checked against a real placeholder |
+| Linux | None. No standard marker exists, so a file is not identified as a placeholder | Provider mounts made by third-party tools are treated as ordinary files |
+
+A flagged placeholder is shown with its full length as the **Apparent** size and
+is marked as stored in the cloud in Quick look. Its length is an upper bound
+rather than a measurement, because most of it is not on this disk. In exports the
+entry carries the `offline` flag. Kosha does not open a placeholder, so scanning
+does not download it. Duplicate searches skip placeholders before comparing
+sizes and report how many files were skipped, because reading a file would
+download it. The same applies to fragmentation checks.
+
+Deleting a placeholder can delete the only copy, because the local entry is the
+handle for the online file. Treat these entries as review-only: use the
+provider's own software to free space, for example by choosing to keep files
+online only, rather than deleting them here.
+
+Two limits to keep in mind:
+
+- Mirrored files (a full local copy) are ordinary files with real sizes. Which
+  mode a provider is in changes how much a scan can tell you.
+- How **Google Drive for desktop** presents its files is assumed from Google's and
+  Apple's published descriptions and has not been verified with kosha. In its
+  streaming mode on Windows it is unknown whether uncached files carry the
+  Windows attributes above; if they do not, kosha treats them as local, so do not
+  run a duplicate search on a streamed Drive folder. On macOS it is assumed to use
+  the File Provider mechanism described above. Google Docs, Sheets and Slides
+  appear locally as small pointer files, so their online storage use is not
+  visible. Treat Drive results as unverified until this page says otherwise.
+
 ## Speed and remaining time
 
 The scan view shows entries found and queued directories. An entry can be a file

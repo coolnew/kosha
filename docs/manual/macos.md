@@ -33,6 +33,13 @@ needs investigation. Stop and [report the exact message](https://github.com/cool
 with the version and macOS version. Do not disable Gatekeeper or recursively
 remove quarantine attributes as an installation step.
 
+## iCloud Drive and other cloud folders
+
+Kosha marks files whose data is not downloaded (the `SF_DATALESS` flag used by
+File Provider apps such as iCloud Drive) as stored in the cloud. It does not read
+or download them. See [cloud-synced folders](scanning.md#cloud-synced-folders)
+for what is and is not verified.
+
 ## Use the CLI
 
 The companion `kosha` executable is alongside the app in the image. Copy it to

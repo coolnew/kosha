@@ -436,6 +436,15 @@ pub fn allocated_size(path: &Path) -> io::Result<u64> {
     imp::allocated_size(path)
 }
 
+/// Whether the file at `path` is a cloud placeholder, asked of its metadata and
+/// never by opening it.
+///
+/// For the few readers that open a file the user named directly (a disk image
+/// handed to the scanner), which must refuse a placeholder rather than fetch it.
+pub(crate) fn is_placeholder(path: &Path) -> bool {
+    imp::is_placeholder(path)
+}
+
 /// Everything the scanner learns about one directory entry.
 ///
 /// `Clone` but no longer `Copy`: [`EntryMeta::owner`] carries a SID, which is
@@ -480,8 +489,9 @@ pub struct EntryMeta {
     /// The data is not resident on this disk — a cloud placeholder, or anything
     /// else behind Windows' `OFFLINE` and `RECALL_ON_*` attributes.
     ///
-    /// Always false on Unix: there is no portable equivalent, and inventing one
-    /// from a heuristic would put a scary label on ordinary files.
+    /// On macOS this is the kernel's own `SF_DATALESS` marker from `st_flags`.
+    /// False on every other Unix: there is no standard equivalent, and
+    /// inventing one from a heuristic would put a scary label on ordinary files.
     pub is_offline: bool,
     /// Who the filesystem says this entry belongs to.
     ///

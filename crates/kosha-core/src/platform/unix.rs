@@ -86,15 +86,55 @@ fn from_metadata(md: &fs::Metadata, file_type: fs::FileType, ctx: &PlatformCtx) 
         // is sparse (or transparently compressed, which we report the same way
         // because the user-visible consequence is identical).
         is_sparse: !is_dir && allocated + ctx.cluster_size < logical,
-        // No portable equivalent. HSM-backed filesystems exist but expose
-        // nothing standard, and guessing from a size-versus-blocks heuristic
-        // would put a scary label on every sparse file.
-        is_offline: false,
+        // macOS says so itself: a File Provider placeholder (iCloud Drive,
+        // OneDrive, Dropbox, Google Drive for desktop) is "dataless", and the
+        // kernel marks it with `SF_DATALESS` in the `st_flags` of this same
+        // stat, so the test costs no syscall. A marker bit, never a name or
+        // path match. Every other Unix has no standard equivalent — HSM-backed
+        // filesystems expose nothing portable, and guessing from a
+        // size-versus-blocks heuristic would put a scary label on every sparse
+        // file — so it stays false there.
+        is_offline: offline_of(md, is_dir),
         // Free: `st_uid` came with the stat the scan had to do anyway. There is
         // no path here where the owner is unreadable — if the stat succeeded
         // the uid is in it — so `None` here means only that nobody asked.
         owner: ctx.collect_owners.then(|| OwnerId::Uid(md.uid())),
     }
+}
+
+/// `SF_DATALESS` from `<sys/stat.h>` (macOS 10.15+): the file's data lives with
+/// a File Provider and is fetched when it is read.
+#[cfg(any(test, target_os = "macos"))]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+/// Whether an `st_flags` value marks a cloud placeholder.
+///
+/// Pure, so the rule is under test on every Unix rather than only on a Mac.
+/// Files only, matching Windows: a dataless *directory* is still a directory to
+/// walk, and the flag there says nothing about content being read.
+#[cfg(any(test, target_os = "macos"))]
+fn dataless(st_flags: u32, is_dir: bool) -> bool {
+    !is_dir && st_flags & SF_DATALESS != 0
+}
+
+#[cfg(target_os = "macos")]
+#[inline]
+fn offline_of(md: &fs::Metadata, is_dir: bool) -> bool {
+    use std::os::macos::fs::MetadataExt as _;
+    dataless(md.st_flags(), is_dir)
+}
+
+#[cfg(not(target_os = "macos"))]
+#[inline]
+fn offline_of(_md: &fs::Metadata, _is_dir: bool) -> bool {
+    false
+}
+
+/// Whether the file at `path` is a cloud placeholder, asked with an `lstat` and
+/// never an open. For the few places that read a file the user named directly
+/// rather than one the scan measured.
+pub(super) fn is_placeholder(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|md| offline_of(&md, md.is_dir()))
 }
 
 /// Put a name to a uid, out of the passwd database.
@@ -313,4 +353,59 @@ pub(super) fn local_clock(unix_secs: i64) -> Option<super::Clock> {
 /// should reach into.
 pub fn compression_available_at(_path: &Path) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The marker bit alone decides. Sparse files, other flag bits and every
+    /// directory are not placeholders, and no heuristic is involved.
+    #[test]
+    fn the_dataless_bit_marks_a_placeholder_and_nothing_else_does() {
+        assert!(dataless(SF_DATALESS, false));
+        // Other BSD flags travel in the same word: UF_HIDDEN (0x8000),
+        // UF_COMPRESSED (0x20, which macOS uses for transparent compression)
+        // and SF_RESTRICTED (0x80000) must not read as a placeholder.
+        for other in [0u32, 0x20, 0x8000, 0x8_0000, !SF_DATALESS] {
+            assert!(!dataless(other, false), "{other:#x} is not SF_DATALESS");
+        }
+        // Set alongside others it still counts.
+        assert!(dataless(SF_DATALESS | 0x20 | 0x8000, false));
+        // A directory is walked, not read.
+        assert!(!dataless(SF_DATALESS, true));
+    }
+
+    /// An ordinary file, and a sparse one, come back as ordinary and as sparse
+    /// but never as offline: a sparse file is local, and calling it a cloud file
+    /// would put a scary label on it.
+    #[test]
+    fn ordinary_and_sparse_files_are_not_offline() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain.bin");
+        std::fs::write(&plain, vec![1u8; 8192]).unwrap();
+        let sparse = dir.path().join("sparse.bin");
+        std::fs::File::create(&sparse)
+            .unwrap()
+            .set_len(64 << 20)
+            .unwrap();
+
+        let ctx = PlatformCtx {
+            root_device: 0,
+            cluster_size: 4096,
+            exact_allocated: false,
+            dedup_hardlinks: false,
+            collect_owners: false,
+        };
+        for path in [&plain, &sparse] {
+            let md = fs::symlink_metadata(path).unwrap();
+            let meta = from_metadata(&md, md.file_type(), &ctx);
+            assert!(!meta.is_offline, "{path:?} was reported as a placeholder");
+            assert!(!is_placeholder(path));
+        }
+        let md = fs::symlink_metadata(&dir).unwrap();
+        assert!(!from_metadata(&md, md.file_type(), &ctx).is_offline);
+        assert!(!is_placeholder(dir.path()));
+        assert!(!is_placeholder(&dir.path().join("absent")));
+    }
 }

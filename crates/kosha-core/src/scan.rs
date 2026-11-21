@@ -760,6 +760,11 @@ fn explain_file_root(path: PathBuf, image_declined: Option<crate::tree::Unavaila
 fn looks_like_an_image(path: &Path) -> bool {
     use std::io::{Read, Seek, SeekFrom};
 
+    // Reading one sector of a cloud placeholder fetches the whole file, which
+    // is a poor price for choosing between two error messages.
+    if platform::is_placeholder(path) {
+        return false;
+    }
     let Ok(mut file) = std::fs::File::open(path) else {
         return false;
     };
