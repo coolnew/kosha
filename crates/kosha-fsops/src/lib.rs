@@ -24,6 +24,8 @@
 //! On top of that sit four more layers: the platform trash rather than
 //! `unlink`, a reviewable [`ActionPlan`] instead of direct action, guards that
 //! refuse system locations regardless of mode, and an append-only audit log.
+//! A plan that would delete files stored only in the cloud also needs a
+//! [`CloudConfirmed`], which only that plan's own warning can produce.
 
 // `deny`, not `forbid`, for exactly one call: the `FSCTL_SET_COMPRESSION`
 // ioctl in `compress`, which has no safe wrapper anywhere. Forbidding it here
@@ -33,6 +35,7 @@
 #![deny(unsafe_code)]
 
 pub mod audit;
+pub mod cloud;
 mod compress;
 pub mod guard;
 mod mode;
@@ -40,6 +43,7 @@ mod plan;
 pub mod tool_cleanup;
 
 pub use audit::AuditLog;
+pub use cloud::{CloudConfirmed, CloudEvidence, CloudRisk, CloudWarning, ItemCloudRisk};
 pub use guard::Refusal;
 pub use mode::{Mode, ModeError, ReadWriteGrant, Session, UserConfirmed};
 pub use plan::{Action, ActionPlan, ExecutionReport, Fingerprint, Outcome, PlanItem, SkipReason};

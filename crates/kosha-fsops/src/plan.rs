@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use kosha_core::{NodeId, SizeTree};
 
 use crate::audit::AuditLog;
+use crate::cloud::{self, CloudConfirmed, CloudRisk, CloudWarning, ItemCloudRisk};
 use crate::guard::{self, Refusal};
 use crate::mode::{ReadWriteGrant, Session};
 
@@ -136,6 +137,9 @@ pub struct PlanItem {
     /// On-disk bytes this item is expected to free.
     pub bytes: u64,
     pub expected: Fingerprint,
+    /// Cloud-only files at or below this item, from the scanned tree. `None`
+    /// for an action that removes nothing, and for an item with none.
+    pub cloud: Option<ItemCloudRisk>,
 }
 
 /// A reviewed, executable set of changes.
@@ -146,6 +150,15 @@ pub struct ActionPlan {
     /// Items that could not be planned at all, kept so the UI can explain the
     /// gap rather than quietly showing a smaller number.
     rejected: Vec<(PathBuf, String)>,
+    /// Present only when an item holds cloud-only files. See [`crate::cloud`].
+    cloud: Option<CloudRisk>,
+    /// What is left to act on with the cloud-only files taken out, as nodes of
+    /// the tree this plan was built from. Empty unless `cloud` is present.
+    cloud_free: Vec<NodeId>,
+    action: Action,
+    /// Which tree `cloud_free` indexes: its root and its length.
+    tree_root: PathBuf,
+    tree_len: usize,
 }
 
 impl ActionPlan {
@@ -154,32 +167,116 @@ impl ActionPlan {
     /// Guard checks run here, so a plan can only ever contain paths that were
     /// already acceptable — and they run again at execution time, because the
     /// filesystem may have changed in between.
+    ///
+    /// Cloud-only files are counted here too, from the tree's `OFFLINE` flags
+    /// and with no filesystem call: an iterative walk of each item's subtree.
+    /// A plan that holds any carries a [`CloudRisk`] and will not execute
+    /// without a [`CloudConfirmed`].
     pub fn build(tree: &SizeTree, nodes: &[NodeId], action: Action, session: &Session) -> Self {
         let root = session.root().to_path_buf();
         let mut items = Vec::with_capacity(nodes.len());
         let mut rejected = Vec::new();
 
+        // One stack for the whole plan, and a list that grows only with
+        // cloud-only files: nothing is allocated per node walked.
+        let mut stack = Vec::new();
+        let mut offline = Vec::new();
+        let mut accepted = Vec::with_capacity(nodes.len());
+
         for &id in nodes {
             let path = tree.path_of(id);
             match guard::check_for(&path, &root, Some(action)) {
                 Ok(resolved) => match Fingerprint::of(&resolved) {
-                    Ok(expected) => items.push(PlanItem {
-                        path: resolved,
-                        action,
-                        bytes: tree.node(id).allocated,
-                        expected,
-                    }),
+                    Ok(expected) => {
+                        accepted.push(id);
+                        items.push(PlanItem {
+                            path: resolved,
+                            action,
+                            bytes: tree.node(id).allocated,
+                            expected,
+                            cloud: cloud::item_risk(tree, id, action, &mut stack, &mut offline),
+                        });
+                    }
                     Err(e) => rejected.push((path, e.to_string())),
                 },
                 Err(refusal) => rejected.push((path, refusal.to_string())),
             }
         }
 
+        let plan_id = cloud::next_plan_id();
+        let at_risk: Vec<&ItemCloudRisk> = items.iter().filter_map(|i| i.cloud.as_ref()).collect();
+        let (risk, cloud_free) = if at_risk.is_empty() {
+            (None, Vec::new())
+        } else {
+            let cloud_free = cloud::cloud_free_pieces(tree, &accepted, &offline);
+            let risk = CloudRisk {
+                plan_id,
+                action,
+                offline_files: at_risk
+                    .iter()
+                    .map(|r| r.offline_files)
+                    .fold(0u64, u64::saturating_add),
+                items_at_risk: at_risk.len(),
+                plan_items: items.len(),
+                single_cloud_file: items.len() == 1 && at_risk[0].is_cloud_only_file,
+                skippable: matches!(action, Action::Trash | Action::DeletePermanently)
+                    && !cloud_free.is_empty(),
+                evidence: at_risk
+                    .iter()
+                    .map(|r| r.evidence)
+                    .find(|e| e.requires_confirmation())
+                    .unwrap_or(at_risk[0].evidence),
+            };
+            (Some(risk), cloud_free)
+        };
+
         ActionPlan {
             root,
             items,
             rejected,
+            cloud: risk,
+            cloud_free,
+            action,
+            tree_root: tree.root_path().to_path_buf(),
+            tree_len: tree.len(),
         }
+    }
+
+    /// Cloud-only files in this plan, or `None` when there are none.
+    pub fn cloud_risk(&self) -> Option<&CloudRisk> {
+        self.cloud.as_ref()
+    }
+
+    /// The words a confirmation must show before this plan runs, or `None`
+    /// for a plan with no cloud-only files — which then needs nothing new.
+    pub fn cloud_warning(&self) -> Option<CloudWarning> {
+        self.cloud.as_ref().map(CloudRisk::warning)
+    }
+
+    /// The same plan with every cloud-only file taken out.
+    ///
+    /// A new plan, built by the same path as any other — guards, fingerprints
+    /// and all — from the largest pieces of the original items that hold no
+    /// cloud-only file. A folder holding some stays on disk and its other
+    /// contents are planned instead. Its dry run is the preview, and executing
+    /// it acts on exactly those items and nothing else.
+    ///
+    /// `tree` must be the tree this plan was built from. Given another, nothing
+    /// is planned and the reason is stated, because node ids from one scan
+    /// mean nothing in the next.
+    pub fn without_cloud_only(&self, tree: &SizeTree, session: &Session) -> ActionPlan {
+        if self.cloud.is_none() {
+            return self.clone();
+        }
+        if tree.len() != self.tree_len || tree.root_path() != self.tree_root {
+            let mut plan = ActionPlan::build(tree, &[], self.action, session);
+            plan.rejected.push((
+                tree.root_path().to_path_buf(),
+                "the scan changed; select the items again".to_string(),
+            ));
+            return plan;
+        }
+        ActionPlan::build(tree, &self.cloud_free, self.action, session)
     }
 
     pub fn items(&self) -> &[PlanItem] {
@@ -221,21 +318,63 @@ impl ActionPlan {
     /// Needs no grant, because it changes nothing. The UI runs this to fill the
     /// confirmation dialog, so the numbers the user approves come out of the
     /// real code path rather than a parallel estimate that can drift.
+    ///
+    /// For a plan with cloud-only files it reports what the plan does once the
+    /// cloud warning has been accepted: the dialog shows that warning beside
+    /// these figures, and the only way to execute is through it. To preview
+    /// the other choice, dry-run [`ActionPlan::without_cloud_only`].
     pub fn dry_run(&self) -> ExecutionReport {
         self.run(None)
     }
 
     /// Execute. Requires read-write mode, expressed as a grant.
+    ///
+    /// A plan with cloud-only files does nothing here: every item is skipped
+    /// with [`SkipReason::CloudNotConfirmed`]. It needs
+    /// [`ActionPlan::execute_including_cloud`].
     pub fn execute(&self, grant: &ReadWriteGrant<'_>, audit: &mut AuditLog) -> ExecutionReport {
-        self.run(Some((grant, audit)))
+        self.run(Some(Live {
+            _grant: grant,
+            cloud: None,
+            audit,
+        }))
     }
 
-    fn run(&self, live: Option<(&ReadWriteGrant<'_>, &mut AuditLog)>) -> ExecutionReport {
+    /// Execute a plan whose cloud-only files the user has accepted.
+    ///
+    /// The token must come from this plan's own [`CloudWarning`]. One from a
+    /// different plan, or naming a different count, is not accepted, and the
+    /// plan then does nothing, exactly as [`ActionPlan::execute`] would.
+    pub fn execute_including_cloud(
+        &self,
+        grant: &ReadWriteGrant<'_>,
+        confirmed: &CloudConfirmed,
+        audit: &mut AuditLog,
+    ) -> ExecutionReport {
+        self.run(Some(Live {
+            _grant: grant,
+            cloud: Some(confirmed),
+            audit,
+        }))
+    }
+
+    fn run(&self, live: Option<Live<'_, '_>>) -> ExecutionReport {
         let dry_run = live.is_none();
-        let (_grant, mut audit) = match live {
-            Some((g, a)) => (Some(g), Some(a)),
+        let (confirmed, mut audit) = match live {
+            Some(live) => (live.cloud, Some(live.audit)),
             None => (None, None),
         };
+        let cloud_confirmed = match (&self.cloud, confirmed) {
+            (Some(risk), Some(token)) => token.matches(risk),
+            _ => false,
+        };
+        // All or nothing: a plan the user did not accept the cloud warning for
+        // acts on none of its items, the ordinary ones included.
+        let cloud_blocked = !dry_run
+            && self
+                .cloud
+                .as_ref()
+                .is_some_and(|risk| risk.requires_confirmation() && !cloud_confirmed);
 
         let mut report = ExecutionReport {
             dry_run,
@@ -244,7 +383,12 @@ impl ActionPlan {
 
         for item in &self.items {
             let mut reclaimed = item.bytes;
-            let outcome = match self.verify(item) {
+            let checked = if cloud_blocked {
+                Err(SkipReason::CloudNotConfirmed)
+            } else {
+                self.verify(item)
+            };
+            let outcome = match checked {
                 Err(reason) => Outcome::Skipped(reason),
                 Ok(()) if dry_run => Outcome::WouldDo(item.action),
                 Ok(()) => match apply(item) {
@@ -273,7 +417,13 @@ impl ActionPlan {
             if let Some(audit) = audit.as_deref_mut()
                 && matches!(outcome, Outcome::Done(_) | Outcome::Partial { .. })
             {
-                audit.record(&item.path, item.action, reclaimed, &outcome);
+                audit.record_item(
+                    &item.path,
+                    item.action,
+                    reclaimed,
+                    &outcome,
+                    item.cloud.map(|risk| (risk, cloud_confirmed)),
+                );
             }
 
             report.tally(item, reclaimed, outcome);
@@ -303,6 +453,14 @@ impl ActionPlan {
         }
         Ok(())
     }
+}
+
+/// What a real (not dry) run holds: the grant that permits it, the cloud
+/// token if one was given, and the log it writes to.
+struct Live<'g, 'a> {
+    _grant: &'a ReadWriteGrant<'g>,
+    cloud: Option<&'a CloudConfirmed>,
+    audit: &'a mut AuditLog,
 }
 
 /// Carry out one item, and report the on-disk bytes it actually reclaimed.
@@ -547,11 +705,17 @@ pub enum SkipReason {
     Moved,
     /// A guard refused it.
     Refused(Refusal),
+    /// The plan holds files stored in the cloud, and was executed without the
+    /// [`CloudConfirmed`] its warning asks for.
+    CloudNotConfirmed,
 }
 
 impl std::fmt::Display for SkipReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SkipReason::CloudNotConfirmed => {
+                f.write_str("not confirmed: this includes files stored in the cloud")
+            }
             SkipReason::Vanished => f.write_str("already gone"),
             SkipReason::Changed => f.write_str("changed since the scan"),
             SkipReason::Moved => f.write_str("moved since the scan"),

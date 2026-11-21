@@ -11,6 +11,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::cloud::ItemCloudRisk;
 use crate::plan::{Action, Outcome};
 
 pub struct AuditLog {
@@ -87,6 +88,23 @@ impl AuditLog {
     }
 
     pub fn record(&mut self, path: &Path, action: Action, bytes: u64, outcome: &Outcome) {
+        self.record_item(path, action, bytes, outcome, None);
+    }
+
+    /// One record, with what was known about cloud-only files in it.
+    ///
+    /// `cloud` is `None` for an item with none, and then the line is
+    /// byte-for-byte what it always was, so older readers see no change. With
+    /// one, a `cloud` object is added: how many cloud-only files, what the
+    /// evidence was, and whether the user accepted the cloud warning.
+    pub(crate) fn record_item(
+        &mut self,
+        path: &Path,
+        action: Action,
+        bytes: u64,
+        outcome: &Outcome,
+        cloud: Option<(ItemCloudRisk, bool)>,
+    ) {
         let Some(file) = self.file.as_mut() else {
             return;
         };
@@ -103,7 +121,7 @@ impl AuditLog {
         // regular file is atomic against other appenders; two of them are
         // not, so this builds the line with its newline and writes once.
         let mut line = format!(
-            r#"{{"time":"{}","action":"{}","reversible":{},"bytes":{},"outcome":"{}","path":{}}}"#,
+            r#"{{"time":"{}","action":"{}","reversible":{},"bytes":{},"outcome":"{}","path":{}"#,
             timestamp(),
             action.label(),
             action.is_reversible(),
@@ -120,7 +138,15 @@ impl AuditLog {
             },
             json_string(&path.to_string_lossy()),
         );
-        line.push('\n');
+        if let Some((risk, confirmed)) = cloud {
+            line.push_str(&format!(
+                r#","cloud":{{"offline_files":{},"evidence":"{}","confirmed":{}}}"#,
+                risk.offline_files,
+                risk.evidence.audit_name(),
+                confirmed,
+            ));
+        }
+        line.push_str("}\n");
         // A failed audit write is not worth aborting a deletion that already
         // happened, but it must not be silent either.
         if file.write_all(line.as_bytes()).is_err() {
@@ -287,5 +313,39 @@ mod tests {
         assert!(text.contains(r#""bytes":4096"#));
         assert!(text.contains(r#""outcome":"done""#));
         assert!(text.contains(r#""reversible":true"#));
+        assert!(!text.contains("cloud"), "an ordinary item gained a field");
+        assert!(text.ends_with("\"path\":\"/tmp/thing\"}\n"), "{text}");
+    }
+
+    /// The cloud object is added for an item with cloud-only files, inside the
+    /// same one-line record, and says whether the warning was accepted.
+    #[test]
+    fn a_cloud_item_records_its_count_evidence_and_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        let mut log = AuditLog::at(path.clone());
+        let risk = ItemCloudRisk {
+            offline_files: 3,
+            evidence: crate::cloud::CloudEvidence::OfflinePlaceholder,
+            is_cloud_only_file: false,
+        };
+        log.record_item(
+            Path::new("/tmp/folder"),
+            Action::Trash,
+            8192,
+            &Outcome::Done(Action::Trash),
+            Some((risk, true)),
+        );
+        drop(log);
+
+        let text = fs::read_to_string(&path).unwrap();
+        assert_eq!(text.lines().count(), 1);
+        assert!(
+            text.ends_with(
+                "\"path\":\"/tmp/folder\",\"cloud\":{\"offline_files\":3,\
+                 \"evidence\":\"offline\",\"confirmed\":true}}\n"
+            ),
+            "{text}"
+        );
     }
 }
