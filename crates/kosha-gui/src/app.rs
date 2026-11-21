@@ -2231,6 +2231,7 @@ impl KoshaApp {
         cx: &mut Context<Self>,
     ) {
         let taken = crate::snapshots::when(&meta);
+        let imported = meta.import.is_some();
         let replaced = kosha_core::snapshot::replaced_names_note(&tree);
         // The session follows the snapshot's root so that the breadcrumb and
         // the window title say what is being looked at. It stays read-only:
@@ -2245,9 +2246,7 @@ impl KoshaApp {
                 automatic,
             })),
         ));
-        let opened = (!automatic).then(|| {
-            format!("Showing a snapshot taken {taken}. Nothing here is the disk as it is now.")
-        });
+        let opened = (!automatic).then(|| crate::imported_text::opened_notice(imported, &taken));
         // Names this system cannot represent are said every time, automatic
         // record or not: they are shown altered and nothing else would say so.
         self.state.notice = match (opened, replaced) {
@@ -3054,7 +3053,8 @@ impl KoshaApp {
         };
         if ready.source.is_past() || ready.tree.stats().strategy == kosha_core::Strategy::DiskImage
         {
-            self.state.notice = Some("This view records metadata, not file contents. Scan the live folder to open its files.".into());
+            let imported = ready.tree.stats().strategy == kosha_core::Strategy::Imported;
+            self.state.notice = Some(crate::imported_text::open_files_refusal(imported).into());
             cx.notify();
             return;
         }
@@ -3342,7 +3342,8 @@ impl KoshaApp {
         } else if ready.source.is_past()
             || ready.tree.stats().strategy == kosha_core::Strategy::DiskImage
         {
-            self.state.notice = Some("Scan the live folder before moving files to Trash.".into());
+            let imported = ready.tree.stats().strategy == kosha_core::Strategy::Imported;
+            self.state.notice = Some(crate::imported_text::trash_refusal(imported).into());
         } else if !self.state.mode().is_read_write() {
             self.state.notice = Some("Read-only. Switch modes in the title bar to act.".into());
         } else {
@@ -3405,9 +3406,7 @@ impl KoshaApp {
                 .ready()
                 .is_some_and(|ready| ready.tree.stats().strategy == kosha_core::Strategy::Imported);
             self.state.notice = Some(if imported {
-                "This is a listing imported from another tool, not measured by Kosha and not this \
-                 disk. Nothing in it can be acted on."
-                    .into()
+                crate::imported_text::imported_refusal().into()
             } else {
                 "This is a snapshot, not the disk. Scan the folder to act on what is there now."
                     .into()
@@ -6477,6 +6476,10 @@ fn entry_context_menu(
                 && ready.tree.stats().strategy != kosha_core::Strategy::DiskImage
         });
         let writable = live && state.state.mode().is_read_write();
+        let imported = state.state.ready().is_some_and(|ready| {
+            Arc::ptr_eq(&ready.tree, &tree)
+                && ready.tree.stats().strategy == kosha_core::Strategy::Imported
+        });
         // The tooltip layer paints above popups. Remove preview owners while
         // an entry menu is open, including delayed previews not yet visible.
         let menu_id = cx.entity_id();
@@ -6540,13 +6543,9 @@ fn entry_context_menu(
         )
         .separator()
         .item(
-            PopupMenuItem::new(if writable {
-                "Move to Trash…"
-            } else if live {
-                "Move to Trash (Read-only)"
-            } else {
-                "Move to Trash (live scan required)"
-            })
+            PopupMenuItem::new(crate::imported_text::trash_menu_label(
+                writable, live, imported,
+            ))
             .disabled(!writable)
             .on_click(move |_, _, cx| {
                 trashing.update(cx, |app, cx| {

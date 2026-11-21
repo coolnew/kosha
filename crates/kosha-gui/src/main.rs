@@ -29,6 +29,7 @@ mod elevate;
 mod geometry;
 mod handoff;
 mod icons;
+mod imported_text;
 mod native_menu;
 mod owners;
 mod places;
