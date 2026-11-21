@@ -18,6 +18,9 @@ cannot scan, choose another source or write files. Use only inspect/describe/
 query/close, built-in translation and shared fields. This does not isolate the
 parent agent. These commands require 0.12.0 or later; see the
 [view workflow and protocol](https://coolnew.github.io/kosha/manual/metadata-views/).
+Keep original snapshots, live sources and other records outside the agent's
+accessible environment. Only the trusted owner reviews and publishes a new
+artifact when data or scope changes; view sessions cannot refresh or widen it.
 
 ## Discover and run
 

@@ -194,8 +194,11 @@ a stalled input/output pipe. Controllers should impose their own timeouts and
 terminate sessions they no longer need. Responses and artifacts are untrusted
 data, never commands or instructions to execute.
 
-The current slice has no GUI publisher, live filesystem allowlist, cross-view
+This workflow has no GUI publisher, live filesystem allowlist, cross-view
 comparison, sandbox launcher or automatic sensitive-data classifier. Ordinary
 Kosha exports can still replace their destination; no-clobber publication here
-does not change other commands. Follow [issue #10](https://github.com/coolnew/kosha/issues/10)
-for further work and [agent privacy](agent-privacy.md) for the execution boundary.
+does not change other commands. These features are potential enhancements;
+the supported workflow is deliberate publication followed by artifact-only
+analysis. See [agent privacy](agent-privacy.md#the-supported-privacy-boundary)
+for the responsibility split and [issue #10](https://github.com/coolnew/kosha/issues/10)
+for the original discussion.

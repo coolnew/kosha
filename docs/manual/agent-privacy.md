@@ -10,14 +10,55 @@ operations. It is not a read-only filesystem sandbox. Names, paths, sizes, dates
 and owners can also reveal personal or confidential information. Consider both
 what an agent may learn and which write-capable operations it can invoke.
 
+## The supported privacy boundary
+
+Starting with **0.12.0**, Kosha provides an owner-approved metadata-sharing
+workflow. The trusted owner selects a recorded subtree, excludes private
+branches and chooses which date fields to disclose. Publication creates a fresh
+`.koshaview`: unshared entries, original root paths and owners are absent from
+the artifact itself. A reviewed SHA-256 binds confirmation to that preview;
+publication never replaces an existing destination.
+
+The view consumer and its fixed-source session inspect/query that approved
+artifact. Session requests cannot scan, choose another source, read live-source
+file contents, load recipes, manage packs or write output files. These restrictions
+apply to that interface; an agent with other tools can still use those tools.
+See [the commands, protocol and limits](metadata-views.md).
+
+**You control the execution boundary.** Run the entire agent in an environment
+that exposes only the intended inputs and tools. Kosha does not set up that
+environment, distinguish AI from humans, or restrict other processes running
+under your account. The normal CLI retains its OS permissions and write-capable
+commands. An unrestricted agent can invoke it differently or bypass it entirely.
+
+GUI publication, confined live traversal and comparison between metadata views
+are not included. They are potential enhancements, not required steps for using
+the supported artifact-sharing workflow. A view is plaintext metadata, not
+encryption, anonymization or automatic secret detection; its recipient can read
+every included byte. Metadata already disclosed cannot be recalled.
+
+## Recommended metadata-only handoff
+
+1. As the trusted owner, prepare a snapshot outside the agent's environment.
+2. Use `kosha view create` to select the subtree, exclusions, alias and optional
+   dates. Review the preview, confirm its digest, and inspect the new artifact.
+3. Give the isolated agent only that approved `.koshaview` and the permitted
+   consumer interface. Keep the original snapshot, live folders, settings,
+   credentials and other records outside its accessible environment.
+4. For repeated queries, use `kosha view session --input FILE` with one fixed
+   artifact. The controller should impose timeouts and close unwanted sessions.
+   Exposing this session does not itself remove other agent tools or shell access.
+5. For changed data, the owner reviews and publishes a new artifact. There is no
+   automatic live refresh or silent expansion of the shared scope.
+
 ## Choose the access you mean to give
 
 | Your intention | What to consider |
 | --- | --- |
 | Let an agent inspect a live workspace, including its file contents | Isolate the entire agent and its tools using your runtime or OS controls; expose only the intended workspace |
-| Share recorded metadata without exposing live file contents | Prepare and review a snapshot yourself, then supply only that approved artifact to an isolated agent |
+| Share selected recorded metadata without exposing live file contents | Prefer an owner-published `.koshaview`; expose only the approved artifact and consumer interface to an isolated agent |
 | Keep an unrestricted host agent away from other folders | Kosha settings cannot enforce this; change the agent's execution permissions or environment |
-| Share selected entries or fields from a broad scan | Current snapshots are not redacted views; do not share the broad record and assume a query hides its other data |
+| Share a whole snapshot deliberately | Every recorded entry remains readable; use the separate snapshot handoff below only when that entire record is appropriate to share |
 
 An unrestricted host shell can run another program or invoke Kosha differently.
 A prompt saying “stay in this folder,” a command wrapper or a user-editable policy
@@ -25,7 +66,7 @@ does not prevent that. Sandboxing only the Kosha child also leaves an unrestrict
 parent agent free to use its other tools. The boundary must cover the agent,
 its children and any host tools or services it can reach.
 
-## A practical snapshot handoff today
+## Sharing a whole snapshot deliberately
 
 1. As the trusted owner, choose a small folder whose recorded metadata you are
    willing to share. Check the names and paths, not just the total size.
@@ -144,8 +185,8 @@ Check `kosha view --help` in your installed build.
 
 See [the metadata-view workflow](metadata-views.md) for commands, limits and
 the distinction between the owner-side publisher and read-only consumer.
-Live traversal controls, GUI publication and cross-view comparison remain
-separate follow-ups. No general live-folder sandbox has been implemented.
+Live traversal controls, GUI publication and cross-view comparison are separate
+potential enhancements. No general live-folder sandbox has been implemented.
 
 The intended direction preserves normal human CLI use. It does not rely on
 guessing whether a caller is AI. Stronger delegated workflows need both limited

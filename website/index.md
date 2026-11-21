@@ -214,13 +214,14 @@ metadata you intend it to inspect.
 </div>
 <div class="support-note" markdown="1">
 
-**Available today:** search a deliberately shared snapshot without rescanning
-its original folder. The entire snapshot remains readable to its recipient.
+**Share only the metadata you choose.** Starting with 0.12.0, publish a selected
+subtree as a metadata view, then give a fixed-view session that approved artifact.
+Excluded entries are absent from the artifact itself.
+[See the workflow and limits →](../docs/manual/metadata-views.md)
 
-**Starting with 0.12.0:** owner-published metadata views and
-fixed-view automation sessions. [See commands and limits →](../docs/manual/metadata-views.md)
-These are cooperative metadata tools, not agent sandboxes. Earlier binaries
-do not include them.
+The agent's environment must restrict its other access. Kosha supplies selective
+disclosure and cooperative tools, not an agent sandbox. A whole snapshot still
+exposes every recorded entry to its recipient.
 
 </div>
 
