@@ -59,6 +59,13 @@ After an action, kosha rescans rather than treating the old measurements as
 current. There is no continuous filesystem watcher. Ordinary browsing stays at
 the state observed during its scan until you rescan.
 
+## Cloud placeholders
+
+A file stored in the cloud has only a local placeholder. Deleting the placeholder
+can delete the only copy, so treat these entries as review-only and free space
+with the provider's own software. See
+[cloud-synced folders](scanning.md#cloud-synced-folders).
+
 ## Historical and incomplete views
 
 A saved drive scan or explicit snapshot describes the past. File-changing

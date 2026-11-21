@@ -95,7 +95,9 @@ observation.
   estimated recoverable allocation after keeping one, and their paths.
   `--dupe-min N` sets the minimum length in bytes and requests the hunt.
   The default is 1 MiB. Snapshots, caches, and disk-image views do not supply
-  file contents for this report.
+  file contents for this report. Cloud placeholders are skipped rather than
+  downloaded and reported as `N files stored in the cloud, skipped rather than
+  downloaded`; see [cloud-synced folders](scanning.md#cloud-synced-folders).
 
 ## Natural-language search
 
@@ -261,7 +263,7 @@ The root is contextual metadata and is excluded from entry export rows.
 | `hardlink-dup` | Allocation and logical bytes are counted under another name for the same file. |
 | `sparse` | Allocation is smaller than logical length, which can also occur with filesystem compression. |
 | `partial` | The entry's subtree includes data the scan could not read. |
-| `offline` | The filesystem marks the content as offline, such as a cloud placeholder. |
+| `offline` | The filesystem marks the content as stored elsewhere, such as a cloud placeholder on Windows or macOS. Its size is an upper bound and it is never read. See [cloud-synced folders](scanning.md#cloud-synced-folders). |
 
 ### JSON scan metadata
 

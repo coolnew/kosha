@@ -942,6 +942,73 @@ mod duplicates {
             report.bytes_hashed
         );
     }
+
+    /// The same tree with the named files marked as cloud placeholders, and the
+    /// files themselves *deleted from disk*.
+    ///
+    /// This is the platform-neutral way to be a placeholder: the scanner sets
+    /// `OFFLINE` from a Windows attribute or a macOS `SF_DATALESS` bit, and both
+    /// arrive in the tree as the same flag. Deleting the file afterwards is what
+    /// makes a read observable without a cloud account: if the hunt opened a
+    /// placeholder it would fail and count one as `unreadable`.
+    fn with_placeholders(tree: &SizeTree, root: &Path, names: &[&str]) -> SizeTree {
+        let mut nodes = tree.nodes_slice().to_vec();
+        for (index, node) in nodes.iter_mut().enumerate() {
+            let id = kosha_core::NodeId::from_index(index);
+            let name = tree.name_lossy(id);
+            if names.iter().any(|wanted| *wanted == name) {
+                node.flags.insert(kosha_core::Flags::OFFLINE);
+            }
+        }
+        for name in names {
+            fs::remove_file(root.join(name)).unwrap();
+        }
+        SizeTree::from_parts(
+            nodes,
+            kosha_core::NameArena::from_bytes(tree.names_bytes().to_vec()),
+            kosha_core::Owners::default(),
+            tree.root_path().to_path_buf(),
+            tree.stats().clone(),
+        )
+    }
+
+    /// A placeholder is skipped and counted, and never opened, on any platform.
+    #[test]
+    fn a_flagged_placeholder_is_skipped_counted_and_never_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let payload = vec![5u8; 2 * MB];
+        for name in ["here-a.bin", "here-b.bin", "in-the-cloud.bin"] {
+            fs::write(root.join(name), &payload).unwrap();
+        }
+        let tree = with_placeholders(&scan(root), root, &["in-the-cloud.bin"]);
+
+        let report = duplicates::find(&tree, &opts());
+
+        assert_eq!(report.not_local, 1);
+        assert_eq!(report.unreadable, 0, "a placeholder was opened");
+        assert_eq!(report.groups.len(), 1);
+        assert_eq!(report.groups[0].nodes.len(), 2, "the local pair survives");
+    }
+
+    /// Same-length placeholders are not even candidates, so nothing is read.
+    #[test]
+    fn same_length_placeholders_are_not_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in ["a.bin", "b.bin"] {
+            fs::write(root.join(name), vec![9u8; 2 * MB]).unwrap();
+        }
+        let tree = with_placeholders(&scan(root), root, &["a.bin", "b.bin"]);
+
+        let report = duplicates::find(&tree, &opts());
+
+        assert_eq!(report.not_local, 2);
+        assert_eq!(report.candidates_examined, 0);
+        assert_eq!(report.bytes_hashed, 0);
+        assert_eq!(report.unreadable, 0);
+        assert!(report.groups.is_empty());
+    }
 }
 
 /// The hunt opens files, and not everything with a size can be read.

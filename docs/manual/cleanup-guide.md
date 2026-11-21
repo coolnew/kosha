@@ -50,6 +50,10 @@ stdout stay clean and do not include guide prose. No commands are executed.
 - **Firefox:** Settings → Privacy & Security → Clear browsing data / Clear
   History. Review the time range and categories before confirming.
   See [Firefox's instructions](https://support.mozilla.org/en-US/kb/delete-browsing-search-download-history-firefox).
+- **Cloud-synced folders:** to free space from OneDrive, iCloud Drive, Dropbox or
+  Google Drive, use the provider's own option to keep files online only. Kosha
+  treats cloud placeholders as review-only; see
+  [cloud-synced folders](scanning.md#cloud-synced-folders).
 - **AI sessions:** review and back up useful conversations in the owning tool.
   Archiving is not deletion. These records can be needed to resume work and are
   not regenerable caches. Kosha does not invent a prune command for them.

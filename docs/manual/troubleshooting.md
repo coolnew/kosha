@@ -68,6 +68,25 @@ allocated size, and scan strategy. Search `unreadable` to inspect access errors.
 Administrator privileges can improve Windows coverage but do not guarantee
 access to every file. Drive usage also includes overhead and reserved storage.
 
+Cloud placeholders can also explain the difference; see the next entry.
+
+## Kosha shows a folder much larger than my disk uses. Is that cloud storage?
+
+Possibly. A cloud placeholder reports the file's full length but uses almost no
+local space, so **Apparent** is large while **on disk** is small. Such entries
+show as stored in the cloud in Quick look and carry the `offline` flag in
+exports. Treat their size as an upper bound. See
+[cloud-synced folders](scanning.md#cloud-synced-folders).
+
+## Will scanning download my cloud files?
+
+No. A scan reads metadata only and never opens a placeholder. Duplicate search
+skips placeholders and reports how many it skipped. The provider's software may
+still contact its service when a folder is listed. Google Drive for desktop has
+not been verified with kosha, and on Windows its streamed files might not be
+recognized as placeholders, so avoid duplicate searches on such a folder. See
+[cloud-synced folders](scanning.md#cloud-synced-folders).
+
 ## An action is unavailable
 
 Check Read-only mode, historical snapshot views, confidence, and protected-path

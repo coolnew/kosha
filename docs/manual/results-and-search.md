@@ -45,7 +45,8 @@ is hidden by the layout.
 
 A six-byte file can occupy one 4 KiB filesystem block. A sparse image can
 report 64 MiB apparent and 0 B on disk when all of it is unallocated.
-Compression, cloud placeholders, skipped subtrees, and hardlink accounting can
+Compression, cloud placeholders (see [cloud-synced folders](scanning.md#cloud-synced-folders)),
+skipped subtrees, and hardlink accounting can
 also make totals and individual rows differ. Adding a folder's total to the
 files listed inside it would count those bytes twice.
 
@@ -270,6 +271,8 @@ Duplicate searches are separate from ordinary scanning. They read file contents
 and confirm candidate matches by hashing. Unavailable content cannot be confirmed
 as duplicate. Review copies and locations before acting. These searches are
 unavailable over snapshots and disk-image views, which do not expose file bytes.
+Files stored in the cloud are skipped and counted, not downloaded; see
+[cloud-synced folders](scanning.md#cloud-synced-folders).
 
 Ownership collection is optional. Its view groups recorded usage by account,
 including identifiers the OS cannot resolve to a name. It can add work to a

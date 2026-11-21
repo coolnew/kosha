@@ -358,6 +358,13 @@ fn resolve_group(size: u64, paths: &[(NodeId, PathBuf)], tree: &SizeTree) -> Gro
     // Pass 2: cheap edge hash.
     let mut by_edge: FxHashMap<[u8; 32], Vec<NodeId>> = FxHashMap::default();
     for (id, path) in paths {
+        // Pass 1 already keeps placeholders out, so this is the second lock on
+        // the same door, at the one place that opens a file: nothing that
+        // reaches `File::open` is allowed to be a cloud placeholder, whatever
+        // a caller or a later edit to pass 1 does.
+        if tree.node(*id).flags.contains(Flags::OFFLINE) {
+            continue;
+        }
         match hash_edges(path, size) {
             Ok((digest, read)) => {
                 outcome.bytes_read += read;
@@ -389,6 +396,9 @@ fn resolve_group(size: u64, paths: &[(NodeId, PathBuf)], tree: &SizeTree) -> Gro
             let Some(path) = lookup.get(&id) else {
                 continue;
             };
+            if tree.node(id).flags.contains(Flags::OFFLINE) {
+                continue;
+            }
             match hash_whole(path) {
                 Ok((digest, read)) => {
                     outcome.bytes_read += read;
