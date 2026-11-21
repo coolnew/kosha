@@ -1,0 +1,31 @@
+[package]
+name = "kosha-import"
+description = "Reads listings written by other disk-usage tools (ncdu JSON) into a kosha size tree."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# The fuzz targets have their own workspace and are not part of the crate.
+exclude = ["fuzz/"]
+
+# Parsers here are pure over a reader: no network, no process spawning, no
+# filesystem access of any kind. The command line opens the one file named and
+# writes the result through the snapshot store.
+[dependencies]
+kosha-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Gzip input. Already in the lock file through kosha-core's snapshots.
+flate2 = "1"
+# Zstandard input (`ncdu -c`), decode only. Pinned exactly after the adoption
+# review: never below 0.9.1 (RUSTSEC-2026-0344, a decompression bomb that
+# bypassed the window limit). Used only through `decompress.rs`, which caps the
+# window, the output and the frames, and verifies the content checksum that
+# this library reads but does not check.
+ruzstd = "=0.9.1"
+
+[dev-dependencies]
+flate2 = "1"

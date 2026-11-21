@@ -15,6 +15,29 @@ pub fn resolve(path: &Path) -> io::Result<PathBuf> {
 
 pub fn report_source(path: &Path, meta: &snapshot::Meta) {
     let selected = std::path::absolute(path).unwrap_or_else(|_| path.to_owned());
+    if let Some(import) = &meta.import {
+        eprintln!(
+            "source: imported; measured_by_kosha=false; format={}; tool={}; observed_unix={}; imported_unix={}; file={}",
+            kosha_core::format::printable(&import.format),
+            kosha_core::format::printable(&import.tool),
+            import
+                .observed
+                .map_or_else(|| "unknown".to_string(), |at| at.to_string()),
+            import.imported_at,
+            kosha_core::format::printable(&selected.to_string_lossy())
+        );
+        if !import.mtime_known {
+            eprintln!(
+                "note: this imported listing records no modification times; date conditions cannot match its entries"
+            );
+        }
+        if !import.allocated_known {
+            eprintln!(
+                "note: this imported listing records apparent sizes only; on-disk sizes equal apparent sizes"
+            );
+        }
+        return;
+    }
     eprintln!(
         "source: snapshot; taken_unix={}; age_seconds={}; file={}",
         meta.taken,

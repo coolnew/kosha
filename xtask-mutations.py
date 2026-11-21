@@ -20,6 +20,10 @@ file that already exists and that somebody else made. Creating a new file is
 a settings file. Those are outputs, and refusing them would be refusing the
 program's own reason to run.
 
+`kosha-import` is in the non-mutating majority on purpose: its parsers read one
+reader and write nothing. The only write an import causes is the new record the
+command line saves through `snapshot/store.rs`, the exception below.
+
 **The exceptions are listed one at a time, with why.** That is the point rather
 than a weakness: such a dependency must be justified explicitly,
 and an allow-list entry is where the argument goes.

@@ -1,0 +1,15 @@
+[1,2,{"progname":"ncdu","progver":"2.9","timestamp":1763647320},
+[{"name":"/srv","asize":4096,"dsize":4096,"dev":2049,"ino":2,"mtime":1763600000},
+{"name":"readme.txt","asize":1200,"dsize":4096,"ino":10,"mtime":1763600100,"uid":1000,"gid":1000,"mode":33188},
+{"name":"empty.txt","asize":0,"dsize":0},
+[{"name":"data","asize":4096,"dsize":4096,"mtime":1763600200.5},
+{"name":"a.bin","asize":10000,"dsize":12288,"ino":20,"nlink":2,"hlnkc":true},
+{"name":"b.bin","asize":10000,"dsize":12288,"ino":20,"nlink":2,"hlnkc":true},
+{"name":"link","asize":7,"dsize":0,"mode":41471,"notreg":true},
+[{"name":"locked","read_error":true,"dsize":4096}],
+{"name":"skipped","excluded":"pattern"},
+{"name":"proc","excluded":"kernfs"},
+[{"name":"mnt","dev":2050,"excluded":"otherfs"}]
+],
+{"name":"other.dat","asize":1,"dsize":4096,"dev":2049,"ino":20,"nlink":1}
+]]

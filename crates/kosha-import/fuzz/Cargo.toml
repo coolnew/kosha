@@ -1,0 +1,39 @@
+# Coverage-guided fuzzing for kosha-import. Not part of the workspace and not
+# built by default. Needs a nightly toolchain and cargo-fuzz:
+#
+#     cd crates/kosha-import/fuzz
+#     cargo +nightly fuzz run ncdu -- -max_total_time=600
+#     cargo +nightly fuzz run decompress -- -max_total_time=600
+#
+# Seed the corpus from ../tests/fixtures. Both targets run with the production
+# caps lowered only far enough to keep each input fast.
+[package]
+name = "kosha-import-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+kosha-import = { path = ".." }
+
+# Its own workspace, so the main one neither builds nor locks it.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ncdu"
+path = "fuzz_targets/ncdu.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decompress"
+path = "fuzz_targets/decompress.rs"
+test = false
+doc = false
+bench = false

@@ -23,6 +23,7 @@ kosha-view.workspace = true
 kosha-analyze.workspace = true
 kosha-query.workspace = true
 kosha-search.workspace = true
+kosha-import.workspace = true
 kosha-marketplace.workspace = true
 ctrlc = "3"
 serde_json.workspace = true

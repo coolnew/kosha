@@ -21,6 +21,7 @@ use kosha_core::{ScanOptions, Scanner, SizeTree, compare, export, format, snapsh
 use kosha_core::{say, sayln};
 
 mod cache;
+mod import;
 mod marketplace;
 mod search;
 mod snapshots;
@@ -38,6 +39,8 @@ USAGE:
     kosha search --load SAVED.kosha \"folders created last week\"
     kosha search --path PATH \"files ending with md\"
     kosha search --help             natural-language search options
+    kosha import --from ncdu FILE  keep an ncdu JSON export as an imported record
+    kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
 
@@ -218,6 +221,11 @@ fn main() -> ExitCode {
         Ok(Parsed::Caches(args)) => cache::list(&args),
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
+        Ok(Parsed::Import(args)) => import::run(&args),
+        Ok(Parsed::ImportHelp) => {
+            say!("{}", import::USAGE);
+            return ExitCode::SUCCESS;
+        }
         Ok(Parsed::SearchRecipes(Some(path), filter)) => {
             search::list_pack(&path, filter.as_deref()).map_err(Into::into)
         }
@@ -391,6 +399,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // candidate list — works on a tree and does not care where it came from.
     // The one thing that does care is the duplicate hunt itself, which reads
     // file contents, and it says so.
+    let mut record: Option<snapshot::Meta> = None;
     let tree = if args.cache.enabled {
         let (meta, tree) = args.cache.open(&args.path)?;
         if !args.document_on_stdout() {
@@ -466,6 +475,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         if !args.document_on_stdout() {
             print_snapshot_header(&meta);
         }
+        record = Some(meta);
         tree
     } else {
         let tree = Scanner::new(args.scan)
@@ -500,7 +510,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // can see. The report is not lost: `run_export` writes its summary to
     // stderr, and `--out` keeps the human report on stdout where it belongs.
     if !args.document_on_stdout() {
-        print_header(&tree, args);
+        print_header(&tree, args, record.as_ref());
         print_largest(&tree, args);
 
         if args.stats {
@@ -511,6 +521,12 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
         if args.cleanup_guide {
             sayln!("\nCLEANUP GUIDE — recorded data, not guaranteed savings");
+            if tree.stats().strategy == kosha_core::Strategy::Imported {
+                sayln!(
+                    "  This is an imported listing: the locations below are on the machine it \
+                     describes, and the advice is about that machine. Nothing here is on this disk."
+                );
+            }
             let guides = kosha_analyze::cleanup::guides(&tree, &Context::detect());
             if guides.is_empty() {
                 sayln!("  No supported locations recorded. Custom locations may not be detected.");
@@ -622,6 +638,10 @@ fn keep_snapshot(tree: &SizeTree, args: &Args) -> Result<(), Box<dyn std::error:
 /// already does. Measured with `--label` and one escape: `red\x1b[31m\n` plus a
 /// forged row put a second snapshot in the listing that does not exist.
 fn print_snapshot_header(meta: &snapshot::Meta) {
+    if let Some(import) = &meta.import {
+        print_import_header(meta, import);
+        return;
+    }
     sayln!("SNAPSHOT  {}", format_when(meta.taken));
     if !meta.label.is_empty() {
         sayln!("  {}", format::printable(&meta.label));
@@ -645,6 +665,56 @@ fn print_snapshot_header(meta: &snapshot::Meta) {
             } else {
                 "the scan could not read everything"
             }
+        );
+    }
+}
+
+/// The header of a record that is another tool's listing.
+///
+/// Says so first and in the same sentence every front end uses, so that
+/// nothing below it reads as a scan kosha made.
+fn print_import_header(meta: &snapshot::Meta, import: &snapshot::Provenance) {
+    sayln!("IMPORTED  {}", format_when(meta.taken));
+    if !meta.label.is_empty() {
+        sayln!("  {}", format::printable(&meta.label));
+    }
+    sayln!("  {}", import.sentence());
+    sayln!(
+        "  listing of  {}",
+        format::printable(&meta.root.to_string_lossy())
+    );
+    sayln!("  from file   {}", format::printable(&import.source_name));
+    if !import.allocated_known {
+        sayln!("  on-disk sizes were not recorded; sizes are apparent sizes only");
+    }
+    if !import.mtime_known {
+        sayln!("  modification times were not recorded; date conditions cannot match");
+    }
+    let mut notes = Vec::new();
+    if import.excluded_by_source > 0 {
+        notes.push(format!(
+            "{} excluded by the source tool",
+            format::plural(import.excluded_by_source as usize, "entry")
+        ));
+    }
+    if import.unknown_size > 0 {
+        notes.push(format!(
+            "{} without a recorded size",
+            format::plural(import.unknown_size as usize, "entry")
+        ));
+    }
+    if import.duplicate_paths > 0 {
+        notes.push(format!(
+            "{} repeated in its directory",
+            format::plural(import.duplicate_paths as usize, "name")
+        ));
+    }
+    if !notes.is_empty() {
+        sayln!("  {}", notes.join(", "));
+    }
+    if meta.partial {
+        sayln!(
+            "  partial — the listing marks entries as unreadable or excluded, so totals are a floor"
         );
     }
 }
@@ -680,6 +750,9 @@ fn print_snapshots() {
                 format!("  ({})", format::printable(&one.meta.label))
             },
         );
+        if let Some(sentence) = one.meta.import_sentence() {
+            sayln!("{:<23}  {sentence}", "");
+        }
     }
     sayln!(
         "\n{} occupying {}",
@@ -780,6 +853,7 @@ fn print_changes(
     let mut counted_differently = None;
     let mut crossed_differently = None;
     let mut measured_differently = None;
+    let mut imported_record = None;
     let baseline = if snapshot::is_snapshot(baseline_path) {
         let (meta, past) = snapshot::store::open(baseline_path)
             .map_err(|e| format!("{}: {e}", baseline_path.display()))?;
@@ -844,6 +918,9 @@ fn print_changes(
                 "it could not read everything"
             });
         }
+        if let Some(sentence) = meta.import_sentence() {
+            imported_record = Some(sentence);
+        }
         compare::Baseline::of_tree(&past)
     } else {
         let file = std::fs::File::open(baseline_path)
@@ -899,6 +976,22 @@ fn print_changes(
     // the window refused the same pair outright. Neither is right. The
     // comparison is the one `compare` documents, and what it rests on is how
     // much of the record is here, so that is what is printed.
+    // **Another tool's numbers are another tool's.** An imported listing is
+    // compared like any record, but what it calls a size is what that tool
+    // measured, on that machine, so a difference can be measurement rather
+    // than change.
+    if let Some(sentence) = &imported_record {
+        sayln!(
+            "  the record is an imported listing — {sentence} Its sizes are what that \
+             tool reported, so a difference can be how it measured rather than a change",
+        );
+    }
+    if tree.stats().strategy == kosha_core::Strategy::Imported {
+        sayln!(
+            "  this tree is an imported listing, not measured by Kosha — its sizes are what \
+             the source tool reported",
+        );
+    }
     if let Some(root) = &elsewhere {
         sayln!(
             "  the record is of {}",
@@ -1085,9 +1178,36 @@ fn run_export(
     Ok(())
 }
 
-fn print_header(tree: &SizeTree, args: &Args) {
+fn print_header(tree: &SizeTree, args: &Args, record: Option<&snapshot::Meta>) {
     let stats = tree.stats();
     let approx = if tree.is_partial() { "~" } else { "" };
+    if let Some(import) = record.and_then(|meta| meta.import.as_ref()) {
+        sayln!(
+            "\n{}",
+            format::printable(&tree.root_path().to_string_lossy())
+        );
+        let on_disk = if import.allocated_known {
+            format!(
+                "{approx}{} on disk",
+                format::bytes_in(tree.total_allocated(), args.units)
+            )
+        } else {
+            "on disk not recorded".to_string()
+        };
+        sayln!(
+            "{on_disk} · {approx}{} apparent · {} · imported, not measured by Kosha",
+            format::bytes_in(tree.total_logical(), args.units),
+            format::plural(stats.entries as usize, "entry"),
+        );
+        if stats.unreadable > 0 {
+            sayln!(
+                "{} could not be read by the source tool, so totals are a lower bound",
+                format::plural(stats.unreadable as usize, "entry")
+            );
+        }
+        sayln!();
+        return;
+    }
 
     // Sanitised like every name under it, and for a reason the other lines do
     // not have: when the tree came out of a snapshot this root came out of that
@@ -1195,7 +1315,15 @@ fn print_stats(tree: &SizeTree) {
         0.0
     };
 
-    sayln!("\nSCAN");
+    let imported = stats.strategy == kosha_core::Strategy::Imported;
+    sayln!(
+        "{}",
+        if imported {
+            "\nLISTING  imported, not measured by Kosha"
+        } else {
+            "\nSCAN"
+        }
+    );
     sayln!("  directories        {:>14}", format::count(stats.dirs));
     sayln!("  files              {:>14}", format::count(stats.files));
     sayln!("  max depth          {:>14}", stats.max_depth);
@@ -1211,11 +1339,13 @@ fn print_stats(tree: &SizeTree) {
         "  hardlinks deduped  {:>14}",
         format::count(stats.hardlinks_deduped)
     );
-    sayln!(
-        "  elapsed            {:>14}",
-        format::duration(stats.duration)
-    );
-    sayln!("  entries/sec        {:>14}", format::count(per_sec as u64));
+    if !imported {
+        sayln!(
+            "  elapsed            {:>14}",
+            format::duration(stats.duration)
+        );
+        sayln!("  entries/sec        {:>14}", format::count(per_sec as u64));
+    }
     sayln!(
         "  tree memory        {:>14}  ({} bytes/entry)",
         format::bytes(tree.memory_bytes() as u64),
@@ -1567,6 +1697,8 @@ enum Parsed {
     Run(Box<Args>),
     Search(Box<search::Args>),
     Marketplace(Vec<String>),
+    Import(Box<import::Args>),
+    ImportHelp,
     SearchHelp,
     SearchRecipes(Option<PathBuf>, Option<String>),
     Usage,
@@ -1602,6 +1734,13 @@ where
     if argv.peek().is_some_and(|arg| arg == "marketplace") {
         argv.next();
         return Ok(Parsed::Marketplace(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "import") {
+        argv.next();
+        return match import::parse(argv)? {
+            import::Parsed::Run(args) => Ok(Parsed::Import(args)),
+            import::Parsed::Help => Ok(Parsed::ImportHelp),
+        };
     }
     if argv.peek().is_some_and(|arg| arg == "search") {
         argv.next();

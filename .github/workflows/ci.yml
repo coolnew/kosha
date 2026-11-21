@@ -79,7 +79,7 @@ jobs:
       - name: Check core crates
         run: >
           cargo clippy --locked -p kosha-core -p kosha-view -p kosha-analyze -p kosha-query -p kosha-search
-          -p kosha-fsops -p kosha-cli --all-targets
+          -p kosha-fsops -p kosha-import -p kosha-cli --all-targets
 
       - name: Test core crates
         run: >
@@ -144,7 +144,7 @@ jobs:
         run: >
           cargo check --locked --target x86_64-unknown-linux-musl --all-targets
           -p kosha-core -p kosha-view -p kosha-analyze -p kosha-query -p kosha-search
-          -p kosha-fsops -p kosha-cli
+          -p kosha-fsops -p kosha-import -p kosha-cli
 
   hygiene:
     name: hygiene
