@@ -4,6 +4,52 @@
 
 Nothing yet.
 
+## [0.12.1-rc.1] — 2026-11-21
+
+### Cloud placeholders are now recognised on macOS
+
+Kosha already marked cloud placeholders on Windows (OneDrive Files On-Demand and
+similar) and never read them, because reading a placeholder downloads it.
+On macOS the same files were not recognised. A file that a File Provider app
+(iCloud Drive, OneDrive, Dropbox, Google Drive for desktop) keeps only in the
+cloud is "dataless", and the kernel says so in the same stat call the scan
+already makes. Kosha now reads that marker and flags those files as stored in
+the cloud. No name or path guess is involved, and the scan costs no extra
+system call.
+
+What changes for you:
+
+- Duplicate search skips these files instead of opening them, so it no longer
+  risks downloading them, and reports how many it skipped.
+- Their size is shown as an upper bound, and the `offline` flag appears in CSV
+  and JSON exports, as it already did on Windows.
+- Cleanup guidance for them stays review-only: deleting a local placeholder can
+  delete the only copy.
+- Opening a placeholder directly as a disk image is refused.
+
+Scanning a synced folder is an ordinary folder scan. The manual has a new
+"Cloud-synced folders" section, and the FAQ, safety, macOS, cleanup and
+command-line pages link to it.
+
+### Scope and limitations
+
+This is not cloud-account scanning. Kosha scans the local folder that your sync
+app presents and sends nothing over the network. It does not list files that
+are not represented locally.
+
+Checked on a real Mac against iCloud Drive: six dataless files were flagged and
+none was downloaded. Google Drive for desktop has not been verified, and on
+Windows its streamed files may not carry the placeholder attributes, so avoid
+duplicate searches on such a folder until this is confirmed. A GUI check and
+wider provider testing remain open.
+
+For testing, please report your macOS version, the sync app, whether the
+"stored in the cloud" count matches what Finder shows as not downloaded, and
+anything that was downloaded during a scan or duplicate search (Refs #12). The
+issue remains open: scanning cloud accounts is not part of this candidate.
+
+This is a testing pre-release, does not replace Latest, and omits Store MSIX.
+
 ## [0.12.0] — 2026-11-21
 
 ### Share selected metadata with coding agents
@@ -515,7 +561,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.12.1-rc.1...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -542,3 +588,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.11.0]: https://github.com/coolnew/kosha/releases/tag/v0.11.0
 
 [0.12.0]: https://github.com/coolnew/kosha/releases/tag/v0.12.0
+
+[0.12.1-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.12.1-rc.1
