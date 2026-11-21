@@ -1,0 +1,12 @@
+[1,2,{"progname":"ncdu","progver":"2.9.1","timestamp":1795296603},
+[{"name":"/tmp/ncdu-real/tree","asize":180,"dev":42,"uid":1000,"gid":1000,"mode":16877,"mtime":1795296603},
+{"name":"zero.empty","uid":1000,"gid":1000,"mode":33188,"mtime":1795296603},
+{"name":"café.txt","asize":1,"dsize":4096,"uid":1000,"gid":1000,"mode":33188,"mtime":1795296603},
+{"name":"link.txt","asize":5,"notreg":true,"uid":1000,"gid":1000,"mode":41471,"mtime":1795296603},
+{"name":"hard.txt","asize":5000,"dsize":8192,"ino":44722391,"hlnkc":true,"nlink":2,"uid":1000,"gid":1000,"mode":33188,"mtime":1795296603},
+{"name":"a.txt","asize":5000,"dsize":8192,"ino":44722391,"hlnkc":true,"nlink":2,"uid":1000,"gid":1000,"mode":33188,"mtime":1795296603},
+[{"name":"empty","asize":40,"uid":1000,"gid":1000,"mode":16877,"mtime":1795296601}],
+[{"name":"sub","asize":80,"uid":1000,"gid":1000,"mode":16877,"mtime":1795296603},
+{"name":"b.bin","asize":70000,"dsize":73728,"uid":1000,"gid":1000,"mode":33188,"mtime":1795296603},
+[{"name":"deep","asize":60,"uid":1000,"gid":1000,"mode":16877,"mtime":1795296603},
+{"name":"c.dat","asize":1200,"dsize":4096,"uid":1000,"gid":1000,"mode":33188,"mtime":1795296603}]]]]

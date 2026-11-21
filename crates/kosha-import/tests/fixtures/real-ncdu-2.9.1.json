@@ -1,0 +1,12 @@
+[1,2,{"progname":"ncdu","progver":"2.9.1","timestamp":1795296603},
+[{"name":"/tmp/ncdu-real/tree","asize":180,"dev":42},
+{"name":"zero.empty"},
+{"name":"café.txt","asize":1,"dsize":4096},
+{"name":"link.txt","asize":5,"notreg":true},
+{"name":"hard.txt","asize":5000,"dsize":8192,"ino":44722391,"hlnkc":true,"nlink":2},
+{"name":"a.txt","asize":5000,"dsize":8192,"ino":44722391,"hlnkc":true,"nlink":2},
+[{"name":"empty","asize":40}],
+[{"name":"sub","asize":80},
+{"name":"b.bin","asize":70000,"dsize":73728},
+[{"name":"deep","asize":60},
+{"name":"c.dat","asize":1200,"dsize":4096}]]]]
