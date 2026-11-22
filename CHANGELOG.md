@@ -4,6 +4,24 @@
 
 Nothing yet.
 
+## [0.14.0] — 2026-11-22
+
+### Browse an rclone listing
+
+Export a directory with `rclone lsjson -R` and open its JSON listing in Kosha.
+This works with listings rclone creates from Google Drive and other providers.
+Use `kosha import --from rclone` or choose **Import a listing...** under
+**Snapshots** in the desktop app. The desktop previews the listing before
+saving, and lets you name the record or cancel.
+
+The imported listing is a record of metadata exported by rclone. Kosha uses
+apparent sizes because the listing does not contain allocated sizes. Unknown
+sizes contribute zero, so the apparent total can be a lower bound. Duplicate
+names are retained. Path comparison is unavailable when names collide.
+
+Kosha reads the listing locally. Run rclone separately to connect to an account
+or refresh its listing. File actions are unavailable for imported records.
+
 ## [0.13.2] — 2026-11-22
 
 ### Duplicate search says what it left out
@@ -945,7 +963,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.14.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -988,3 +1006,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.13.1]: https://github.com/coolnew/kosha/releases/tag/v0.13.1
 
 [0.13.2]: https://github.com/coolnew/kosha/releases/tag/v0.13.2
+
+[0.14.0]: https://github.com/coolnew/kosha/releases/tag/v0.14.0
