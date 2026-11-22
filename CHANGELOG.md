@@ -4,6 +4,48 @@
 
 Nothing yet.
 
+## [0.13.2] — 2026-11-22
+
+### Duplicate search says what it left out
+
+A duplicate hunt takes same-size files, largest first, until it has about 200,000
+candidates, so it cannot turn into an unbounded read of the disk. When a very large
+tree has more than that, the files left out were not mentioned, and the result could
+read as a complete answer. The command-line report and the desktop summary now say how
+many files were not checked and up to what size, for example "47,702 files up to
+13.0 KiB not checked". The limit itself is unchanged and is soft, because whole groups
+of same-size files are kept.
+
+### More room for insight packs
+
+Insight packs installed from the marketplace can now hold 256 rules in total, up from
+64. Measured on a tree of 2.4 million entries, the whole set of pack rules costs about
+0.1 ms to apply at 64, 128 and 256 rules, so the larger budget does not slow analysis.
+The limits on one pack (32 rules, 256 KiB) and on the number of packs (32) are
+unchanged, and pack rules still only point at exact places for you to review.
+
+### Imported listings on Windows
+
+A listing imported from a Linux or macOS machine showed its paths with a Windows
+backslash in insights, for example `/srv\logs`. Paths from an imported listing now keep
+the source's `/`. Nothing is ever opened from an imported listing; this only fixes how
+paths read and match.
+
+### Dependency updates
+
+The `async-executor` library used by the Linux desktop build was a yanked release and
+is replaced by its fixed version, together with patch updates to `zbus_names` and
+`zvariant`.
+
+### Limitations
+
+Eleven dependencies reached through the desktop toolkit are reported as unmaintained and
+have no fixed version to move to; they are not vulnerabilities and the weekly advisory
+check reports them without failing. The 256-rule budget was measured on one Apple M1
+machine with a warm cache; cold or spinning disks were not measured, and the time to load
+a store of more than 64 rules was estimated, not measured. Kosha still does not scan cloud
+accounts or other machines by itself. Refs #12, which stays open.
+
 ## [0.13.1] — 2026-11-22
 
 ### Dependency security updates
@@ -903,7 +945,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.2...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -944,3 +986,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.13.0]: https://github.com/coolnew/kosha/releases/tag/v0.13.0
 
 [0.13.1]: https://github.com/coolnew/kosha/releases/tag/v0.13.1
+
+[0.13.2]: https://github.com/coolnew/kosha/releases/tag/v0.13.2

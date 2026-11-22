@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.13.1"
+version = "0.13.2"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -22,15 +22,15 @@ repository = "https://github.com/coolnew/kosha"
 authors = ["Neeraj Sharma <neerajsharma.9@outlook.com>"]
 
 [workspace.dependencies]
-kosha-core = { path = "crates/kosha-core", version = "0.13.1" }
-kosha-view = { path = "crates/kosha-view", version = "0.13.1" }
-kosha-analyze = { path = "crates/kosha-analyze", version = "0.13.1" }
-kosha-fsops = { path = "crates/kosha-fsops", version = "0.13.1" }
-kosha-query = { path = "crates/kosha-query", version = "0.13.1" }
-kosha-search = { path = "crates/kosha-search", version = "0.13.1" }
-kosha-import = { path = "crates/kosha-import", version = "0.13.1" }
+kosha-core = { path = "crates/kosha-core", version = "0.13.2" }
+kosha-view = { path = "crates/kosha-view", version = "0.13.2" }
+kosha-analyze = { path = "crates/kosha-analyze", version = "0.13.2" }
+kosha-fsops = { path = "crates/kosha-fsops", version = "0.13.2" }
+kosha-query = { path = "crates/kosha-query", version = "0.13.2" }
+kosha-search = { path = "crates/kosha-search", version = "0.13.2" }
+kosha-import = { path = "crates/kosha-import", version = "0.13.2" }
 
-kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.13.1" }
+kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.13.2" }
 
 rayon = "1.10"
 rustc-hash = "2"
