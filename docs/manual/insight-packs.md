@@ -110,7 +110,7 @@ identifier rules; a finding's ID includes its marketplace publisher and pack.
 Unknown fields, undeclared capabilities and any destructive action are refused.
 
 At most 32 insights fit in a 256 KiB artifact. The managed store supports 32
-packs and 64 rules in total, counting inactive OS rules too. Installation checks
+packs and 256 rules in total, counting inactive OS rules too. Installation checks
 the prospective store under a writer lock; rejection preserves earlier packs.
 Matching uses binary lookup in the scan's existing child-name index. It adds no
 per-file index or full-tree traversal for each insight; each rule resolves at

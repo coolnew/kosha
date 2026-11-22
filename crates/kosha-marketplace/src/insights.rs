@@ -14,7 +14,14 @@ use serde::Deserialize;
 pub const KIND: &str = "insight-pack";
 pub const CAPABILITY: &str = "insight.locations.v1";
 pub(crate) const DIRECTORY: &str = "insight-packs";
-pub const MAX_RULES: usize = 64;
+/// Managed insight rules across every installed pack, counting rules for other
+/// operating systems too.
+///
+/// 256, raised from 64 after measurement (docs/dev/studies/insight-caps-and-deep-analysis.md,
+/// section 11): the whole managed batch, exact path lookups under the writer lock,
+/// costs about 0.1 ms at 256 rules on a 2.4-million-entry tree, indistinguishable
+/// from none, so the bound that ADR-0017 set for cancellation latency still holds.
+pub const MAX_RULES: usize = 256;
 
 #[cfg(test)]
 pub(crate) fn fixture(publisher: &str, id: &str, count: usize) -> String {
@@ -171,7 +178,9 @@ fn load_from(directory: &Path, pending: Option<&InsightPack>) -> Result<Vec<Pack
         if let Some(pack) = pack {
             count += pack.rules.len();
             if count > MAX_RULES {
-                return Err("Managed insight store exceeds its 64-rule budget".into());
+                return Err(format!(
+                    "Managed insight store exceeds its {MAX_RULES}-rule budget"
+                ));
             }
             if active(pack) {
                 rules.extend(pack.rules.iter().cloned());
@@ -300,6 +309,16 @@ mod tests {
         );
     }
 
+    /// Publishers for a store that is exactly full: `MAX_RULES` rules in packs of 32.
+    const FULL_STORE: [&str; 8] = [
+        "alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi",
+    ];
+
+    #[test]
+    fn the_full_store_is_exactly_the_rule_budget() {
+        assert_eq!(FULL_STORE.len() * 32, MAX_RULES);
+    }
+
     #[test]
     fn aggregate_preflight_preserves_existing_packs_and_personal_configuration() {
         let temp = tempfile::tempdir().unwrap();
@@ -307,18 +326,18 @@ mod tests {
         let personal = temp.path().join("rules.d");
         std::fs::create_dir(&personal).unwrap();
         std::fs::write(personal.join("mine.json"), b"preserve personal input").unwrap();
-        for publisher in ["alice", "bob"] {
+        for publisher in FULL_STORE {
             let text = fixture(publisher, "sessions", 32);
             install_in(&store, &text, &parse(&text).unwrap()).unwrap();
         }
-        let rejected = fixture("charlie", "sessions", 1);
+        let rejected = fixture("zed", "sessions", 1);
         assert!(
             install_in(&store, &rejected, &parse(&rejected).unwrap())
                 .unwrap_err()
                 .contains("budget")
         );
-        assert_eq!(load_from(&store, None).unwrap().len(), 64);
-        assert!(!store.join("charlie/pack-sessions.json").exists());
+        assert_eq!(load_from(&store, None).unwrap().len(), MAX_RULES);
+        assert!(!store.join("zed/pack-sessions.json").exists());
         assert_eq!(
             std::fs::read(personal.join("mine.json")).unwrap(),
             b"preserve personal input"
@@ -328,18 +347,18 @@ mod tests {
             fixture("alice", "sessions", 32)
         );
         super::super::uninstall_in(&store, "alice/sessions").unwrap();
-        assert_eq!(load_from(&store, None).unwrap().len(), 32);
+        assert_eq!(load_from(&store, None).unwrap().len(), MAX_RULES - 32);
         std::fs::write(store.join("bob/pack-sessions.json"), b"corrupt").unwrap();
         assert!(load_from(&store, None).is_err());
         super::super::uninstall_in(&store, "bob/sessions").unwrap();
-        assert!(load_from(&store, None).unwrap().is_empty());
+        assert_eq!(load_from(&store, None).unwrap().len(), MAX_RULES - 64);
     }
 
     #[test]
     fn inactive_rules_count_toward_limits_and_cannot_evade_validation() {
         let temp = tempfile::tempdir().unwrap();
         let store = temp.path().join(DIRECTORY);
-        for publisher in ["alice", "bob"] {
+        for publisher in FULL_STORE {
             let mut data: serde_json::Value =
                 serde_json::from_str(&fixture(publisher, "sessions", 32)).unwrap();
             data["platforms"] =
@@ -348,7 +367,7 @@ mod tests {
             install_in(&store, &text, &parse(&text).unwrap()).unwrap();
         }
         assert!(load_from(&store, None).unwrap().is_empty());
-        let text = fixture("charlie", "sessions", 1);
+        let text = fixture("zed", "sessions", 1);
         assert!(
             install_in(&store, &text, &parse(&text).unwrap())
                 .unwrap_err()
