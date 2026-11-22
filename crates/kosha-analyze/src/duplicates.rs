@@ -91,6 +91,19 @@ pub struct DuplicateReport {
     /// The floor that was applied, so a report can name it without being handed
     /// the options as well.
     pub min_size: u64,
+    /// Same-size files that were not examined because the hunt reached its
+    /// candidate ceiling ([`DuplicateOptions::max_candidates`]).
+    ///
+    /// Candidates are taken largest first, so what is left out is the smallest
+    /// same-size groups. Counted and reported, never silent: without it a hunt
+    /// on a very large tree would read as complete, and "no duplicates among
+    /// the smaller files" would be concluded from files that were never opened.
+    pub over_ceiling: usize,
+    /// The largest size among the files counted in `over_ceiling`: everything
+    /// left out was at most this big. Zero when nothing was left out.
+    pub over_ceiling_up_to: u64,
+    /// The ceiling that applied, so a report can name it.
+    pub max_candidates: usize,
     /// True when the caller stopped the hunt before it had looked at
     /// everything.
     ///
@@ -203,6 +216,7 @@ fn run(
 ) -> DuplicateReport {
     let mut report = DuplicateReport {
         min_size: opts.min_size,
+        max_candidates: opts.max_candidates,
         ..DuplicateReport::default()
     };
 
@@ -241,8 +255,11 @@ fn run(
     candidates.sort_unstable_by_key(|(size, _)| std::cmp::Reverse(*size));
 
     let mut budget = opts.max_candidates;
-    candidates.retain(|(_, group)| {
+    candidates.retain(|(size, group)| {
         if budget == 0 {
+            // Sorted largest first, so the first one dropped is the biggest.
+            report.over_ceiling += group.len();
+            report.over_ceiling_up_to = report.over_ceiling_up_to.max(*size);
             return false;
         }
         budget = budget.saturating_sub(group.len());

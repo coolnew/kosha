@@ -94,7 +94,10 @@ observation.
   files. Each confirmed group shows the number and size of identical files,
   estimated recoverable allocation after keeping one, and their paths.
   `--dupe-min N` sets the minimum length in bytes and requests the hunt.
-  The default is 1 MiB. Snapshots, caches, and disk-image views do not supply
+  The default is 1 MiB. A hunt takes same-size files, largest first, until it has
+  about 200,000 (whole same-size groups, so it can run slightly over), so it cannot become an unbounded read of the volume; when more than
+  that qualify, the report says how many files, up to what size, were not
+  checked (`N files up to SIZE not checked`). Snapshots, caches, and disk-image views do not supply
   file contents for this report. Cloud placeholders are skipped rather than
   downloaded and reported as `N files stored in the cloud, skipped rather than
   downloaded`; see [cloud-synced folders](scanning.md#cloud-synced-folders).

@@ -1572,6 +1572,18 @@ fn print_duplicates(tree: &SizeTree, args: &Args) {
             format::bytes_in(report.min_size, args.units),
         );
     }
+    if report.over_ceiling > 0 {
+        // A bound on how many same-size files one hunt will open, so it cannot
+        // become an unbounded read of the volume. Candidates are taken largest
+        // first; saying what was left out stops a very large tree reading as
+        // fully checked.
+        sayln!(
+            "  {} up to {} not checked — a hunt takes same-size files largest first until it has about {}",
+            format::plural(report.over_ceiling, "file"),
+            format::bytes_in(report.over_ceiling_up_to, args.units),
+            format::count(report.max_candidates as u64),
+        );
+    }
     if report.groups.is_empty() {
         sayln!("  no identical files found");
         return;

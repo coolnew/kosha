@@ -273,6 +273,9 @@ as duplicate. Review copies and locations before acting. These searches are
 unavailable over snapshots and disk-image views, which do not expose file bytes.
 Files stored in the cloud are skipped and counted, not downloaded; see
 [cloud-synced folders](scanning.md#cloud-synced-folders).
+A search takes same-size files, largest first, until it has about 200,000; if a
+very large tree has more, the result line says how many files, up to what size,
+were not checked, so a long list is never mistaken for a complete one.
 
 Ownership collection is optional. Its view groups recorded usage by account,
 including identifiers the OS cannot resolve to a name. It can add work to a

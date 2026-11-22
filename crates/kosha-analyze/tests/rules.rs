@@ -807,6 +807,33 @@ mod duplicates {
     }
 
     #[test]
+    fn candidates_past_the_ceiling_are_counted_and_the_largest_left_out_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Three same-size pairs of different sizes; a ceiling of 4 keeps the two
+        // larger pairs (largest first) and leaves the smallest pair out.
+        for (name, len) in [("a", 3000usize), ("b", 2000), ("c", 1000)] {
+            fs::write(root.join(format!("{name}1")), vec![7u8; len]).unwrap();
+            fs::write(root.join(format!("{name}2")), vec![7u8; len]).unwrap();
+        }
+        let options = DuplicateOptions {
+            max_candidates: 4,
+            ..opts()
+        };
+        let report = duplicates::find(&scan(root), &options);
+        assert_eq!(report.candidates_examined, 4);
+        assert_eq!(report.over_ceiling, 2, "the dropped pair was not counted");
+        assert_eq!(report.over_ceiling_up_to, 1000);
+        assert_eq!(report.max_candidates, 4);
+        assert_eq!(report.groups.len(), 2, "the larger pairs were not found");
+
+        // With room for everything nothing is reported as left out.
+        let full = duplicates::find(&scan(root), &opts());
+        assert_eq!(full.over_ceiling, 0);
+        assert_eq!(full.over_ceiling_up_to, 0);
+    }
+
+    #[test]
     fn identical_files_are_grouped() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

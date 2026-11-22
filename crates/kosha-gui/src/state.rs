@@ -428,6 +428,12 @@ pub struct Duplicates {
     /// reason a hunt finds nothing, and the only one the user can change.
     pub below_min: usize,
     pub min_size: u64,
+    /// Same-size files left out because the hunt reached its candidate ceiling,
+    /// the largest size among them, and the ceiling. Never silent: see
+    /// `DuplicateReport::over_ceiling`.
+    pub over_ceiling: usize,
+    pub over_ceiling_up_to: u64,
+    pub max_candidates: usize,
 }
 
 impl Duplicates {
@@ -457,6 +463,9 @@ impl Duplicates {
             not_local: report.not_local,
             below_min: report.below_min,
             min_size: report.min_size,
+            over_ceiling: report.over_ceiling,
+            over_ceiling_up_to: report.over_ceiling_up_to,
+            max_candidates: report.max_candidates,
             rows,
             group_of,
             tint_of: FxHashMap::default(),

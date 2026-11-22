@@ -1975,6 +1975,17 @@ impl KoshaApp {
                         format::bytes_in(found.min_size, units),
                     ));
                 }
+                if found.over_ceiling > 0 {
+                    // The hunt opens a bounded number of same-size files, largest
+                    // first; say what that left out rather than let a very large
+                    // tree read as fully checked.
+                    summary.push_str(&format!(
+                        " · {} up to {} not checked (a hunt takes same-size files largest first until it has about {})",
+                        format::plural(found.over_ceiling, "file"),
+                        format::bytes_in(found.over_ceiling_up_to, units),
+                        format::count(found.max_candidates as u64),
+                    ));
+                }
                 if let Some(ready) = this.state.ready_mut() {
                     ready.hunt = None;
                     // A stopped hunt still shows what it did confirm: a
