@@ -4,6 +4,34 @@
 
 Nothing yet.
 
+## [0.13.1] — 2026-11-22
+
+### Dependency security updates
+
+Kosha's dependency list was checked against the RustSec advisory database and nine
+known vulnerabilities were found in libraries it links, including the TLS
+certificate checks (`rustls-webpki` and the bundled root certificate lists) and the
+QUIC libraries used by the desktop app's networking stack. This release updates the
+affected libraries to their patched versions. The Kosha source code is unchanged
+apart from these updates. The marketplace's HTTPS client uses the patched TLS
+libraries. Disk scanning itself makes no network requests.
+Also updated were `heapless`, `rustix` and `tokio`, which carry soundness advisories.
+
+A weekly check of the dependency list against the advisory database now runs in the
+project's automation, so new advisories are seen without waiting for a release.
+
+### Documentation
+
+The manual's page on cloud storage and other machines now shows how an imported
+ncdu listing looks in the desktop app, including the "Imported · ncdu" label and the
+notice that nothing in the listing can be acted on.
+
+### Limitations
+
+Eleven dependencies are reported as unmaintained or yanked and have no fixed
+version to move to; they are visible in the automated check and are not security
+vulnerabilities. Refs #12, which stays open.
+
 ## [0.13.0] — 2026-11-22
 
 ### Import an ncdu listing
@@ -875,7 +903,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.13.1...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -914,3 +942,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.13.0-rc.1]: https://github.com/coolnew/kosha/releases/tag/v0.13.0-rc.1
 
 [0.13.0]: https://github.com/coolnew/kosha/releases/tag/v0.13.0
+
+[0.13.1]: https://github.com/coolnew/kosha/releases/tag/v0.13.1
