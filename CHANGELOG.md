@@ -22,6 +22,10 @@ names are retained. Path comparison is unavailable when names collide.
 Kosha reads the listing locally. Run rclone separately to connect to an account
 or refresh its listing. File actions are unavailable for imported records.
 
+### Dependency security
+
+Updated the URL parser dependency to address RUSTSEC-2026-0592.
+
 ## [0.13.2] — 2026-11-22
 
 ### Duplicate search says what it left out
