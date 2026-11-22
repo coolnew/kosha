@@ -611,6 +611,20 @@ impl SizeTree {
             chain.push(cur);
             cur = self.nodes[cur as usize].parent;
         }
+        if self.stats.strategy == Strategy::Imported {
+            // The listing was written on another system, usually Unix. Joining with
+            // this host's separator would show `/srv\logs` on Windows, so keep the
+            // source's own `/`. The result is for display and matching only: an
+            // imported record allows no file action, so it is never opened.
+            let mut joined = self.root_path.clone().into_os_string();
+            for &i in chain.iter().rev() {
+                if !joined.as_encoded_bytes().ends_with(b"/") {
+                    joined.push("/");
+                }
+                joined.push(self.name_of(&self.nodes[i as usize]));
+            }
+            return PathBuf::from(joined);
+        }
         let mut path = self.root_path.clone();
         for &i in chain.iter().rev() {
             let n = &self.nodes[i as usize];

@@ -692,3 +692,20 @@ fn random_damage_never_panics() {
     }
     assert!(runs >= 200);
 }
+
+#[test]
+fn paths_in_an_imported_tree_use_the_source_separator_on_every_host() {
+    // A Unix listing must read `/r/logs/app.log` on Windows too, not `/r\logs\app.log`: the
+    // path is shown in insights and matched in searches, and it is never opened.
+    let imported = ok(&export(
+        r#",[{"name":"logs"},{"name":"app.log","asize":10,"dsize":4096}],{"name":"top.txt","asize":1}"#,
+    ));
+    let tree = &imported.tree;
+    let nested = tree.path_of(find(tree, &["logs", "app.log"]));
+    assert_eq!(nested.to_string_lossy(), "/r/logs/app.log");
+    assert_eq!(
+        tree.path_of(find(tree, &["top.txt"])).to_string_lossy(),
+        "/r/top.txt"
+    );
+    assert_eq!(tree.path_of(tree.root()).to_string_lossy(), "/r");
+}
