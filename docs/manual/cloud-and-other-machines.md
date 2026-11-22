@@ -132,6 +132,8 @@ standard input (or a file you name), starts no program and makes no network
 request. The record says everywhere that it was imported and not measured by
 Kosha. See [imported listings](snapshots.md#imported-listings).
 
+![An imported ncdu listing open in Kosha, labelled Imported · ncdu, with insights that say the listing was not measured by Kosha and nothing in it can be acted on](images/gui-imported-listing.png)
+
 ## What is not available yet
 
 - Scanning online accounts directly.

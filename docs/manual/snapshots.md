@@ -103,6 +103,8 @@ breadcrumb reads **Imported · ncdu** and the status bar repeats the sentence.
 If the export has no timestamp, the line says `observed: unknown` and gives the
 import date.
 
+![Kosha showing an imported ncdu listing of a synthetic build server: the Imported · ncdu chip beside the breadcrumb, the space-usage graph and folder list, insights that say the listing was not measured by Kosha, and a status bar that says nothing here is the disk as it is now](images/gui-imported-listing.png)
+
 What is recorded, from the export:
 
 - Names, the folder structure, apparent size (`asize`) and ncdu's disk usage
