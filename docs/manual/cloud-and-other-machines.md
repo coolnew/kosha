@@ -150,6 +150,8 @@ account names and file names.
 
 ## Import an rclone listing
 
+![A synthetic rclone listing open in Kosha with imported provenance](images/rclone-listing.png)
+
 For Google Drive, configure an rclone remote such as `gdrive:`. For OneDrive
 or Dropbox, use the remote name you configured for that provider. Run rclone
 to produce a listing, then give the JSON file to Kosha.
@@ -168,6 +170,8 @@ Use `--from auto` to detect ncdu or rclone input. Use `--out FILE` to save
 the snapshot at a chosen path. An existing destination is preserved.
 
 ### Preview a listing in the desktop app
+
+![The desktop import preview for a synthetic rclone listing](images/rclone-import-sheet.png)
 
 In the desktop app, choose **Import a listing…** under **Snapshots**, select
 an ncdu or rclone listing, and review the summary. You can name the record,
