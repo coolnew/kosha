@@ -255,6 +255,66 @@ pub fn rfc3339(secs: i64) -> String {
     )
 }
 
+/// Parse an RFC 3339 timestamp to Unix seconds, discarding fractional precision.
+pub fn parse_rfc3339(text: &str) -> Option<i64> {
+    let bytes = text.as_bytes();
+    let decimal = |part: &[u8]| {
+        part.iter().try_fold(0u32, |value, &digit| {
+            digit
+                .is_ascii_digit()
+                .then(|| value * 10 + u32::from(digit - b'0'))
+        })
+    };
+    let (date_time, zone) = bytes.split_at_checked(19)?;
+    if date_time[4] != b'-'
+        || date_time[7] != b'-'
+        || !matches!(date_time[10], b'T' | b't')
+        || date_time[13] != b':'
+        || date_time[16] != b':'
+    {
+        return None;
+    }
+    let year = i64::from(decimal(&date_time[..4])?);
+    let month = decimal(&date_time[5..7])?;
+    let day = decimal(&date_time[8..10])?;
+    let hour = decimal(&date_time[11..13])?;
+    let minute = decimal(&date_time[14..16])?;
+    let second = decimal(&date_time[17..19])?;
+    if !is_a_date(year, month, day) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+
+    let zone = if let [b'.', fraction @ ..] = zone {
+        let length = fraction
+            .iter()
+            .take_while(|digit| digit.is_ascii_digit())
+            .count();
+        if length == 0 {
+            return None;
+        }
+        &fraction[length..]
+    } else {
+        zone
+    };
+    let offset = match zone {
+        [b'Z' | b'z'] => 0,
+        [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] => {
+            let hours = decimal(&[*h1, *h2])?;
+            let minutes = decimal(&[*m1, *m2])?;
+            if hours > 23 || minutes > 59 {
+                return None;
+            }
+            let seconds = i64::from(hours * 3600 + minutes * 60);
+            if *sign == b'-' { -seconds } else { seconds }
+        }
+        _ => return None,
+    };
+    Some(
+        days_from_civil(year, month, day) * 86_400 + i64::from(hour * 3600 + minute * 60 + second)
+            - offset,
+    )
+}
+
 /// Now, as RFC 3339 UTC.
 pub fn now_rfc3339() -> String {
     rfc3339(i64::from(now_unix()))
@@ -602,6 +662,30 @@ mod tests {
         // A leap day, which is where an off-by-one in this algorithm shows up.
         assert_eq!(civil_from_days(19_782), (2024, 2, 29));
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    }
+
+    #[test]
+    fn parses_rfc_3339_offsets_and_validates_dates() {
+        assert_eq!(
+            parse_rfc3339("1970-01-01T05:30:00.123456789+05:30"),
+            Some(0)
+        );
+        assert_eq!(parse_rfc3339("1969-12-31T19:00:01-05:00"), Some(1));
+        assert_eq!(parse_rfc3339("1969-12-31T23:59:59Z"), Some(-1));
+        assert_eq!(
+            parse_rfc3339("2024-02-29T23:59:59Z")
+                .map(rfc3339)
+                .as_deref(),
+            Some("2024-02-29T23:59:59Z")
+        );
+        for invalid in [
+            "2023-02-29T00:00:00Z",
+            "2024-01-01T00:00:00.Z",
+            "2024-01-01T00:00:00+24:00",
+            "2024-01-01T00:00:00",
+        ] {
+            assert_eq!(parse_rfc3339(invalid), None, "{invalid}");
+        }
     }
 
     #[test]

@@ -29,3 +29,4 @@ ruzstd = "=0.9.1"
 
 [dev-dependencies]
 flate2 = "1"
+tempfile = "3"

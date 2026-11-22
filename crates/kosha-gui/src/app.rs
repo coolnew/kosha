@@ -14,14 +14,15 @@
 //! only visible rows are built; and the treemap drops sub-pixel tiles rather
 //! than emitting thousands of elements nobody can see.
 
+use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::ui::tooltip;
 use gpui_kit::base::input::{InputEvent, InputState};
-use gpui_kit::base::{h_flex, v_flex};
+use gpui_kit::base::{Input, h_flex, v_flex};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Theme, ThemeMode};
@@ -79,6 +80,34 @@ struct ColumnDrag {
     width: f32,
 }
 
+struct ListingProgress {
+    cancelled: AtomicBool,
+    bytes: AtomicU64,
+}
+
+struct ListingReader {
+    file: std::fs::File,
+    progress: Arc<ListingProgress>,
+}
+
+impl Read for ListingReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.progress.cancelled.load(Ordering::Relaxed) {
+            return Err(io::Error::other("Import cancelled"));
+        }
+        let count = self.file.read(buffer)?;
+        self.progress
+            .bytes
+            .fetch_add(count as u64, Ordering::Relaxed);
+        Ok(count)
+    }
+}
+
+enum ListingImport {
+    Reading(Arc<ListingProgress>),
+    Preview(Box<kosha_import::Imported>),
+}
+
 pub struct KoshaApp {
     pub(crate) handoff: Option<crate::handoff::Panel>,
     handoff_task: Option<gpui_kit::Task<()>>,
@@ -88,6 +117,8 @@ pub struct KoshaApp {
     state: State,
     /// Discards background results after another location is requested.
     load_generation: u64,
+    listing_import: Option<ListingImport>,
+    listing_label: Entity<InputState>,
     analysis_generation: u64,
     comparison_generation: u64,
     comparison_busy: bool,
@@ -384,6 +415,8 @@ impl KoshaApp {
             planning_action: None,
             state,
             load_generation: 0,
+            listing_import: None,
+            listing_label: cx.new(|cx| InputState::new(window, cx).placeholder("Listing name")),
             analysis_generation: 0,
             comparison_generation: 0,
             comparison_busy: false,
@@ -934,6 +967,17 @@ impl KoshaApp {
             cx.notify();
             return;
         };
+        if ready
+            .source
+            .snapshot()
+            .and_then(|one| one.meta.import.as_ref())
+            .is_some_and(|source| source.duplicate_paths > 0)
+        {
+            self.state.notice =
+                Some("This listing has duplicate paths and cannot be compared by path.".into());
+            cx.notify();
+            return;
+        }
         let here = Arc::clone(&ready.tree);
         // When the thing on screen is itself a snapshot, it has a date. When it
         // is a scan, it is now — which is later than any snapshot can be.
@@ -976,6 +1020,16 @@ impl KoshaApp {
 
         let task = cx.background_executor().spawn(async move {
             let (meta, there) = kosha_core::snapshot::store::open(&path)?;
+            if meta
+                .import
+                .as_ref()
+                .is_some_and(|source| source.duplicate_paths > 0)
+            {
+                return Err(io::Error::other(
+                    "This listing has duplicate paths and cannot be compared by path.",
+                )
+                .into());
+            }
             let started = std::time::Instant::now();
             let (older, newer) = if meta.at_ms() <= here_taken {
                 (&there, &*here)
@@ -1508,6 +1562,12 @@ impl KoshaApp {
             None
         };
         let now = ready.now;
+        let source = ready
+            .source
+            .snapshot()
+            .and_then(|snapshot| snapshot.meta.import.as_ref());
+        let apparent_only = source.is_some_and(|source| !source.allocated_known);
+        let unknown_sizes = source.is_some_and(|source| source.unknown_size > 0);
         let absolute_paths = rows.is_some();
 
         let suggested = format!(
@@ -1531,6 +1591,8 @@ impl KoshaApp {
             let options = kosha_core::export::Options {
                 format,
                 absolute_paths,
+                apparent_only,
+                unknown_sizes,
                 ..Default::default()
             };
             let target = path.clone();
@@ -1695,6 +1757,7 @@ impl KoshaApp {
             commands::Action::Scan(path) => self.scan(path, cx),
             commands::Action::ChooseFolder => self.choose_folder(cx),
             commands::Action::ChooseImage => self.choose_image(cx),
+            commands::Action::ImportListing => self.choose_listing(cx),
             commands::Action::InstallRecipePack => self.choose_recipe_pack(cx),
             commands::Action::SyncMarketplace => self.sync_marketplace(cx),
             commands::Action::MarketplaceUnavailable(reason) => {
@@ -2243,6 +2306,13 @@ impl KoshaApp {
     ) {
         let taken = crate::snapshots::when(&meta);
         let imported = meta.import.is_some();
+        let opened = (!automatic).then(|| {
+            if let Some(source) = &meta.import {
+                source.sentence()
+            } else {
+                crate::imported_text::opened_notice(imported, &taken)
+            }
+        });
         let replaced = kosha_core::snapshot::replaced_names_note(&tree);
         // The session follows the snapshot's root so that the breadcrumb and
         // the window title say what is being looked at. It stays read-only:
@@ -2257,7 +2327,7 @@ impl KoshaApp {
                 automatic,
             })),
         ));
-        let opened = (!automatic).then(|| crate::imported_text::opened_notice(imported, &taken));
+
         // Names this system cannot represent are said every time, automatic
         // record or not: they are shown altered and nothing else would say so.
         self.state.notice = match (opened, replaced) {
@@ -2713,6 +2783,198 @@ impl KoshaApp {
             .ok();
         })
         .detach();
+    }
+
+    fn choose_listing(&mut self, cx: &mut Context<Self>) {
+        if self.listing_import.is_some() {
+            return;
+        }
+        let prompt = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let selection = prompt.await;
+            this.update(cx, |this, cx| {
+                if let Some(path) = this
+                    .file_picker_selection(selection, cx)
+                    .and_then(|paths| paths.into_iter().next())
+                {
+                    this.read_listing(path, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn read_listing(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if self.listing_import.is_some() {
+            return;
+        }
+        let progress = Arc::new(ListingProgress {
+            cancelled: AtomicBool::new(false),
+            bytes: AtomicU64::new(0),
+        });
+        self.listing_import = Some(ListingImport::Reading(Arc::clone(&progress)));
+        cx.notify();
+        let reader_progress = Arc::clone(&progress);
+        let task = cx.background_executor().spawn(async move {
+            let name = path
+                .file_name()
+                .map(|part| part.to_string_lossy())
+                .unwrap_or_default();
+            let file = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+            kosha_import::import_auto(
+                ListingReader {
+                    file,
+                    progress: reader_progress,
+                },
+                &kosha_import::RcloneSource {
+                    source_name: &name,
+                    label: "",
+                    root: "",
+                    tool: "",
+                    observed: None,
+                },
+                std::time::SystemTime::now(),
+                &kosha_import::Limits::default(),
+            )
+            .map_err(|error| error.to_string())
+        });
+        let polling_progress = Arc::clone(&progress);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(150)).await;
+                let reading = this.update(cx, |this, cx| {
+                    let active = matches!(&this.listing_import,
+                        Some(ListingImport::Reading(progress)) if Arc::ptr_eq(progress, &polling_progress));
+                    if active {
+                        cx.notify();
+                    }
+                    active
+                }).unwrap_or(false);
+                if !reading {
+                    break;
+                }
+            }
+        }).detach();
+        cx.spawn(async move |this, cx| {
+            let outcome = task.await;
+            this.update(cx, |this, cx| {
+                if !matches!(&this.listing_import, Some(ListingImport::Reading(active)) if Arc::ptr_eq(active, &progress)) {
+                    return;
+                }
+                this.listing_import = match outcome {
+                    Ok(imported) => Some(ListingImport::Preview(Box::new(imported))),
+                    Err(error) => {
+                        this.state.notice = Some(format!("Could not import listing: {error}"));
+                        None
+                    }
+                };
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    fn cancel_listing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ListingImport::Reading(progress)) = self.listing_import.take() {
+            progress.cancelled.store(true, Ordering::Relaxed);
+        }
+        self.listing_label
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        cx.notify();
+    }
+
+    fn save_listing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ListingImport::Preview(mut imported)) = self.listing_import.take() else {
+            return;
+        };
+        imported.meta.label = self.listing_label.read(cx).value().trim().to_owned();
+        self.listing_label
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.state.notice = Some("Saving imported listing…".into());
+        cx.notify();
+        let generation = self.load_generation;
+        let task = cx.background_executor().spawn(async move {
+            kosha_core::snapshot::store::save_record(&imported.tree, &imported.meta)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match result {
+                Ok(path) => {
+                    this.refresh_snapshots();
+                    if generation == this.load_generation {
+                        this.open_snapshot(path, cx);
+                    } else {
+                        this.state.notice = Some("Imported listing saved in Snapshots.".into());
+                        cx.notify();
+                    }
+                }
+                Err(error) => {
+                    this.state.notice = Some(format!("Could not save listing: {error}"));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn render_listing_import(
+        &self,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let state = self.listing_import.as_ref()?;
+        let cancel = crate::ui::button("cancel-listing-import", palette)
+            .child("Cancel")
+            .on_click(cx.listener(|this, _, window, cx| this.cancel_listing(window, cx)));
+        let body =
+            match state {
+                ListingImport::Reading(progress) => {
+                    let bytes = kosha_core::format::bytes(progress.bytes.load(Ordering::Relaxed));
+                    v_flex()
+                        .child(format!("Reading listing… {bytes} read"))
+                        .child(cancel)
+                }
+                ListingImport::Preview(imported) => {
+                    let stats = imported.tree.stats();
+                    let source = imported.meta.import.as_ref()?;
+                    v_flex()
+                        .gap(px(6.0))
+                        .child(source.sentence())
+                        .child(format!(
+                            "{} entries · {} folders",
+                            stats.entries, stats.dirs
+                        ))
+                        .child(format!(
+                            "{} unknown sizes · {} synthesized folders · {} duplicate names",
+                            source.unknown_size, source.synthesized_dirs, source.duplicate_paths
+                        ))
+                        .when(!source.allocated_known, |body| {
+                            body.child(if source.unknown_size > 0 {
+                                "Apparent sizes only. Totals are lower bounds."
+                            } else {
+                                "Apparent sizes only."
+                            })
+                        })
+                        .child("Save creates a record in the snapshot store.")
+                        .child(Input::new(&self.listing_label))
+                        .child(
+                            h_flex().gap(px(6.0)).child(cancel).child(
+                                crate::ui::button("save-listing-import", palette)
+                                    .child("Save")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.save_listing(window, cx)
+                                    })),
+                            ),
+                        )
+                }
+            };
+        Some(body.p(px(12.0)).bg(palette.surface).into_any_element())
     }
 
     /// Ask for a disk image and read it.
@@ -3738,6 +4000,7 @@ impl Render for KoshaApp {
                 v_flex()
                     .size_full()
                     .child(self.render_title_bar(fits, &palette, window, cx))
+                    .children(self.render_listing_import(&palette, cx))
                     // One strip for both long jobs. A scan cannot say how
                     // far along it is — the tree is what it is finding out —
                     // so it slides; a hunt knows its candidate count before it
@@ -4541,7 +4804,7 @@ impl KoshaApp {
                     .child(crate::ui::section_label(palette, "PINNED"))
                     .children(scopes)
             })
-            // Above the volumes, and only when there are any.
+            // Keep the listing import and saved snapshots above the volumes.
             //
             // They were below them, on the argument that everything above the
             // line is a disk and everything below it is a record of one. That
@@ -4556,11 +4819,14 @@ impl KoshaApp {
             // Volumes are a place to *go*, and the rail has other ways to get
             // there. Snapshots are a thing you have, and this is the only place
             // that lists them.
-            .when(!snapshots.is_empty(), |this| {
-                this.child(div().h(px(10.0)))
-                    .child(crate::ui::section_label(palette, "SNAPSHOTS"))
-                    .children(snapshots)
-            })
+            .child(div().h(px(10.0)))
+            .child(crate::ui::section_label(palette, "SNAPSHOTS"))
+            .child(
+                crate::ui::button("import-listing", palette)
+                    .child("Import a listing…")
+                    .on_click(cx.listener(|this, _, _, cx| this.choose_listing(cx))),
+            )
+            .children(snapshots)
             .child(div().h(px(10.0)))
             .child(crate::ui::section_label(palette, "VOLUMES"))
             .children(volumes);
@@ -5569,6 +5835,12 @@ impl KoshaApp {
 
         // The two size lines are the point of the panel, so the difference
         // between them is named rather than left as arithmetic for the reader.
+        let apparent_only = self
+            .state
+            .ready()
+            .and_then(|ready| ready.source.snapshot())
+            .and_then(|snapshot| snapshot.meta.import.as_ref())
+            .is_some_and(|source| !source.allocated_known);
         let difference = if d.saved > 0 {
             Some(row(
                 "saved by the filesystem",
@@ -5582,7 +5854,14 @@ impl KoshaApp {
 
         let body = v_flex()
             .gap(px(4.0))
-            .child(row("on disk", format::bytes_in(d.allocated, units)))
+            .child(row(
+                "on disk",
+                if apparent_only {
+                    "Not recorded".into()
+                } else {
+                    format::bytes_in(d.allocated, units)
+                },
+            ))
             .child(row("apparent", format::bytes_in(d.logical, units)))
             .children(difference)
             .child(row(
@@ -6310,6 +6589,11 @@ fn row(
     show_path: bool,
     cx: &mut Context<KoshaApp>,
 ) -> gpui_kit::AnyElement {
+    let apparent_only = ready
+        .source
+        .snapshot()
+        .and_then(|snapshot| snapshot.meta.import.as_ref())
+        .is_some_and(|source| !source.allocated_known);
     let node = ready.tree.node(id);
     let name = if show_path {
         // Relative to the scan root: the absolute prefix is the same on every
@@ -6412,7 +6696,11 @@ fn row(
                         Column::Allocated => cell
                             .font_family(mono.clone())
                             .text_color(palette.text)
-                            .child(SharedString::from(format::bytes_in(node.allocated, units))),
+                            .child(SharedString::from(if apparent_only {
+                                "—".into()
+                            } else {
+                                format::bytes_in(node.allocated, units)
+                            })),
                         Column::Logical => cell
                             .font_family(mono.clone())
                             .text_color(palette.text_faint)
@@ -6937,6 +7225,9 @@ impl KoshaApp {
     ) -> Option<AnyElement> {
         let ready = self.state.ready()?;
         let source = ready.source.snapshot();
+        if source.is_some_and(|snapshot| snapshot.meta.import.is_some()) {
+            return None;
+        }
         let original_date = source
             .filter(|one| one.automatic)
             .map(|one| crate::snapshots::exactly(&one.meta));
@@ -7313,13 +7604,28 @@ impl KoshaApp {
                 let imported = ready
                     .source
                     .snapshot()
-                    .and_then(|one| one.meta.import_sentence());
-                if let Some(sentence) = imported {
+                    .and_then(|one| one.meta.import.as_ref());
+                if let Some(source) = imported {
+                    let sentence = source.sentence();
+                    let size = if source.allocated_known {
+                        format!(
+                            "{approx}{} on disk as reported",
+                            self.bytes(ready.tree.total_allocated())
+                        )
+                    } else {
+                        let floor = if source.unknown_size > 0 {
+                            " (lower bound)"
+                        } else {
+                            ""
+                        };
+                        format!(
+                            "{} apparent{floor} · on-disk sizes unavailable",
+                            self.bytes(ready.tree.total_logical())
+                        )
+                    };
                     format!(
-                        "{sentence} · {} · {approx}{} on disk as reported · \
-                         not the disk as it is now",
-                        format::plural(stats.entries as usize, "entry"),
-                        self.bytes(ready.tree.total_allocated()),
+                        "{sentence} ? {} ? {size}",
+                        format::plural(stats.entries as usize, "entry")
                     )
                     .into()
                 } else {

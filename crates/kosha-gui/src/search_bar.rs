@@ -581,7 +581,7 @@ impl Render for SearchBar {
 
         let mut body = v_flex().min_w(px(0.0)).gap(px(5.0)).child(row)
             .child(div().text_size(px(metrics::TEXT_XS)).text_color(palette.text_faint)
-                .child("Scope: whole scanned tree · Default size: on disk · local dates · scan metadata, no file contents"));
+                .child("Scope: whole scanned tree · Size: on disk when recorded · local dates · scan metadata, no file contents"));
         if empty {
             let mut examples = h_flex().flex_wrap().gap(px(6.0));
             for &example in NATURAL_EXAMPLES.iter().take(QUICK_EXAMPLE_COUNT) {

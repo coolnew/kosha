@@ -39,7 +39,7 @@ USAGE:
     kosha search --load SAVED.kosha \"folders created last week\"
     kosha search --path PATH \"files ending with md\"
     kosha search --help             natural-language search options
-    kosha import --from ncdu FILE  keep an ncdu JSON export as an imported record
+    kosha import --from FORMAT FILE  keep an ncdu or rclone listing as an imported record
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
@@ -554,6 +554,15 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_query(&tree, query, args)?;
         }
         if let Some(baseline) = &args.since {
+            if record
+                .as_ref()
+                .and_then(|meta| meta.import.as_ref())
+                .is_some_and(|source| source.duplicate_paths > 0)
+            {
+                return Err(
+                    "the current listing has duplicate paths and cannot be compared by path".into(),
+                );
+            }
             print_changes(&tree, baseline, args)?;
         }
     }
@@ -564,7 +573,12 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         warn_export_coverage(&tree);
     }
     if let Some(options) = &args.export {
-        run_export(&tree, options, args)?;
+        let mut options = *options;
+        if let Some(source) = record.as_ref().and_then(|meta| meta.import.as_ref()) {
+            options.apparent_only = !source.allocated_known;
+            options.unknown_sizes = source.unknown_size > 0;
+        }
+        run_export(&tree, &options, args)?;
     }
     if tree.stats().cancelled {
         return Err(kosha_core::ScanError::Cancelled.into());
@@ -920,6 +934,15 @@ fn print_changes(
         }
         if let Some(sentence) = meta.import_sentence() {
             imported_record = Some(sentence);
+        }
+        if meta
+            .import
+            .as_ref()
+            .is_some_and(|source| source.duplicate_paths > 0)
+        {
+            return Err(
+                "the baseline listing has duplicate paths and cannot be compared by path".into(),
+            );
         }
         compare::Baseline::of_tree(&past)
     } else {

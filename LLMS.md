@@ -68,6 +68,10 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
   `NAME.kosha` filenames. Existing local paths win; only missing bare filenames
   fall back to the explicit store. Use `./NAME.kosha` to forbid fallback or a
   full store path to select that copy. Source file/date diagnostics go to stderr.
+- `kosha import --from rclone FILE|-` reads JSON from `rclone lsjson -R`.
+  Use `--root` to label the source and `--observed-at` to record its observation time.
+  Sizes are apparent, and totals are lower bounds when sizes are unknown.
+  Use `--from auto` to detect ncdu or rclone, and `--out FILE` to write a new record at a chosen path.
 - `kosha import --from ncdu FILE|-` (0.13.0+) reads an ncdu JSON export (plain,
   gzip or zstd) into the snapshot store. It runs no program and opens no listed
   path. Imported records report `source: imported; measured_by_kosha=false` on

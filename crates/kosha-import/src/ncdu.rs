@@ -17,7 +17,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -25,7 +25,8 @@ use kosha_core::snapshot::{Meta, Provenance};
 use kosha_core::{Entry, Flags, ScanStats, Strategy, TreeBuilder};
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
-use crate::decompress::{self, Caps, Compression, Refusal, Stop};
+use crate::decompress::Compression;
+use crate::io_error;
 use crate::{ImportError, Imported, Limits};
 
 /// Sizes at or above this are outside the specification's range.
@@ -36,25 +37,13 @@ const MINOR_LIMIT: u64 = 10_000;
 const S_IFMT: u64 = 0o170_000;
 const S_IFLNK: u64 = 0o120_000;
 
-pub(crate) fn import<R: Read>(
-    input: R,
+pub(crate) fn import(
+    opened: crate::decompress::Opened<'_>,
     source_name: &str,
     label: &str,
     now: SystemTime,
     limits: &Limits,
 ) -> Result<Imported, ImportError> {
-    let caps = Caps {
-        max_input_bytes: limits.max_input_bytes,
-        max_output_bytes: limits.max_input_bytes,
-        max_window: limits.max_window,
-    };
-    let opened = match decompress::open(input, caps) {
-        Ok(opened) => opened,
-        Err(Refusal::Empty) => return Err(ImportError::Empty),
-        Err(Refusal::NcduBinary) => return Err(ImportError::NcduBinary),
-        Err(Refusal::CompressedTwice) => return Err(ImportError::CompressedTwice),
-        Err(Refusal::Io(error)) => return Err(io_error(error, Compression::None)),
-    };
     let compression = opened.compression;
     let mut reader = opened.reader;
 
@@ -117,33 +106,6 @@ fn starts_with_an_array(reader: &mut dyn BufRead) -> Result<(), Start> {
     }
 }
 
-fn io_error(error: io::Error, compression: Compression) -> ImportError {
-    if let Some(stop) = decompress::stop_of(&error) {
-        return match stop {
-            Stop::InputTooLarge(limit) => ImportError::InputTooLarge(*limit),
-            Stop::OutputTooLarge(limit) => ImportError::DecompressedTooLarge(*limit),
-            Stop::Window { requested, limit } => ImportError::ZstdWindow {
-                requested: *requested,
-                limit: *limit,
-            },
-            other => ImportError::Compressed(other.to_string()),
-        };
-    }
-    match compression {
-        Compression::None => ImportError::Io(error),
-        compressed if error.kind() == io::ErrorKind::UnexpectedEof => {
-            ImportError::Compressed(format!(
-                "the {} data ends early; it may be truncated",
-                compressed.label()
-            ))
-        }
-        compressed => ImportError::Compressed(format!(
-            "the {} data is damaged: {error}",
-            compressed.label()
-        )),
-    }
-}
-
 fn json_error(
     error: serde_json::Error,
     state: &mut State,
@@ -152,18 +114,7 @@ fn json_error(
     if let Some(failure) = state.failure.take() {
         return failure;
     }
-    match error.classify() {
-        serde_json::error::Category::Io => io_error(error.into(), compression),
-        serde_json::error::Category::Eof => ImportError::Truncated(error.to_string()),
-        _ => {
-            let text = error.to_string();
-            if text.contains("invalid unicode code point") {
-                ImportError::NotUtf8(text)
-            } else {
-                ImportError::Malformed(text)
-            }
-        }
-    }
+    crate::listing_json_error(error, compression)
 }
 
 // ---------------------------------------------------------------- the state

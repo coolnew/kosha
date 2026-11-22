@@ -82,6 +82,7 @@ pub enum Action {
     /// `FOS_PICKFOLDERS`, which is a folder picker and shows no files at all.
     /// Two offers that each do one thing beats one that does neither.
     ChooseImage,
+    ImportListing,
     InstallRecipePack,
     SyncMarketplace,
     DownloadRecipePack(String),
@@ -337,6 +338,14 @@ pub fn all(
             "mount",
         ],
         action: Action::ChooseImage,
+    });
+
+    commands.push(Command {
+        label: "Import a listing…".into(),
+        detail: "Preview and save an ncdu or rclone listing".into(),
+        binding: None,
+        keywords: &["import", "listing", "ncdu", "rclone"],
+        action: Action::ImportListing,
     });
 
     if situation.have_tree {

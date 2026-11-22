@@ -97,6 +97,10 @@ pub struct Options {
     pub directories: bool,
     /// Include files.
     pub files: bool,
+    /// The imported source recorded apparent sizes only.
+    pub apparent_only: bool,
+    /// Some imported sizes were unknown.
+    pub unknown_sizes: bool,
 }
 
 impl Default for Options {
@@ -107,6 +111,8 @@ impl Default for Options {
             min_size: 0,
             directories: true,
             files: true,
+            apparent_only: false,
+            unknown_sizes: false,
         }
     }
 }
@@ -276,14 +282,14 @@ pub fn write_rows<W: Write>(
     written.rows = kept.len();
 
     match opts.format {
-        Format::Csv => write_csv(tree, &kept, &mut out)?,
-        Format::Json => write_json(tree, &kept, &mut out)?,
+        Format::Csv => write_csv(tree, &kept, opts, &mut out)?,
+        Format::Json => write_json(tree, &kept, opts, &mut out)?,
         Format::Txt => {
             for (path, _, _) in &kept {
                 writeln!(out, "{path}")?;
             }
         }
-        Format::Jsonl => write_jsonl(tree, &kept, &mut out)?,
+        Format::Jsonl => write_jsonl(tree, &kept, opts, &mut out)?,
     }
     out.flush()?;
     Ok(written)
@@ -296,6 +302,7 @@ const CSV_HEADER: &str = "path,name,kind,on_disk,apparent,items,modified,flags,l
 fn write_csv<W: Write>(
     tree: &SizeTree,
     rows: &[(String, NodeId, bool)],
+    opts: &Options,
     out: &mut W,
 ) -> io::Result<()> {
     out.write_all(CSV_HEADER.as_bytes())?;
@@ -311,7 +318,9 @@ fn write_csv<W: Write>(
         line.push(',');
         line.push_str(if node.is_dir() { "dir" } else { "file" });
         line.push(',');
-        line.push_str(&node.allocated.to_string());
+        if !opts.apparent_only {
+            line.push_str(&node.allocated.to_string());
+        }
         line.push(',');
         line.push_str(&node.logical.to_string());
         line.push(',');
@@ -386,12 +395,22 @@ fn csv_field(out: &mut String, value: &str) {
 
 // -------------------------------------------------------------------- JSON
 
+fn allocated_json(opts: &Options, value: u64) -> String {
+    if opts.apparent_only {
+        "null".into()
+    } else {
+        value.to_string()
+    }
+}
+
 fn write_jsonl<W: Write>(
     tree: &SizeTree,
     rows: &[(String, NodeId, bool)],
+    opts: &Options,
     out: &mut W,
 ) -> io::Result<()> {
     let mut line = String::with_capacity(384);
+    let imported = tree.stats().strategy == crate::tree::Strategy::Imported;
     for (path, id, lossy) in rows {
         let node = tree.node(*id);
         line.clear();
@@ -403,7 +422,8 @@ fn write_jsonl<W: Write>(
         json::write_escaped(&mut line, if node.is_dir() { "dir" } else { "file" });
         line.push_str(&format!(
             ",\"on_disk\":{},\"apparent\":{},\"items\":",
-            node.allocated, node.logical
+            allocated_json(opts, node.allocated),
+            node.logical
         ));
         if node.is_dir() {
             line.push_str(&node.subtree_files.to_string());
@@ -421,6 +441,12 @@ fn write_jsonl<W: Write>(
         } else {
             line.push_str("null");
         }
+        if imported {
+            line.push_str(",\"imported\":true,\"measured_by_kosha\":false");
+            if opts.unknown_sizes {
+                line.push_str(",\"lower_bound\":true");
+            }
+        }
         line.push_str(",\"flags\":");
         json::write_escaped(&mut line, &flag_list(node.flags));
         line.push_str(if *lossy {
@@ -436,6 +462,7 @@ fn write_jsonl<W: Write>(
 fn write_json<W: Write>(
     tree: &SizeTree,
     rows: &[(String, NodeId, bool)],
+    opts: &Options,
     out: &mut W,
 ) -> io::Result<()> {
     let stats = tree.stats();
@@ -462,7 +489,7 @@ fn write_json<W: Write>(
     head.push_str(&format!(
         ",\n  \"entries_scanned\": {},\n  \"total_on_disk\": {},\n  \"total_apparent\": {},\n  \"partial\": {},\n  \"access_limited\": {},\n  \"incomplete\": {},\n  \"cancelled\": {},\n  \"depth_limited\": {},\n  \"unreadable_entries\": {},\n  \"lower_bound\": {},\n  \"entries\": [\n",
         stats.entries,
-        tree.total_allocated(),
+        allocated_json(opts, tree.total_allocated()),
         tree.total_logical(),
         tree.is_partial(),
         stats.unreadable > 0 || (tree.is_partial() && !tree.is_incomplete()),
@@ -470,7 +497,7 @@ fn write_json<W: Write>(
         stats.cancelled,
         stats.depth_limited,
         stats.unreadable,
-        tree.is_partial() || tree.is_incomplete(),
+        tree.is_partial() || tree.is_incomplete() || opts.unknown_sizes,
     ));
     out.write_all(head.as_bytes())?;
 
@@ -486,7 +513,8 @@ fn write_json<W: Write>(
         json::write_escaped(&mut line, if node.is_dir() { "dir" } else { "file" });
         line.push_str(&format!(
             ", \"on_disk\": {}, \"apparent\": {}",
-            node.allocated, node.logical
+            allocated_json(opts, node.allocated),
+            node.logical
         ));
         if node.is_dir() {
             line.push_str(&format!(", \"items\": {}", node.subtree_files));
@@ -564,6 +592,30 @@ fn flag_list(flags: Flags) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apparent_only_exports_mark_missing_allocated_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("one"), b"abc").unwrap();
+        let tree = crate::Scanner::new(crate::ScanOptions::default())
+            .scan(dir.path())
+            .unwrap();
+        let text = export(
+            &tree,
+            &Options {
+                format: Format::Json,
+                apparent_only: true,
+                unknown_sizes: true,
+                ..Options::default()
+            },
+        );
+        let document: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(document["total_on_disk"].is_null());
+        assert_eq!(document["total_apparent"], 3);
+        assert_eq!(document["lower_bound"], true);
+        assert!(document["entries"][0]["on_disk"].is_null());
+        assert_eq!(document["entries"][0]["apparent"], 3);
+    }
 
     #[test]
     fn path_lists_and_jsonl_export_every_selected_entry() {

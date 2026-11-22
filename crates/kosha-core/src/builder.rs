@@ -169,6 +169,15 @@ impl TreeBuilder {
         Ok((self.records.len() - 1) as u32)
     }
 
+    /// Set a timestamp on an entry already added. Returns false for an unknown handle.
+    pub fn set_mtime(&mut self, handle: u32, mtime: u32) -> bool {
+        let Some(record) = self.records.get_mut(handle as usize) else {
+            return false;
+        };
+        record.mtime = mtime;
+        true
+    }
+
     /// Store every entry's on-disk size as its apparent size, for a source
     /// that recorded no on-disk sizes at all. Totals, sorting and the treemap
     /// then work on apparent sizes, and the caller records that basis rather

@@ -1,0 +1,6 @@
+[
+{"Path":"empty","Name":"empty","Size":40,"MimeType":"inode/directory","ModTime":"2023-11-14T22:13:20.000000000Z","IsDir":true},
+{"Path":"one.txt","Name":"one.txt","Size":5,"MimeType":"text/plain; charset=utf-8","ModTime":"2023-11-14T22:13:20.000000000Z","IsDir":false},
+{"Path":"sub","Name":"sub","Size":60,"MimeType":"inode/directory","ModTime":"2023-11-14T22:13:20.000000000Z","IsDir":true},
+{"Path":"sub/two.bin","Name":"two.bin","Size":8,"MimeType":"application/octet-stream","ModTime":"2023-11-14T22:13:20.000000000Z","IsDir":false}
+]

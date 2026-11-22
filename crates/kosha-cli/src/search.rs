@@ -300,11 +300,17 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let flag = cancel.clone();
     let _ = ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed));
     let document_stdout = args.export.is_some() && args.out.is_none();
+    let mut apparent_only = false;
+    let mut unknown_sizes = false;
     let tree = match args.source.as_ref().expect("validated source") {
         Source::Snapshot(path) => {
             let path = super::snapshots::resolve(path)?;
             let (meta, tree) = snapshot::store::open(&path)
                 .map_err(|e| format!("could not load {}: {e}", path.display()))?;
+            if let Some(source) = &meta.import {
+                apparent_only = !source.allocated_known;
+                unknown_sizes = source.unknown_size > 0;
+            }
             super::snapshots::report_source(&path, &meta);
             super::snapshots::report_replaced_names(&tree);
             if !document_stdout {
@@ -422,6 +428,8 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         let options = export::Options {
             format: kind,
             absolute_paths: args.absolute_paths,
+            apparent_only,
+            unknown_sizes,
             ..Default::default()
         };
         let written = if let Some(path) = &args.out {

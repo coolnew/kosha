@@ -95,6 +95,12 @@ ncdu can run on a machine where Kosha is not installed, and its export can be
 copied or piped here. Kosha reads only the file you name (or standard input),
 starts no program and makes no network request.
 
+From Kosha 0.14.0, you can also [import an rclone listing](command-line.md#import-an-rclone-listing).
+Choose **Import a listing** under **Snapshots** in the desktop app to preview,
+name and save an ncdu or rclone listing. rclone provides apparent sizes only.
+A listing can retain duplicate paths, which makes path comparison unavailable
+for that record.
+
 An imported record is not a Kosha scan, and every view says so: the CLI header,
 `--stats`, the `--snapshots` list and search print
 `Imported from ncdu 2.9 (export 2026-11-20 14:02 UTC). Not measured by Kosha.`

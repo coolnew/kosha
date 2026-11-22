@@ -15,7 +15,7 @@
 //! Every count, length and depth is bounded before it can cost memory; see
 //! [`Limits`] and [`decompress`].
 
-use std::io::Read;
+use std::io::{self, BufRead, Read};
 use std::time::SystemTime;
 
 use kosha_core::SizeTree;
@@ -23,8 +23,10 @@ use kosha_core::snapshot::Meta;
 
 pub mod decompress;
 mod ncdu;
+mod rclone;
 
 pub use decompress::Compression;
+pub use rclone::{RcloneSource, import_rclone};
 
 /// Bounds on one import. The defaults suit a whole server; each refusal
 /// names the limit it hit.
@@ -68,6 +70,8 @@ impl Default for Limits {
 pub enum ImportError {
     #[error("the input is empty")]
     Empty,
+    #[error("unrecognized listing format; specify --from ncdu or --from rclone")]
+    ListingFormat,
     #[error(
         "this is ncdu's binary export (`ncdu -O`), which kosha does not read; \
          export JSON instead with `ncdu -o FILE` (or `ncdu -co FILE` for zstd)"
@@ -150,16 +154,182 @@ pub fn import_ncdu<R: Read + Send>(
         max_depth: limits.max_depth.min(MAX_DEPTH),
         ..*limits
     };
+    on_import_worker(move || {
+        ncdu::import(
+            open_listing(input, &limits)?,
+            source_name,
+            label,
+            now,
+            &limits,
+        )
+    })
+}
+
+/// Detect a supported listing after decompression and read it from the same stream.
+pub fn import_auto<R: Read + Send>(
+    input: R,
+    source: &RcloneSource<'_>,
+    now: SystemTime,
+    limits: &Limits,
+) -> Result<Imported, ImportError> {
+    let limits = Limits {
+        max_depth: limits.max_depth.min(MAX_DEPTH),
+        ..*limits
+    };
+    on_import_worker(move || {
+        let mut opened = open_listing(input, &limits)?;
+        let compression = opened.compression;
+        let first = |reader: &mut dyn BufRead| {
+            first_nonblank(reader).map_err(|error| io_error(error, compression))
+        };
+        if first(&mut *opened.reader)? != Some(b'[') {
+            return Err(ImportError::ListingFormat);
+        }
+        opened.reader.consume(1);
+        let format = first(&mut *opened.reader)?;
+        opened.reader = Box::new(io::Cursor::new(b"[").chain(opened.reader));
+        match format {
+            Some(b'0'..=b'9') => {
+                ncdu::import(opened, source.source_name, source.label, now, &limits)
+            }
+            Some(b'{' | b']') => rclone::import_opened(opened, source, now, &limits),
+            _ => Err(ImportError::ListingFormat),
+        }
+    })
+}
+
+/// Skip JSON whitespace without buffering the skipped bytes.
+fn first_nonblank(reader: &mut dyn BufRead) -> io::Result<Option<u8>> {
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(None);
+        }
+        let blank = available
+            .iter()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+            .count();
+        let first = available.get(blank).copied();
+        reader.consume(blank);
+        if first.is_some() {
+            return Ok(first);
+        }
+    }
+}
+
+fn on_import_worker(
+    run: impl FnOnce() -> Result<Imported, ImportError> + Send,
+) -> Result<Imported, ImportError> {
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .name("kosha-import".into())
             .stack_size(64 << 20)
-            .spawn_scoped(scope, move || {
-                ncdu::import(input, source_name, label, now, &limits)
-            });
+            .spawn_scoped(scope, run);
         match worker {
             Ok(handle) => handle.join().unwrap_or(Err(ImportError::Internal)),
             Err(error) => Err(ImportError::Io(error)),
         }
     })
+}
+
+fn open_listing<'a, R: Read + 'a>(
+    input: R,
+    limits: &Limits,
+) -> Result<decompress::Opened<'a>, ImportError> {
+    use decompress::{Caps, Refusal};
+
+    let caps = Caps {
+        max_input_bytes: limits.max_input_bytes,
+        max_output_bytes: limits.max_input_bytes,
+        max_window: limits.max_window,
+    };
+    decompress::open(input, caps).map_err(|refusal| match refusal {
+        Refusal::Empty => ImportError::Empty,
+        Refusal::NcduBinary => ImportError::NcduBinary,
+        Refusal::CompressedTwice => ImportError::CompressedTwice,
+        Refusal::Io(error) => io_error(error, Compression::None),
+    })
+}
+
+fn io_error(error: io::Error, compression: Compression) -> ImportError {
+    use decompress::Stop;
+
+    if let Some(stop) = decompress::stop_of(&error) {
+        return match stop {
+            Stop::InputTooLarge(limit) => ImportError::InputTooLarge(*limit),
+            Stop::OutputTooLarge(limit) => ImportError::DecompressedTooLarge(*limit),
+            Stop::Window { requested, limit } => ImportError::ZstdWindow {
+                requested: *requested,
+                limit: *limit,
+            },
+            other => ImportError::Compressed(other.to_string()),
+        };
+    }
+    match compression {
+        Compression::None => ImportError::Io(error),
+        compressed if error.kind() == io::ErrorKind::UnexpectedEof => {
+            ImportError::Compressed(format!(
+                "the {} data ends early; it may be truncated",
+                compressed.label()
+            ))
+        }
+        compressed => ImportError::Compressed(format!(
+            "the {} data is damaged: {error}",
+            compressed.label()
+        )),
+    }
+}
+
+fn listing_json_error(error: serde_json::Error, compression: Compression) -> ImportError {
+    match error.classify() {
+        serde_json::error::Category::Io => io_error(error.into(), compression),
+        serde_json::error::Category::Eof => ImportError::Truncated(error.to_string()),
+        _ => {
+            let text = error.to_string();
+            if text.contains("invalid unicode code point") {
+                ImportError::NotUtf8(text)
+            } else {
+                ImportError::Malformed(text)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod auto_tests {
+    use super::*;
+
+    #[test]
+    fn detects_both_array_shapes_and_preserves_the_stream() {
+        let source = RcloneSource {
+            source_name: "listing.json",
+            label: "",
+            root: "",
+            tool: "",
+            observed: None,
+        };
+        for (json, expected) in [
+            ("  [  ]", "rclone-lsjson"),
+            (r#" [ 1,0,{},[{"name":"/tmp"}]] "#, "ncdu-json"),
+        ] {
+            let result = import_auto(
+                json.as_bytes(),
+                &source,
+                SystemTime::UNIX_EPOCH,
+                &Limits::default(),
+            )
+            .unwrap();
+            assert_eq!(result.bytes_read, json.len() as u64);
+            assert_eq!(result.meta.import.unwrap().format, expected);
+        }
+        assert!(matches!(
+            import_auto(
+                &b"[false]"[..],
+                &source,
+                SystemTime::UNIX_EPOCH,
+                &Limits::default()
+            ),
+            Err(ImportError::ListingFormat)
+        ));
+    }
 }

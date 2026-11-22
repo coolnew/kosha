@@ -241,7 +241,7 @@ and never opens a path named inside the listing.
 
 | Option | Meaning |
 | --- | --- |
-| `--from ncdu` | Required. ncdu JSON is the only supported format. |
+| `--from ncdu` | Read an ncdu JSON export. |
 | `--label TEXT` | Name the record. |
 | `--max-input-bytes N` | Refuse input, or decompressed input, larger than `N` bytes. The default is 8 GiB. |
 
@@ -279,6 +279,20 @@ requests full paths. JSONL and TXT alone do not carry the scan metadata: keep
 stderr or use JSON when completeness and source age matter.
 The root is contextual metadata and is excluded from entry export rows.
 `--export-min N` filters the regular scan export by allocated bytes.
+
+### Import an rclone listing
+
+```sh
+rclone lsjson -R gdrive: > drive.json
+kosha import --from rclone drive.json --root gdrive: --label "Drive listing"
+```
+
+Use `--from auto` to detect ncdu or rclone, `-` for standard input, or
+`--out FILE` to write a new snapshot at a chosen path. Existing output files
+are preserved. For rclone, `--tool TEXT` records the source tool version and
+`--observed-at TIME` takes an RFC 3339 observation time. Without that option,
+the observation time is unknown. Sizes are apparent and can be lower bounds
+when the listing contains unknown sizes.
 
 ### Exported entry fields
 

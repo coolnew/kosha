@@ -138,8 +138,7 @@ Kosha. See [imported listings](snapshots.md#imported-listings).
 
 - Scanning online accounts directly.
 - Scanning other machines from inside Kosha.
-- Importing listings from tools other than ncdu, such as rclone or QDirStat.
-  Importing ncdu JSON exports is available from Kosha 0.13.0.
+- Importing QDirStat listings.
 
 ## Tell us what is missing
 
@@ -148,3 +147,32 @@ If your files live somewhere Kosha cannot reach today, tell us with the
 Say which provider or tool you use, your operating system, the rough size of the
 tree and what you tried. The request is public, so leave out private paths,
 account names and file names.
+
+## Import an rclone listing
+
+For Google Drive, configure an rclone remote such as `gdrive:`. For OneDrive
+or Dropbox, use the remote name you configured for that provider. Run rclone
+to produce a listing, then give the JSON file to Kosha.
+
+```sh
+rclone lsjson -R gdrive: > drive.json
+kosha import --from rclone drive.json --root gdrive:
+```
+
+Kosha browses the imported metadata locally. The listing shows apparent sizes.
+An rclone size of `-1` means unknown. These entries contribute zero, so totals
+can be lower bounds.
+Duplicate names are retained. File actions are unavailable in imported listings.
+
+Use `--from auto` to detect ncdu or rclone input. Use `--out FILE` to save
+the snapshot at a chosen path. An existing destination is preserved.
+
+### Preview a listing in the desktop app
+
+In the desktop app, choose **Import a listing…** under **Snapshots**, select
+an ncdu or rclone listing, and review the summary. You can name the record,
+then select **Save** to open it and retain it in the snapshot store. **Cancel**
+dismisses the import before a record is saved.
+
+JSON and JSONL exports represent unrecorded on-disk sizes as null. CSV
+leaves the on-disk column empty for these listings.
