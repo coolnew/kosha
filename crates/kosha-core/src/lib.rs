@@ -61,6 +61,7 @@ mod recognise;
 pub mod say;
 mod scan;
 pub mod snapshot;
+pub mod snapshot_compare;
 mod tree;
 /// UDF, read out of a disc image or a volume.
 mod udf;
@@ -75,6 +76,8 @@ pub use error::ScanError;
 pub use names::{NameArena, is_valid_encoded_name, is_well_formed_wtf8};
 pub use node::{Flags, Node, NodeId};
 pub use owner::{Owner, OwnerId, OwnerKind, Owners, Share};
+#[cfg(target_os = "macos")]
+pub use platform::macos_mounts;
 pub use platform::wsl;
 pub use platform::{
     DiskUsage, EntryMeta, Fragmentation, MediaType, PlatformCtx, allocated_size,

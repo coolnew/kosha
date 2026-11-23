@@ -130,6 +130,161 @@ fn text(out: &Output) -> String {
 }
 
 #[test]
+fn compares_two_saved_snapshots_without_opening_their_source_roots() {
+    use kosha_core::snapshot::{self, Meta, Provenance};
+    use kosha_core::{Entry, Flags, ScanStats, TreeBuilder};
+    use serde_json::Value;
+
+    let home = tempfile::tempdir().unwrap();
+    let write = |label: &str, is_right: bool, partial: bool| {
+        let path = home.path().join(format!("{label}.kosha"));
+        let mut builder = TreeBuilder::new(label, Entry::default()).unwrap();
+        let file = |logical, mtime| Entry {
+            logical,
+            allocated: 0,
+            mtime,
+            flags: Flags::default(),
+        };
+        let side = u32::from(is_right);
+        builder.push(0, "exact", file(10, 100)).unwrap();
+        builder
+            .push(0, "boundary", file(7, 100 + side * 2))
+            .unwrap();
+        builder.push(0, "changed", file(5, 100 + side * 3)).unwrap();
+        builder.push(0, "missing-time", file(5, 0)).unwrap();
+        builder.push(0, "zero-size", file(0, 100)).unwrap();
+        builder
+            .push(0, "known-size-change", file(u64::from(side) + 1, 0))
+            .unwrap();
+        builder
+            .push(
+                0,
+                "hardlink",
+                Entry {
+                    flags: Flags::HARDLINK_DUP,
+                    ..file(0, 100)
+                },
+            )
+            .unwrap();
+        let casing = if is_right { "a" } else { "A" };
+        let composed = if is_right { "e\u{301}" } else { "é" };
+        builder.push(0, casing, file(2, 100)).unwrap();
+        builder.push(0, composed, file(2, 100)).unwrap();
+        if is_right {
+            builder.push(0, "type", file(1, 100)).unwrap();
+        } else {
+            builder
+                .push(
+                    0,
+                    "type",
+                    Entry {
+                        flags: Flags::DIR,
+                        ..Entry::default()
+                    },
+                )
+                .unwrap();
+        }
+        builder.push(0, "duplicate", file(4, 100)).unwrap();
+        if is_right {
+            builder.push(0, "duplicate", file(4, 100)).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let non_utf8 = std::ffi::OsStr::from_bytes(b"raw-\xff");
+            builder.push_os(0, non_utf8, file(1, 100)).unwrap();
+        }
+        let root = home.path().join("missing-roots").join(label);
+        let (tree, _) = builder
+            .finish(
+                root,
+                ScanStats {
+                    partial,
+                    ..ScanStats::default()
+                },
+            )
+            .unwrap();
+        let mut meta = Meta::of(&tree, std::time::UNIX_EPOCH, label);
+        if is_right {
+            meta.import = Some(Provenance {
+                format: "rclone-lsjson".into(),
+                unknown_size: 1,
+                mtime_known: true,
+                ..Provenance::default()
+            });
+        }
+        snapshot::write(&tree, &meta, std::fs::File::create(&path).unwrap()).unwrap();
+        path
+    };
+    let left = write("left", false, false);
+    let right = write("right", true, true);
+    let invoke = |left: &Path, right: &Path, extra: &[&str]| {
+        let mut args = vec![
+            "compare",
+            left.to_str().unwrap(),
+            right.to_str().unwrap(),
+            "--format",
+            "jsonl",
+        ];
+        args.extend_from_slice(extra);
+        run(&args, home.path())
+    };
+    let output = invoke(&left, &right, &[]);
+    assert_eq!(output.status.code(), Some(1), "{:?}", output);
+    let records: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let row = |path: &str| {
+        records
+            .iter()
+            .find(|record| record["path"] == path)
+            .unwrap()
+    };
+    assert_eq!(records[0]["schema"], "kosha.snapshot-compare.v1");
+    assert_eq!(records[0]["right"]["import"]["format"], "rclone-lsjson");
+    assert_eq!(row("boundary")["status"], "metadata-match");
+    assert_eq!(row("changed")["reasons"], serde_json::json!(["mtime"]));
+    assert_eq!(
+        row("known-size-change")["reasons"],
+        serde_json::json!(["apparent-size"])
+    );
+    assert_eq!(row("type")["reasons"], serde_json::json!(["type"]));
+    for path in [
+        "missing-time",
+        "zero-size",
+        "duplicate",
+        "hardlink",
+        "A",
+        "é",
+    ] {
+        assert_eq!(row(path)["status"], "indeterminate");
+    }
+    assert_eq!(row("a")["status"], "right-only");
+    assert_eq!(row("e\u{301}")["status"], "right-only");
+    #[cfg(unix)]
+    assert_eq!(row("raw-�")["path_bytes_hex"], "7261772dff");
+    assert_eq!(records.last().unwrap()["right_incomplete"], true);
+    assert_eq!(invoke(&left, &left, &[]).status.code(), Some(2));
+    let strict = invoke(&left, &right, &["--mtime-tolerance", "0"]);
+    assert!(
+        String::from_utf8(strict.stdout)
+            .unwrap()
+            .lines()
+            .any(|line| {
+                let row: Value = serde_json::from_str(line).unwrap();
+                row["path"] == "boundary" && row["status"] == "changed"
+            })
+    );
+    let corrupt = home.path().join("corrupt.kosha");
+    std::fs::write(&corrupt, b"corrupt").unwrap();
+    let refused = invoke(&left, &corrupt, &[]);
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(refused.stdout.is_empty());
+}
+
+#[test]
 fn a_scan_reports_the_tree_it_was_given() {
     let tree = fixture();
     let home = tempfile::tempdir().unwrap();
@@ -1159,4 +1314,114 @@ fn a_mistake_that_needs_no_disk_is_caught_before_the_disk() {
         home.path(),
     ));
     assert!(compared.contains("Nothing changed"), "{compared}");
+}
+
+#[cfg(feature = "remote-client")]
+#[test]
+fn remote_cli_checks_settings_before_ssh_config() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join(".ssh/config")).unwrap();
+    let settings = if cfg!(windows) {
+        home.path().join("coolnew/kosha")
+    } else if cfg!(target_os = "macos") {
+        home.path()
+            .join("Library/Application Support/app.coolnew.kosha")
+    } else {
+        home.path().join("kosha")
+    };
+    std::fs::create_dir_all(&settings).unwrap();
+    let run = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_kosha"))
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("APPDATA", home.path())
+            .env("XDG_CONFIG_HOME", home.path())
+            .args(["remote", "fixture.invalid", "--path", "/fixture"])
+            .output()
+            .unwrap()
+    };
+    let disabled = run();
+    assert!(!disabled.status.success());
+    assert!(disabled.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&disabled.stderr).contains("SSH scanning is disabled"));
+    std::fs::write(settings.join("settings.json"), r#"{"ssh-access":true}"#).unwrap();
+    let enabled = run();
+    assert!(!enabled.status.success());
+    assert!(enabled.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&enabled.stderr).contains("SSH path is not a regular file"));
+}
+
+#[cfg(feature = "remote-serve")]
+mod remote_server {
+    use kosha_core::snapshot::{ReadLimits, RemoteRecord};
+    use kosha_scan_wire::{self as wire, Hello, Progress};
+    use kosha_scan_wire::{ProgressRate, Request};
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    #[test]
+    fn server_emits_a_scan_only_after_one_negotiated_request() {
+        let fixture = tempfile::tempdir().unwrap();
+        std::fs::write(fixture.path().join("sample.txt"), b"fixture").unwrap();
+        let client = Hello::new("test client");
+        let mut input = Vec::new();
+        wire::write_hello(&mut input, &client).unwrap();
+        wire::write_request(
+            &mut input,
+            &Request {
+                path: fixture.path().to_str().unwrap().into(),
+                max_depth: None,
+                owners: false,
+                cross_filesystems: false,
+                dedup_hardlinks: false,
+            },
+        )
+        .unwrap();
+        let run = |args: &[&str], input: &[u8]| {
+            let mut child = Command::new(super::common::kosha())
+                .arg("serve-scan")
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            if !input.is_empty() {
+                child.stdin.take().unwrap().write_all(input).unwrap();
+            }
+            child.wait_with_output().unwrap()
+        };
+        let output = run(&[], &input);
+        assert!(output.status.success());
+        let mut reply = output.stdout.as_slice();
+        client
+            .require_compatible(&wire::read_hello(&mut reply).unwrap())
+            .unwrap();
+        let record = RemoteRecord::read(reply, ReadLimits::default()).unwrap();
+        assert_eq!(record.tree().len(), 2);
+        assert_eq!(record.tree().total_logical(), 7);
+        assert_eq!(
+            wire::read_progress(
+                &mut output.stderr.as_slice(),
+                &mut ProgressRate::new(Instant::now())
+            )
+            .unwrap(),
+            Some(Progress {
+                files: 1,
+                directories: 1
+            }),
+        );
+
+        input.push(0);
+        let output = run(&[], &input);
+        assert!(!output.status.success());
+        let mut reply = output.stdout.as_slice();
+        wire::read_hello(&mut reply).unwrap();
+        assert!(reply.is_empty() && output.stderr.is_empty());
+
+        let output = run(&["unexpected"], &[]);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+    }
 }

@@ -94,10 +94,12 @@ observation.
   files. Each confirmed group shows the number and size of identical files,
   estimated recoverable allocation after keeping one, and their paths.
   `--dupe-min N` sets the minimum length in bytes and requests the hunt.
-  The default is 1 MiB. A hunt takes same-size files, largest first, until it has
-  about 200,000 (whole same-size groups, so it can run slightly over), so it cannot become an unbounded read of the volume; when more than
-  that qualify, the report says how many files, up to what size, were not
-  checked (`N files up to SIZE not checked`). Snapshots, caches, and disk-image views do not supply
+  The minimum defaults to 1 MiB. `--dupe-budget N` sets an estimated read
+  budget in bytes and requests the hunt. It defaults to 8 GiB. Kosha schedules
+  whole same-size groups from largest to smallest and counts the estimated
+  cost of both hashing passes. The final group may exceed the budget.
+  The report shows how many files and what sizes were left out.
+  A zero budget reports omissions without opening candidate files. Snapshots, caches, and disk-image views do not supply
   file contents for this report. Cloud placeholders are skipped rather than
   downloaded and reported as `N files stored in the cloud, skipped rather than
   downloaded`; see [cloud-synced folders](scanning.md#cloud-synced-folders).
@@ -287,12 +289,73 @@ rclone lsjson -R gdrive: > drive.json
 kosha import --from rclone drive.json --root gdrive: --label "Drive listing"
 ```
 
-Use `--from auto` to detect ncdu or rclone, `-` for standard input, or
+Use `--from auto` to detect ncdu, rclone or QDirStat, `-` for standard input, or
 `--out FILE` to write a new snapshot at a chosen path. Existing output files
 are preserved. For rclone, `--tool TEXT` records the source tool version and
 `--observed-at TIME` takes an RFC 3339 observation time. Without that option,
 the observation time is unknown. Sizes are apparent and can be lower bounds
 when the listing contains unknown sizes.
+
+### Find duplicate candidates in rclone listings
+
+![A macOS Terminal example showing one MD5 candidate group from a synthetic rclone listing](images/checksum-candidates-macos.png)
+
+```sh
+rclone lsjson -R --hash-type md5 gdrive: > drive.json
+kosha duplicate-candidates --algorithm md5 drive.json
+kosha duplicate-candidates --algorithm md5 drive.json archive.json
+```
+
+Use the same checksum algorithm for both listings. Kosha supports `md5`,
+`sha1`, `sha256`, `quickxor`, and `dropbox`. Only rows with a known apparent
+size and a valid checksum for the selected algorithm can match. With two
+inputs, each group has members on both sides. The coverage counts show how
+many rows qualified, including when one side has no usable checksums.
+
+Kosha reads the listing files locally. The matches are candidates based on
+recorded metadata. They carry no file actions or reclaimable-space estimate.
+Generating checksums with rclone may require remote requests or file reads,
+depending on the backend. Use `-` for one input from standard input.
+
+Each listing is limited to 256 MiB both on disk and decoded. The shared
+limits are one million eligible rows and 64 MiB of retained path text.
+The report counts all groups and displays up to 100, with up to 10 members
+per input in each group.
+
+### Import a QDirStat cache
+
+```sh
+qdirstat-cache-writer /srv srv.cache.gz
+kosha import --from qdirstat srv.cache.gz --label "Server listing"
+```
+
+Kosha reads QDirStat cache formats 1.0 and 2.0, plain or gzip-compressed.
+Totals use apparent sizes. The cache has no inode IDs, so each hard-link
+name contributes its recorded size. Caches written by the QDirStat app
+before 1.7 may contain per-link shares instead of full file sizes.
+
+### Compare two saved snapshots
+
+![A macOS Terminal example showing a changed timestamp and paths recorded on one side of a synthetic snapshot comparison](images/snapshot-compare-macos.png)
+
+```sh
+kosha compare before.kosha after.kosha
+kosha compare before.kosha after.kosha --mtime-tolerance 0 --format jsonl
+```
+
+Pass two explicit snapshot file paths. Kosha compares the stored relative paths
+byte for byte. For files it checks type, apparent size, and modification time,
+with a two-second default tolerance. A metadata match makes no claim about file
+contents. Directory entries compare by presence and type, and descendants get
+their own results.
+
+Missing metadata, ambiguous duplicate paths, and missing entries on an
+incomplete side can make a result indeterminate. The text report shows up to
+30 differences or indeterminate paths, followed by totals. JSONL writes a
+versioned provenance header, an entry for each compared path, and a summary.
+Rows whose paths contain non-UTF-8 bytes also include `path_bytes_hex`.
+Exit status is 0 for matching metadata, 1 for known differences, and 2 for an
+error or an indeterminate comparison with no known differences.
 
 ### Exported entry fields
 

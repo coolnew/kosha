@@ -21,9 +21,15 @@ use kosha_core::{ScanOptions, Scanner, SizeTree, compare, export, format, snapsh
 use kosha_core::{say, sayln};
 
 mod cache;
+mod checksum_candidates;
+mod compare_snapshots;
 mod import;
 mod marketplace;
+#[cfg(feature = "remote-client")]
+mod remote;
 mod search;
+#[cfg(feature = "remote-serve")]
+mod serve_scan;
 mod snapshots;
 mod views;
 
@@ -39,7 +45,9 @@ USAGE:
     kosha search --load SAVED.kosha \"folders created last week\"
     kosha search --path PATH \"files ending with md\"
     kosha search --help             natural-language search options
-    kosha import --from FORMAT FILE  keep an ncdu or rclone listing as an imported record
+    kosha import --from FORMAT FILE  keep an ncdu, rclone or QDirStat listing
+    kosha duplicate-candidates --algorithm ALGORITHM LISTING [LISTING]
+    kosha compare LEFT RIGHT        compare metadata in two saved snapshots
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
@@ -54,6 +62,8 @@ OPTIONS:
     --duplicates     Hunt for duplicate file contents (reads file data)
     --dupe-min N     Smallest file the hunt considers, in bytes (default 1 MiB);
                      asks for the hunt, so --duplicates need not be given too
+    --dupe-budget N Estimated read budget in bytes (default 8 GiB).
+                    The final same-size group may exceed the budget.
     --query Q        Show entries matching a query, e.g. \"size > 1gb\"
     --query-help     Explain the query language
     --export FORMAT  Write every entry as txt, csv, jsonl, or json
@@ -157,6 +167,7 @@ struct Args {
     duplicates: bool,
     /// Smallest file `--duplicates` will consider.
     dupe_min: u64,
+    dupe_budget: u64,
     /// Set by `--export`. Combines with `--query`, which then decides the rows.
     export: Option<export::Options>,
     /// Where the export goes. `None` is standard output.
@@ -215,6 +226,24 @@ impl Args {
 }
 
 fn main() -> ExitCode {
+    #[cfg(feature = "remote-client")]
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().is_some_and(|arg| arg == "remote") {
+            return remote::run(args);
+        }
+    }
+    #[cfg(feature = "remote-serve")]
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().is_some_and(|arg| arg == "serve-scan") {
+            return if args.next().is_none() && serve_scan::stdio().is_ok() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            };
+        }
+    }
     let result = match parse() {
         Ok(Parsed::Run(args)) => run(*args),
         Ok(Parsed::View(args)) => return views::run(&args),
@@ -222,6 +251,8 @@ fn main() -> ExitCode {
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
         Ok(Parsed::Import(args)) => import::run(&args),
+        Ok(Parsed::ChecksumCandidates(args)) => checksum_candidates::run(&args),
+        Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
         Ok(Parsed::ImportHelp) => {
             say!("{}", import::USAGE);
             return ExitCode::SUCCESS;
@@ -1550,7 +1581,7 @@ fn print_duplicates(tree: &SizeTree, args: &Args) {
         tree,
         &DuplicateOptions {
             min_size: args.dupe_min,
-            ..DuplicateOptions::default()
+            max_read_bytes: args.dupe_budget,
         },
     );
     sayln!("\nDUPLICATES");
@@ -1596,15 +1627,11 @@ fn print_duplicates(tree: &SizeTree, args: &Args) {
         );
     }
     if report.over_ceiling > 0 {
-        // A bound on how many same-size files one hunt will open, so it cannot
-        // become an unbounded read of the volume. Candidates are taken largest
-        // first; saying what was left out stops a very large tree reading as
-        // fully checked.
         sayln!(
-            "  {} up to {} not checked — a hunt takes same-size files largest first until it has about {}",
+            "  {} up to {} not checked — estimated read budget: {} (largest sizes first)",
             format::plural(report.over_ceiling, "file"),
             format::bytes_in(report.over_ceiling_up_to, args.units),
-            format::count(report.max_candidates as u64),
+            format::bytes_in(report.max_read_bytes, args.units),
         );
     }
     if report.groups.is_empty() {
@@ -1733,6 +1760,8 @@ enum Parsed {
     Search(Box<search::Args>),
     Marketplace(Vec<String>),
     Import(Box<import::Args>),
+    ChecksumCandidates(Vec<String>),
+    CompareSnapshots(Vec<String>),
     ImportHelp,
     SearchHelp,
     SearchRecipes(Option<PathBuf>, Option<String>),
@@ -1777,6 +1806,14 @@ where
             import::Parsed::Help => Ok(Parsed::ImportHelp),
         };
     }
+    if argv.peek().is_some_and(|arg| arg == "duplicate-candidates") {
+        argv.next();
+        return Ok(Parsed::ChecksumCandidates(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "compare") {
+        argv.next();
+        return Ok(Parsed::CompareSnapshots(argv.collect()));
+    }
     if argv.peek().is_some_and(|arg| arg == "search") {
         argv.next();
         return match search::parse(argv)? {
@@ -1796,6 +1833,7 @@ where
         owners: false,
         duplicates: false,
         dupe_min: DuplicateOptions::default().min_size,
+        dupe_budget: DuplicateOptions::default().max_read_bytes,
         export: None,
         out: None,
         since: None,
@@ -1856,6 +1894,14 @@ where
                 args.scan.collect_owners = true;
             }
             "--duplicates" => args.duplicates = true,
+            "--dupe-budget" => {
+                args.dupe_budget = iter
+                    .next()
+                    .ok_or("--dupe-budget needs a byte count")?
+                    .parse()
+                    .map_err(|_| "--dupe-budget needs a nonnegative byte count")?;
+                args.duplicates = true;
+            }
             "--dupe-min" => {
                 args.dupe_min = u64::from(value("--dupe-min")?);
                 // Setting the smallest file the hunt looks at is asking for the
@@ -2211,6 +2257,9 @@ mod tests {
         assert_eq!(args(".").dupe_min, DuplicateOptions::default().min_size);
         assert_eq!(args(". --dupe-min 100").dupe_min, 100);
         assert_eq!(args(". --dupe-min 0").dupe_min, 0);
+        assert_eq!(args(". --dupe-budget 8589934592").dupe_budget, 8 << 30);
+        assert!(args(". --dupe-budget 0").duplicates);
+        assert!(error(". --dupe-budget -1").contains("--dupe-budget"));
     }
 
     // ------------------------------------------------------------- export

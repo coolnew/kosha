@@ -61,13 +61,19 @@ pub enum BuildError {
 /// that becomes a `.` or `..` step when `\` is read as a separator — which
 /// is what a Windows path does with it.
 pub fn is_valid_component(name: &str) -> bool {
-    if name.is_empty() || name == "." || name == ".." {
+    is_valid_component_bytes(name.as_bytes())
+}
+
+fn is_valid_component_bytes(name: &[u8]) -> bool {
+    if name.is_empty() || name == b"." || name == b".." {
         return false;
     }
-    if name.contains('/') || name.contains('\0') {
+    if name.contains(&b'/') || name.contains(&0) {
         return false;
     }
-    !name.split('\\').any(|step| step == "." || step == "..")
+    !name
+        .split(|&byte| byte == b'\\')
+        .any(|step| step == b"." || step == b"..")
 }
 
 #[derive(Clone, Copy)]
@@ -136,7 +142,18 @@ impl TreeBuilder {
     /// Add an entry below `parent`, which must be a directory already added.
     /// Returns the handle to pass as `parent` for its own children.
     pub fn push(&mut self, parent: u32, name: &str, entry: Entry) -> Result<u32, BuildError> {
-        if !is_valid_component(name) {
+        self.push_os(parent, std::ffi::OsStr::new(name), entry)
+    }
+
+    /// Add an entry whose name uses the platform's native string encoding.
+    pub fn push_os(
+        &mut self,
+        parent: u32,
+        name: &std::ffi::OsStr,
+        entry: Entry,
+    ) -> Result<u32, BuildError> {
+        let name = name.as_encoded_bytes();
+        if !is_valid_component_bytes(name) {
             return Err(BuildError::InvalidName);
         }
         if name.len() > usize::from(u16::MAX) {
@@ -155,7 +172,7 @@ impl TreeBuilder {
         if name_off + name.len() > u32::MAX as usize {
             return Err(BuildError::NamesTooLarge);
         }
-        self.names.extend_from_slice(name.as_bytes());
+        self.names.extend_from_slice(name);
         let is_dir = entry.flags.contains(Flags::DIR);
         self.records.push(Record {
             logical: if is_dir { 0 } else { entry.logical },
@@ -309,7 +326,7 @@ impl TreeBuilder {
             root_path,
             stats,
         );
-        debug_assert_eq!(tree.names_replaced(), 0, "UTF-8 names are valid everywhere");
+        debug_assert_eq!(tree.names_replaced(), 0, "native names are valid here");
         Ok((tree, layout))
     }
 }

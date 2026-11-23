@@ -156,6 +156,8 @@ impl ScanOptions {
 /// A snapshot of scan progress. Published per level.
 #[derive(Clone, Copy, Debug)]
 pub struct Progress {
+    /// Recorded file and directory counts at a committed walk level.
+    pub recorded_counts: Option<(u64, u64)>,
     /// Directories read by the walk. None for record/image strategies whose
     /// progress units cannot support a directory-queue time estimate.
     pub dirs_scanned: Option<u64>,
@@ -446,6 +448,7 @@ impl Scanner {
                             && let Ok(_guard) = publishing.try_lock()
                         {
                             self.publish(Progress {
+                                recorded_counts: None,
                                 dirs_scanned: Some(
                                     dirs_scanned + completed.load(Ordering::Relaxed),
                                 ),
@@ -608,6 +611,7 @@ impl Scanner {
             stats.max_depth = stats.max_depth.max(child_depth);
             dirs_scanned += frontier.len() as u64;
             self.publish(Progress {
+                recorded_counts: Some((stats.files, stats.dirs)),
                 dirs_scanned: Some(dirs_scanned),
                 entries: stats.entries,
                 dirs_pending: next.len() as u64,

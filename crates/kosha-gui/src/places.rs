@@ -85,13 +85,30 @@ pub struct Volume {
 /// Mounted volumes, listed separately so a row of drive letters does not push
 /// the directories anyone actually scans off the bottom of the rail.
 ///
-/// One `GetDiskFreeSpaceEx`/`statvfs` per volume. Cheap, but not free and not
-/// per frame: the caller caches this.
+/// Uses cached mount metadata on macOS and probes each volume elsewhere.
 pub fn volumes() -> Vec<Volume> {
-    volume_roots()
+    #[cfg(target_os = "macos")]
+    let volumes = {
+        let mut mounts = kosha_core::macos_mounts();
+        mounts.sort_by(|a, b| a.0.cmp(&b.0));
+        mounts.dedup_by(|a, b| a.0 == b.0);
+        let root = PathBuf::from("/");
+        let usage = kosha_core::disk_usage(&root);
+        match mounts.first_mut() {
+            Some((path, cached_usage)) if *path == root => *cached_usage = usage,
+            _ => mounts.insert(0, (root, usage)),
+        }
+        mounts
+    };
+    #[cfg(not(target_os = "macos"))]
+    let volumes = volume_roots().into_iter().map(|root| {
+        let usage = kosha_core::disk_usage(&root);
+        (root, usage)
+    });
+    volumes
         .into_iter()
-        .map(|root| Volume {
-            usage: kosha_core::disk_usage(&root),
+        .map(|(root, usage)| Volume {
+            usage,
             place: Place {
                 label: root.display().to_string(),
                 glyph: "▣",
@@ -101,6 +118,24 @@ pub fn volumes() -> Vec<Volume> {
         .collect()
 }
 
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn macos_volumes_include_root_and_the_attached_test_volume() {
+    let volumes = volumes();
+    assert_eq!(volumes[0].place.path, std::path::Path::new("/"));
+    if let Some(expected) = std::env::var_os("KOSHA_TEST_MOUNT") {
+        let expected = PathBuf::from(expected);
+        let mounted = volumes
+            .iter()
+            .find(|volume| volume.place.path == expected)
+            .expect("the explicitly selected test mount must appear in the sidebar list");
+        assert!(
+            mounted.usage.is_some(),
+            "the test mount should report capacity"
+        );
+    }
+}
+
 /// Mounted volumes.
 ///
 /// Probing drive letters on Windows is cheap. Linux has `/proc/mounts`, which
@@ -108,6 +143,7 @@ pub fn volumes() -> Vec<Volume> {
 /// `/home` on its own disk, an external drive under `/media` or a NAS under
 /// `/mnt` showed a single bar, while the same machine's Windows side showed
 /// six. Everywhere else the root is still the only portable answer.
+#[cfg(not(target_os = "macos"))]
 fn volume_roots() -> Vec<PathBuf> {
     #[cfg(windows)]
     {

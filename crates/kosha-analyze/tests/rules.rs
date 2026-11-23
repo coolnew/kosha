@@ -487,6 +487,32 @@ fn a_directory_named_like_build_output_is_not_enough() {
 }
 
 #[test]
+fn build_output_preserves_checkouts_and_finds_their_nested_artifacts() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let worktree = root.join("build/.worktrees/topic");
+    let checkout = root.join("target");
+    write(&worktree.join("local-work.bin"), 4);
+    fs::write(worktree.join(".git"), b"gitdir: /synthetic/worktrees/topic").unwrap();
+    fs::write(root.join("CMakeLists.txt"), b"").unwrap();
+    fs::write(root.join("Cargo.toml"), b"").unwrap();
+    fs::create_dir_all(checkout.join(".git")).unwrap();
+    write(&checkout.join("working-copy.bin"), 4);
+    fs::write(worktree.join("Cargo.toml"), b"").unwrap();
+    write(&worktree.join("target/artifact.bin"), 4);
+
+    let tree = scan(root);
+    let insights = analyze(&tree, &ctx());
+    let found = find(&insights, "build-artifacts").unwrap();
+    assert_eq!(found.action, Suggested::Trash);
+    assert_eq!(found.nodes.len(), 1);
+    assert_eq!(
+        tree.path_of(found.nodes[0]),
+        tree.root_path().join("build/.worktrees/topic/target")
+    );
+}
+
+#[test]
 fn nested_build_output_is_counted_once() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -807,25 +833,60 @@ mod duplicates {
     }
 
     #[test]
+    fn read_estimate_counts_overlapping_edges_and_full_hash() {
+        let estimate = duplicates::estimated_read_bytes;
+        assert_eq!(estimate(0), 0);
+        assert_eq!(estimate(16_384), 16_384);
+        assert_eq!(estimate(16_385), 32_768);
+        assert_eq!(estimate(32_768), 32_768);
+        assert_eq!(estimate(32_769), 65_537);
+        assert_eq!(estimate(u64::MAX), u64::MAX);
+    }
+
+    #[test]
     fn candidates_past_the_ceiling_are_counted_and_the_largest_left_out_is_named() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        // Three same-size pairs of different sizes; a ceiling of 4 keeps the two
+        // Three same-size pairs of different sizes; a budget of 10,000 bytes keeps the two
         // larger pairs (largest first) and leaves the smallest pair out.
         for (name, len) in [("a", 3000usize), ("b", 2000), ("c", 1000)] {
             fs::write(root.join(format!("{name}1")), vec![7u8; len]).unwrap();
             fs::write(root.join(format!("{name}2")), vec![7u8; len]).unwrap();
         }
         let options = DuplicateOptions {
-            max_candidates: 4,
+            max_read_bytes: 10_000,
             ..opts()
         };
         let report = duplicates::find(&scan(root), &options);
         assert_eq!(report.candidates_examined, 4);
         assert_eq!(report.over_ceiling, 2, "the dropped pair was not counted");
         assert_eq!(report.over_ceiling_up_to, 1000);
-        assert_eq!(report.max_candidates, 4);
+        assert_eq!(report.max_read_bytes, 10_000);
+        assert_eq!(report.bytes_hashed, 10_000);
         assert_eq!(report.groups.len(), 2, "the larger pairs were not found");
+
+        let soft = duplicates::find(
+            &scan(root),
+            &DuplicateOptions {
+                max_read_bytes: 6_001,
+                ..options
+            },
+        );
+        assert_eq!(soft.candidates_examined, 4);
+        assert_eq!(soft.bytes_hashed, 10_000);
+        assert_eq!(soft.over_ceiling, 2);
+
+        let empty = duplicates::find(
+            &scan(root),
+            &DuplicateOptions {
+                max_read_bytes: 0,
+                ..options
+            },
+        );
+        assert_eq!(empty.candidates_examined, 0);
+        assert_eq!(empty.bytes_hashed, 0);
+        assert_eq!(empty.over_ceiling, 6);
+        assert_eq!(empty.over_ceiling_up_to, 3_000);
 
         // With room for everything nothing is reported as left out.
         let full = duplicates::find(&scan(root), &opts());

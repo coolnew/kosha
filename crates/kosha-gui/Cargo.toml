@@ -28,6 +28,8 @@ kosha-analyze.workspace = true
 kosha-fsops.workspace = true
 kosha-import.workspace = true
 kosha-query.workspace = true
+kosha-remote = { path = "../kosha-remote", version = "0.14.0", features = ["ssh"], optional = true }
+kosha-scan-wire = { path = "../kosha-scan-wire", version = "0.14.0", optional = true }
 kosha-search.workspace = true
 kosha-marketplace.workspace = true
 gpui-kit = "0.6"
@@ -47,6 +49,10 @@ rust-embed = { version = "8.7.2", features = ["debug-embed"] }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+remote-client = ["dep:kosha-remote", "dep:kosha-scan-wire"]
+headless-ui-tests = ["gpui-kit/test-support"]
 
 [target.'cfg(windows)'.dependencies]
 # AttachConsole, because a windows-subsystem binary has no console and this

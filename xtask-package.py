@@ -49,6 +49,7 @@ DIST = ROOT / "dist"
 
 WINDOWS = os.name == "nt"
 MACOS = sys.platform == "darwin"
+DEPENDENCY_NOTICES = "THIRD-PARTY-NOTICES.md"
 
 
 def git_only_data(name: str) -> bool:
@@ -73,7 +74,7 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
     # tracked files require a policy update rather than a recursive copy.
     names = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().strip("\0").split("\0")
     roots = {".gitattributes", ".gitignore", "Cargo.toml", "Cargo.lock", "DCO", "LICENSE-MIT", "LICENSE-APACHE", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md", "SECURITY.md", "TRADEMARKS.md", "LLMS.md", "llms.txt", "clippy.toml", "rust-toolchain.toml", "rustfmt.toml", "xtask-dco.py", "xtask-eol.py", "xtask-spdx.py", "xtask-gaps.py", "xtask-mutations.py", "xtask-version.py", "xtask-package.py", "xtask-release.py", "xtask-llms.py", "test_xtask_version.py", "test_xtask_llms.py", "test_xtask_release.py"}
-    roots.update({"PRIVACY.md", "xtask-marketplace.py", "test_xtask_marketplace.py"})
+    roots.update({"PRIVACY.md", DEPENDENCY_NOTICES, "deny.toml", "xtask-marketplace.py", "test_xtask_marketplace.py"})
     roots.update({"xtask-msix.py", "test_xtask_msix.py"})
     roots.update({"xtask-windows.py", "xtask-installer.py", "test_windows_distribution.py",
                   "installer/setup.nsi.in", "xtask-nsis.py"})
@@ -108,7 +109,7 @@ def public_payloads(root: Path | None = None) -> dict[str, bytes]:
 def documentation_payloads(root: Path | None = None) -> dict[str, bytes]:
     files = public_payloads(root)
     roots = {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "RELEASING.md", "SECURITY.md", "TRADEMARKS.md", "LLMS.md", "llms.txt", "DCO", "LICENSE-MIT", "LICENSE-APACHE"}
-    roots.add("PRIVACY.md")
+    roots.update({"PRIVACY.md", DEPENDENCY_NOTICES})
     return {name: data for name, data in files.items() if name in roots or name.startswith(("docs/", "assets/"))}
 
 
@@ -212,6 +213,7 @@ def assemble(name: str) -> Path:
         (app / "Resources").mkdir(parents=True)
         shutil.copy2(gui, app / "MacOS" / "kosha-gui")
         shutil.copy2(ROOT / "assets" / "kosha.icns", app / "Resources" / "kosha.icns")
+        shutil.copy2(out / DEPENDENCY_NOTICES, app / "Resources" / DEPENDENCY_NOTICES)
         (app / "PkgInfo").write_text("APPL????")
         (app / "Info.plist").write_text(plist(version()))
         shutil.copy2(cli, out / cli.name)
@@ -400,6 +402,11 @@ def verify(path: Path, folder_name: str) -> list:
     for relative in required_docs:
         if not (unpacked / relative).is_file():
             wrong.append(f"missing packaged documentation: {relative.as_posix()}")
+    if MACOS:
+        bundle_notice = unpacked / "Kosha.app" / "Contents" / "Resources" / DEPENDENCY_NOTICES
+        archive_notice = unpacked / DEPENDENCY_NOTICES
+        if not bundle_notice.is_file() or not archive_notice.is_file() or bundle_notice.read_bytes() != archive_notice.read_bytes():
+            wrong.append(f"application bundle does not contain the packaged {DEPENDENCY_NOTICES}")
     suffix = ".exe" if WINDOWS else ""
     cli = unpacked / f"kosha{suffix}"
     if WINDOWS:

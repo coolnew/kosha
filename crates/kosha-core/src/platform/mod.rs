@@ -28,6 +28,8 @@ pub mod wsl;
 mod unix;
 #[cfg(unix)]
 use unix as imp;
+#[cfg(target_os = "macos")]
+pub use unix::macos_mounts;
 
 #[cfg(windows)]
 mod windows;

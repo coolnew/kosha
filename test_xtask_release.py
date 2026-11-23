@@ -354,6 +354,15 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("PRIVACY.md", package.public_payloads(self.root))
         self.assertIn("PRIVACY.md", package.documentation_payloads(self.root))
 
+    def test_dependency_policy_and_notice_are_admitted_in_public_checkout(self):
+        git(self.root, "init")
+        names = ["deny.toml", "THIRD-PARTY-NOTICES.md"]
+        for name in names:
+            (self.root / name).write_text("# Reviewed public file\n", encoding="utf-8")
+        git(self.root, "add", *names)
+        self.assertEqual(set(package.public_payloads(self.root)), set(names))
+        self.assertEqual(set(package.documentation_payloads(self.root)), {"THIRD-PARTY-NOTICES.md"})
+
     def test_git_recipe_packs_are_omitted_from_archive_payloads(self):
         git(self.root, "init")
         (self.root / "README.md").write_text("# Public\n", encoding="utf-8")
@@ -496,23 +505,26 @@ class MacDmgTests(unittest.TestCase):
     def test_native_mac_bundle_seal_survives_dmg_and_detects_changed_resources(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            folder = root / "kosha-signing-test"
-            app = folder / "Kosha.app/Contents"
-            (app / "MacOS").mkdir(parents=True)
-            (app / "Resources").mkdir()
             source = root / "main.c"
             source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
-            subprocess.run(["cc", str(source), "-o", str(folder / "kosha")], check=True)
-            package.shutil.copy2(folder / "kosha", app / "MacOS/kosha-gui")
-            (app / "Info.plist").write_text(package.plist("0.10.6"), encoding="utf-8")
-            (app / "Resources/fixture.txt").write_text("original", encoding="utf-8")
-            package.sign_mac_payload(folder)
+            fixture = root / "kosha"
+            subprocess.run(["cc", str(source), "-o", str(fixture)], check=True)
+            notice = (ROOT / package.DEPENDENCY_NOTICES).read_bytes()
+            with patch.object(package, "DIST", root), \
+                 patch.object(package, "binaries", return_value=(fixture, fixture)), \
+                 patch.object(package, "version", return_value="0.10.6"), \
+                 patch.object(package, "documentation_payloads", return_value={package.DEPENDENCY_NOTICES: notice}):
+                folder = package.assemble("kosha-signing-test")
+            app = folder / "Kosha.app/Contents"
             self.assertTrue((app / "_CodeSignature/CodeResources").is_file())
             image = package.archive(folder)
             unpacked = root / "unpacked"
             package.unpack_dmg(image, unpacked)
             package.verify_mac_payload(unpacked)
-            (unpacked / "Kosha.app/Contents/Resources/fixture.txt").write_text("changed", encoding="utf-8")
+            self.assertEqual((unpacked / package.DEPENDENCY_NOTICES).read_bytes(), notice)
+            bundle_notice = unpacked / "Kosha.app/Contents/Resources" / package.DEPENDENCY_NOTICES
+            self.assertEqual(bundle_notice.read_bytes(), notice)
+            bundle_notice.write_text("changed", encoding="utf-8")
             with self.assertRaises(subprocess.CalledProcessError):
                 package.verify_mac_payload(unpacked)
 

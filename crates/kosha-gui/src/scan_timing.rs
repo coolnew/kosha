@@ -29,6 +29,7 @@ impl ScanTiming {
         timing.observe(
             Duration::ZERO,
             Progress {
+                recorded_counts: None,
                 entries: 0,
                 dirs_scanned: Some(0),
                 dirs_pending: 0,
@@ -98,6 +99,7 @@ mod tests {
     use super::*;
     fn p(entries: u64) -> Progress {
         Progress {
+            recorded_counts: None,
             entries,
             dirs_scanned: Some(entries / 10),
             dirs_pending: 20,
@@ -153,6 +155,7 @@ mod tests {
         timing.observe(
             Duration::from_secs(61),
             Progress {
+                recorded_counts: None,
                 dirs_scanned: None,
                 ..p(9100)
             },

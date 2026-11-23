@@ -433,7 +433,7 @@ pub struct Duplicates {
     /// `DuplicateReport::over_ceiling`.
     pub over_ceiling: usize,
     pub over_ceiling_up_to: u64,
-    pub max_candidates: usize,
+    pub max_read_bytes: u64,
 }
 
 impl Duplicates {
@@ -465,7 +465,7 @@ impl Duplicates {
             min_size: report.min_size,
             over_ceiling: report.over_ceiling,
             over_ceiling_up_to: report.over_ceiling_up_to,
-            max_candidates: report.max_candidates,
+            max_read_bytes: report.max_read_bytes,
             rows,
             group_of,
             tint_of: FxHashMap::default(),
@@ -630,6 +630,8 @@ pub enum Source {
     Disk,
     /// Read back from a snapshot. This is the past, and it says so everywhere.
     Snapshot(Box<SnapshotSource>),
+    /// A verified remote measurement whose paths are display labels.
+    Remote(Box<kosha_core::snapshot::Meta>),
 }
 
 /// A snapshot being browsed: where it came from and what it says about itself.
@@ -643,8 +645,15 @@ pub struct SnapshotSource {
 impl Source {
     pub fn snapshot(&self) -> Option<&SnapshotSource> {
         match self {
-            Source::Disk => None,
+            Source::Disk | Source::Remote(_) => None,
             Source::Snapshot(one) => Some(one),
+        }
+    }
+
+    pub fn remote(&self) -> Option<&kosha_core::snapshot::Meta> {
+        match self {
+            Self::Remote(meta) => Some(meta),
+            _ => None,
         }
     }
 
@@ -654,7 +663,14 @@ impl Source {
     /// itself, so that adding a third kind of source cannot silently become a
     /// third kind of thing you are allowed to delete files from.
     pub fn is_past(&self) -> bool {
-        matches!(self, Source::Snapshot(_))
+        !matches!(self, Source::Disk)
+    }
+}
+
+impl From<kosha_core::snapshot::RemoteRecord> for Ready {
+    fn from(record: kosha_core::snapshot::RemoteRecord) -> Self {
+        let (meta, tree) = record.into_parts();
+        Self::from_source(Arc::new(tree), Source::Remote(Box::new(meta)))
     }
 }
 
@@ -1248,6 +1264,26 @@ mod tests {
 
     fn name(ready: &Ready, id: NodeId) -> String {
         kosha_core::format::printable(&ready.tree.name_lossy(id)).into_owned()
+    }
+
+    #[test]
+    fn verified_ssh_reply_installs_as_a_read_only_remote_source() {
+        use kosha_core::snapshot::{self, Meta, ReadLimits, RemoteRecord};
+
+        let (_directory, original) = fixture();
+        let meta = Meta::of(&original.tree, std::time::UNIX_EPOCH, "Peer label");
+        let mut bytes = Vec::new();
+        snapshot::write(&original.tree, &meta, &mut bytes).unwrap();
+        let record = RemoteRecord::read(bytes.as_slice(), ReadLimits::default()).unwrap();
+        let remote = Ready::from(record);
+        assert!(remote.source.is_past());
+        assert!(remote.source.snapshot().is_none());
+        assert_eq!(remote.source.remote().unwrap().label, "SSH snapshot");
+        assert_eq!(
+            remote.tree.root_path(),
+            std::path::Path::new("[SSH snapshot]")
+        );
+        assert_eq!(remote.tree.total_logical(), original.tree.total_logical());
     }
 
     /// A text box has the keyboard and nothing modal is open.

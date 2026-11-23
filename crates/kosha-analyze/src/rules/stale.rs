@@ -195,8 +195,11 @@ impl Rule for LogFiles {
 /// interesting part in the middle of the name, so an extension test alone is
 /// not enough.
 fn is_log_name(tree: &SizeTree, id: NodeId) -> bool {
-    let name = tree.name_lossy(id).to_ascii_lowercase();
-    name.ends_with(".log") || name.contains(".log.")
+    tree.name(id)
+        .as_encoded_bytes()
+        .split(|&byte| byte == b'.')
+        .skip(1)
+        .any(|part| part.eq_ignore_ascii_case(b"log"))
 }
 
 /// Virtual machine and container disk images.

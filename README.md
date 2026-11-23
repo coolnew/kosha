@@ -196,6 +196,8 @@ dependencies; Linux prerequisites are in the [build guide](docs/manual/linux.md#
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
 
+If you plan to share a macOS build, see [signing and notarizing your own macOS build](CONTRIBUTING.md#distributing-your-own-macos-build).
+
 Read the [website and searchable manual](https://coolnew.github.io/kosha/),
 [measured coverage report](https://coolnew.github.io/kosha/coverage/),
 [test quality and coverage scope](docs/manual/quality-and-coverage.md),

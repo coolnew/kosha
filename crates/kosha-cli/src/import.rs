@@ -20,6 +20,7 @@ kosha import — keep another tool's listing as a record kosha can browse
 USAGE:
     kosha import --from ncdu FILE [--label TEXT] [--max-input-bytes N]
     kosha import --from rclone FILE|- [--label TEXT] [--root TEXT]
+    kosha import --from qdirstat FILE|- [--label TEXT]
 
 Reads an ncdu JSON export (`ncdu -o FILE`), uncompressed, gzip-compressed or
 zstd-compressed (`ncdu -co FILE`), and keeps it in the snapshot folder as an
@@ -28,7 +29,7 @@ and not measured by kosha. Nothing named inside the listing is opened, and no
 program is run. ncdu's binary export (`ncdu -O`) is not read.
 
 OPTIONS:
-    --from FORMAT        The listing's format: ncdu, rclone or auto
+    --from FORMAT        The listing's format: ncdu, rclone, qdirstat or auto
     --out FILE           Write a new snapshot to FILE instead of the snapshot store
     --label TEXT         Name the record (optional)
     --root TEXT          Source root for rclone (optional)
@@ -62,6 +63,7 @@ pub struct Args {
 enum ListingFormat {
     Ncdu,
     Rclone,
+    Qdirstat,
     Auto,
 }
 
@@ -95,7 +97,7 @@ pub fn parse(argv: impl Iterator<Item = String>) -> Result<Parsed, String> {
             "--from" => {
                 from = Some(
                     argv.next()
-                        .ok_or("--from needs a format: ncdu, rclone or auto")?,
+                        .ok_or("--from needs a format: ncdu, rclone, qdirstat or auto")?,
                 )
             }
             "--label" => label = argv.next().ok_or("--label needs a name")?,
@@ -140,15 +142,23 @@ pub fn parse(argv: impl Iterator<Item = String>) -> Result<Parsed, String> {
     let format = match from.as_deref() {
         Some("ncdu") => ListingFormat::Ncdu,
         Some("rclone") => ListingFormat::Rclone,
+        Some("qdirstat") => ListingFormat::Qdirstat,
         Some("auto") => ListingFormat::Auto,
         Some(other) => {
             return Err(format!(
-                "unknown import format `{other}`; choose ncdu, rclone or auto"
+                "unknown import format `{other}`; choose ncdu, rclone, qdirstat or auto"
             ));
         }
-        None => return Err("kosha import needs --from ncdu or --from rclone".into()),
+        None => {
+            return Err(
+                "kosha import needs --from ncdu, --from rclone, --from qdirstat or --from auto"
+                    .into(),
+            );
+        }
     };
-    if format == ListingFormat::Ncdu && (root.is_some() || tool.is_some() || observed.is_some()) {
+    if matches!(format, ListingFormat::Ncdu | ListingFormat::Qdirstat)
+        && (root.is_some() || tool.is_some() || observed.is_some())
+    {
         return Err("--root, --tool and --observed-at require --from rclone or --from auto".into());
     }
     let input = input.ok_or("kosha import needs a file to read, or - for standard input")?;
@@ -209,6 +219,9 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             kosha_import::import_ncdu(reader, &name, &args.label, now, &args.limits)
         }
         ListingFormat::Rclone => kosha_import::import_rclone(reader, &source, now, &args.limits),
+        ListingFormat::Qdirstat => {
+            kosha_import::import_qdirstat(reader, &name, &args.label, now, &args.limits)
+        }
         ListingFormat::Auto => kosha_import::import_auto(reader, &source, now, &args.limits),
     }
     .map_err(|error| format!("{}: {error}", format::printable(&name)))?;
@@ -216,12 +229,10 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .meta
         .import
         .as_ref()
-        .is_some_and(|import| import.format == "ncdu-json")
+        .is_some_and(|import| import.format != "rclone-lsjson")
         && (args.root.is_some() || args.tool.is_some() || args.observed.is_some())
     {
-        return Err(
-            "the detected listing is ncdu; --root, --tool and --observed-at apply to rclone".into(),
-        );
+        return Err("--root, --tool and --observed-at apply to rclone listings".into());
     }
     let path = if let Some(destination) = &args.out {
         let parent = destination
@@ -293,6 +304,7 @@ pub fn run(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         ("sizes not recorded", import.unknown_size),
         ("duplicate names", import.duplicate_paths),
         ("synthesized folders", import.synthesized_dirs),
+        ("lossy names", import.lossy_names),
     ] {
         if count > 0 {
             sayln!("  {what:<20}{}", format::count(count));

@@ -72,6 +72,9 @@ use crate::node::{Flags, Node};
 use crate::owner::{Owner, OwnerId, OwnerKind, Owners};
 use crate::tree::{ScanStats, SizeTree, Strategy};
 
+mod limited;
+pub use limited::{ReadLimits, RemoteRecord, read_limited};
+
 /// First eight bytes of every snapshot file.
 pub const MAGIC: &[u8; 8] = b"KOSHASNP";
 
@@ -117,6 +120,8 @@ pub enum ReadError {
     Newer { found: u32 },
     #[error("the snapshot is damaged: {0}")]
     Damaged(&'static str),
+    #[error("the snapshot exceeds the {resource} limit of {max}")]
+    Limit { resource: &'static str, max: u64 },
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -681,7 +686,7 @@ pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
     let (format, header) = read_header_bytes(&mut input).map_err(cut_short(BEFORE_HEADER))?;
     let meta = decode_header(format, &header)?;
     let mut body = ZlibDecoder::new(input);
-    let tree = read_body(&meta, format, &mut body).map_err(cut_short(BEFORE_TREE))?;
+    let tree = read_body(&meta, format, &mut body, None).map_err(cut_short(BEFORE_TREE))?;
 
     // Read *past* the tree, which is what makes the checksum mean anything:
     // zlib verifies its Adler-32 when it reaches the end, and stopping as soon
@@ -694,8 +699,12 @@ pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
     // it: deflate turns a quarter of a megabyte of zeros into a quarter of a
     // gigabyte, so the file that made kosha ask the system for 256 MiB was
     // 255 KiB long. A byte is enough to tell "the end" from "more".
-    let mut probe = [0u8; 1];
-    match body.read(&mut probe) {
+    finish_body(&mut body)?;
+    Ok((meta, tree))
+}
+
+fn finish_body(body: &mut impl Read) -> Result<(), ReadError> {
+    match body.read(&mut [0]) {
         Ok(0) => {}
         Ok(_) => return Err(ReadError::Damaged("there is more here than a tree")),
         // Two different files fail here and they deserve two different
@@ -714,7 +723,7 @@ pub fn read<R: Read>(mut input: R) -> Result<(Meta, SizeTree), ReadError> {
         }
     }
 
-    Ok((meta, tree))
+    Ok(())
 }
 
 fn read_header_bytes<R: Read>(input: &mut R) -> Result<(u32, Vec<u8>), ReadError> {
@@ -866,40 +875,56 @@ fn decode_header(format: u32, buf: &[u8]) -> Result<Meta, ReadError> {
     Ok(meta)
 }
 
-fn read_body<R: Read>(meta: &Meta, format: u32, input: &mut R) -> Result<SizeTree, ReadError> {
-    let count = read_u64(input)? as usize;
+fn read_body<R: Read>(
+    meta: &Meta,
+    format: u32,
+    input: &mut R,
+    limits: Option<ReadLimits>,
+) -> Result<SizeTree, ReadError> {
+    let declared_count = read_u64(input)?;
+    if let Some(limits) = limits {
+        limited::check("node count", declared_count, limits.max_nodes)?;
+    }
     // The header says how many entries there were, and the body says it again.
     // They must agree: a file whose two halves disagree is damaged, and
     // trusting the second would build a tree the listing described wrongly.
-    if count as u64 != meta.entries {
+    if declared_count != meta.entries {
         return Err(ReadError::Damaged("the header and the tree disagree"));
     }
 
     // A `NodeId` is a u32, so a tree cannot hold more than that many entries
     // however confidently the file claims otherwise.
-    if count > u32::MAX as usize {
+    if declared_count > u64::from(u32::MAX) {
         return Err(ReadError::Damaged("more entries than an arena can hold"));
     }
+    let count = declared_count as usize;
     // Capacity from a *file's* number is how a damaged byte becomes a
     // multi-exabyte allocation and a hard abort rather than an error message.
     // Reserve something sensible and let it grow as the bytes actually arrive.
     let mut nodes = Vec::with_capacity(count.min(64 * 1024));
-    let mut raw = [0u8; RECORD];
-    for _ in 0..count {
-        input.read_exact(&mut raw)?;
-        nodes.push(Node {
-            logical: u64::from_le_bytes(raw[0..8].try_into().unwrap()),
-            allocated: u64::from_le_bytes(raw[8..16].try_into().unwrap()),
-            parent: u32::from_le_bytes(raw[16..20].try_into().unwrap()),
-            first_child: u32::from_le_bytes(raw[20..24].try_into().unwrap()),
-            child_count: u32::from_le_bytes(raw[24..28].try_into().unwrap()),
-            subtree_files: u32::from_le_bytes(raw[28..32].try_into().unwrap()),
-            name_off: u32::from_le_bytes(raw[32..36].try_into().unwrap()),
-            mtime: u32::from_le_bytes(raw[36..40].try_into().unwrap()),
-            name_len: u16::from_le_bytes(raw[40..42].try_into().unwrap()),
-            flags: Flags::from_bits(raw[42]),
-            depth: raw[43],
-        });
+    // Pull several complete records per decoder call. Keep the scratch size
+    // fixed and stop at the end of the node array before reading the names.
+    const RECORDS_PER_READ: usize = 256;
+    let mut buffer = [0u8; RECORD * RECORDS_PER_READ];
+    for first in (0..count).step_by(RECORDS_PER_READ) {
+        let records = (count - first).min(RECORDS_PER_READ);
+        let block = &mut buffer[..records * RECORD];
+        input.read_exact(block)?;
+        for raw in block.as_chunks::<RECORD>().0 {
+            nodes.push(Node {
+                logical: u64::from_le_bytes(raw[0..8].try_into().unwrap()),
+                allocated: u64::from_le_bytes(raw[8..16].try_into().unwrap()),
+                parent: u32::from_le_bytes(raw[16..20].try_into().unwrap()),
+                first_child: u32::from_le_bytes(raw[20..24].try_into().unwrap()),
+                child_count: u32::from_le_bytes(raw[24..28].try_into().unwrap()),
+                subtree_files: u32::from_le_bytes(raw[28..32].try_into().unwrap()),
+                name_off: u32::from_le_bytes(raw[32..36].try_into().unwrap()),
+                mtime: u32::from_le_bytes(raw[36..40].try_into().unwrap()),
+                name_len: u16::from_le_bytes(raw[40..42].try_into().unwrap()),
+                flags: Flags::from_bits(raw[42]),
+                depth: raw[43],
+            });
+        }
     }
 
     // Same rule as the arena above, and this one is why the rule exists: a
@@ -908,6 +933,9 @@ fn read_body<R: Read>(meta: &Meta, format: u32, input: &mut R) -> Result<SizeTre
     // error can be returned. `take` bounds the read and the vector grows only
     // as far as there is data.
     let names_len = read_u64(input)?;
+    if let Some(limits) = limits {
+        limited::check("name-arena byte", names_len, limits.max_name_bytes)?;
+    }
     // And the claim itself is checked before a byte of it is read. The arena
     // holds one name per entry and no name twice — that is what the scanner
     // appends and what every image builder pushes — and a name is at most
@@ -949,6 +977,9 @@ fn read_body<R: Read>(meta: &Meta, format: u32, input: &mut R) -> Result<SizeTre
     // the query engine, and a damaged file must not become a panic three
     // screens later.
     validate(&nodes, names_len).map_err(ReadError::Damaged)?;
+    if limits.is_some() {
+        limited::check_tree(&nodes, &names)?;
+    }
 
     Ok(SizeTree::from_parts(
         nodes,
@@ -1043,6 +1074,38 @@ pub(crate) fn validate(nodes: &[Node], names_len: usize) -> Result<(), &'static 
         }
     }
     Ok(())
+}
+
+pub(crate) fn check_child_layout(nodes: &[Node]) -> Result<(), &'static str> {
+    if nodes.is_empty() || nodes[0].parent != 0 || !nodes[0].is_dir() {
+        return Err("invalid snapshot root");
+    }
+    // Every nonroot node must belong to its own parent's range. The total
+    // number of edges proves no range lists a child a second time.
+    let mut edges = 0;
+    for (index, node) in nodes.iter().enumerate() {
+        edges += u64::from(node.child_count);
+        if node.child_count != 0
+            && (!node.is_dir()
+                || u64::from(node.first_child) + u64::from(node.child_count) > nodes.len() as u64)
+        {
+            return Err("invalid snapshot child range");
+        }
+        if index != 0 {
+            let parent = node.parent as usize;
+            if parent >= index || !nodes[parent].child_range().contains(&index) {
+                return Err("invalid snapshot parent or child range");
+            }
+        }
+    }
+    if edges != nodes.len() as u64 - 1 {
+        return Err("overlapping snapshot child ranges");
+    }
+    Ok(())
+}
+
+pub(crate) fn valid_path_component(name: &[u8]) -> bool {
+    !matches!(name, b"" | b"." | b"..") && !name.contains(&b'/') && !name.contains(&0)
 }
 
 fn stats_from(meta: &Meta) -> ScanStats {

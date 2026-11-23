@@ -21,8 +21,10 @@ use std::time::SystemTime;
 use kosha_core::SizeTree;
 use kosha_core::snapshot::Meta;
 
+pub mod checksums;
 pub mod decompress;
 mod ncdu;
+mod qdirstat;
 mod rclone;
 
 pub use decompress::Compression;
@@ -70,7 +72,7 @@ impl Default for Limits {
 pub enum ImportError {
     #[error("the input is empty")]
     Empty,
-    #[error("unrecognized listing format; specify --from ncdu or --from rclone")]
+    #[error("unrecognized listing format; specify --from ncdu, --from rclone or --from qdirstat")]
     ListingFormat,
     #[error(
         "this is ncdu's binary export (`ncdu -O`), which kosha does not read; \
@@ -165,6 +167,25 @@ pub fn import_ncdu<R: Read + Send>(
     })
 }
 
+/// Import a plain or compressed QDirStat cache.
+pub fn import_qdirstat<R: Read + Send>(
+    input: R,
+    source_name: &str,
+    label: &str,
+    now: SystemTime,
+    limits: &Limits,
+) -> Result<Imported, ImportError> {
+    on_import_worker(move || {
+        qdirstat::import(
+            open_listing(input, limits)?,
+            source_name,
+            label,
+            now,
+            limits,
+        )
+    })
+}
+
 /// Detect a supported listing after decompression and read it from the same stream.
 pub fn import_auto<R: Read + Send>(
     input: R,
@@ -193,6 +214,7 @@ pub fn import_auto<R: Read + Send>(
                 ncdu::import(opened, source.source_name, source.label, now, &limits)
             }
             Some(b'{' | b']') => rclone::import_opened(opened, source, now, &limits),
+            Some(b'q') => qdirstat::import(opened, source.source_name, source.label, now, &limits),
             _ => Err(ImportError::ListingFormat),
         }
     })

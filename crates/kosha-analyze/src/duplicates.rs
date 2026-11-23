@@ -38,16 +38,16 @@ pub struct DuplicateOptions {
     /// Files below this size are ignored. Deduplicating thumbnails is not worth
     /// anybody's disk I/O.
     pub min_size: u64,
-    /// Stop after this many candidate files, so a pathological tree cannot turn
-    /// into an unbounded read of the whole volume.
-    pub max_candidates: usize,
+    /// Estimated bytes for both hashing passes. Finish the same-size group
+    /// that spends the remaining budget so matches within it stay complete.
+    pub max_read_bytes: u64,
 }
 
 impl Default for DuplicateOptions {
     fn default() -> Self {
         DuplicateOptions {
             min_size: 1024 * 1024,
-            max_candidates: 200_000,
+            max_read_bytes: 8 << 30,
         }
     }
 }
@@ -92,7 +92,7 @@ pub struct DuplicateReport {
     /// the options as well.
     pub min_size: u64,
     /// Same-size files that were not examined because the hunt reached its
-    /// candidate ceiling ([`DuplicateOptions::max_candidates`]).
+    /// estimated read budget ([`DuplicateOptions::max_read_bytes`]).
     ///
     /// Candidates are taken largest first, so what is left out is the smallest
     /// same-size groups. Counted and reported, never silent: without it a hunt
@@ -102,8 +102,8 @@ pub struct DuplicateReport {
     /// The largest size among the files counted in `over_ceiling`: everything
     /// left out was at most this big. Zero when nothing was left out.
     pub over_ceiling_up_to: u64,
-    /// The ceiling that applied, so a report can name it.
-    pub max_candidates: usize,
+    /// The estimated read budget that applied.
+    pub max_read_bytes: u64,
     /// True when the caller stopped the hunt before it had looked at
     /// everything.
     ///
@@ -216,7 +216,7 @@ fn run(
 ) -> DuplicateReport {
     let mut report = DuplicateReport {
         min_size: opts.min_size,
-        max_candidates: opts.max_candidates,
+        max_read_bytes: opts.max_read_bytes,
         ..DuplicateReport::default()
     };
 
@@ -254,7 +254,7 @@ fn run(
     // truncates the least valuable candidates rather than an arbitrary slice.
     candidates.sort_unstable_by_key(|(size, _)| std::cmp::Reverse(*size));
 
-    let mut budget = opts.max_candidates;
+    let mut budget = opts.max_read_bytes;
     candidates.retain(|(size, group)| {
         if budget == 0 {
             // Sorted largest first, so the first one dropped is the biggest.
@@ -262,7 +262,8 @@ fn run(
             report.over_ceiling_up_to = report.over_ceiling_up_to.max(*size);
             return false;
         }
-        budget = budget.saturating_sub(group.len());
+        budget =
+            budget.saturating_sub(estimated_read_bytes(*size).saturating_mul(group.len() as u64));
         true
     });
     report.candidates_examined = candidates.iter().map(|(_, g)| g.len()).sum();
@@ -446,6 +447,20 @@ fn finish(tree: &SizeTree, mut nodes: Vec<NodeId>, size: u64) -> DuplicateGroup 
         nodes,
         size,
         reclaimable,
+    }
+}
+
+/// Worst-case bytes scheduled for an unchanged file of this recorded size.
+pub fn estimated_read_bytes(size: u64) -> u64 {
+    let edge_bytes = if size <= EDGE_BYTES as u64 {
+        size
+    } else {
+        (2 * EDGE_BYTES) as u64
+    };
+    if edges_cover_everything(size) {
+        edge_bytes
+    } else {
+        edge_bytes.saturating_add(size)
     }
 }
 

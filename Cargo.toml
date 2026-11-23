@@ -8,6 +8,8 @@ members = [
     "crates/kosha-query",
     "crates/kosha-search",
     "crates/kosha-import",
+    "crates/kosha-scan-wire",
+    "crates/kosha-remote",
     "crates/kosha-marketplace",
     "crates/kosha-cli",
     "crates/kosha-gui",

@@ -1,9 +1,8 @@
 # Cloud storage and other machines
 
-This page explains what Kosha can show you today about files that live in cloud
-storage or on another computer, and what it cannot. Kosha scans what this
-computer can read locally, and it opens saved snapshots. It has no feature that
-signs in to an online account or connects to another machine.
+Kosha scans folders this computer can read and opens saved snapshots. To
+inspect another machine, transfer its snapshot or [build with SSH
+scanning enabled](#ssh-scanning-in-opt-in-builds).
 
 ## Cloud storage
 
@@ -70,8 +69,8 @@ treat what happens there as untested.
 
 ## Other machines
 
-Kosha cannot scan another machine from inside Kosha. The workflow that works
-today uses Kosha on both machines and a snapshot file. From Kosha 0.13.0, a
+The standard downloads support scanning on the other machine and opening a
+copy of its snapshot here. From Kosha 0.13.0, a
 listing made by ncdu on the other machine can be imported instead; see
 [without Kosha on the other machine](#without-kosha-on-the-other-machine).
 
@@ -134,10 +133,71 @@ Kosha. See [imported listings](snapshots.md#imported-listings).
 
 ![An imported ncdu listing open in Kosha, labelled Imported · ncdu, with insights that say the listing was not measured by Kosha and nothing in it can be acted on](images/gui-imported-listing.png)
 
+### SSH scanning in opt-in builds
+
+SSH scanning is available when you build Kosha from source with the SSH
+Cargo features. Standard downloads use the default build configuration.
+To build both clients and the server command from the repository root:
+
+```sh
+cargo build --release --locked -p kosha-cli -p kosha-gui --features kosha-cli/remote-client,kosha-cli/remote-serve,kosha-gui/remote-client
+```
+
+For a scan host that only serves scans, build `kosha-cli` with
+`--features remote-serve`. Put that host's `kosha` binary on the PATH used
+by noninteractive SSH sessions. Use an SSH account that can read the folder.
+Kosha opens one SSH session and runs the fixed command `kosha serve-scan`.
+
+On the client, enable **SSH access** in Settings. A CLI-only installation
+can set `"ssh-access": true` in [settings.json](settings-and-files.md).
+SSH access defaults to off. Verify the host fingerprint through a trusted
+channel and add the key to a supported known-hosts file. Missing, changed
+and revoked keys stop the connection.
+
+In the desktop command palette, choose **Scan a folder over SSH**. Enter
+the host alias or `user@host:port` and the absolute folder path on the
+scan host, then choose **Review connection**.
+
+![Kosha's centered SSH dialog with host and remote folder fields and a Review connection button](images/ssh-scan-dialog-macos.png)
+
+Check the resolved host, port, user and remote folder before choosing
+**Scan**. In the dialog, Tab moves between fields, Enter runs the primary
+action, and Escape closes the dialog or cancels a scan in progress.
+
+![Kosha's SSH connection review using a synthetic loopback host, with the resolved connection details and optional SSH agent public-key field](images/ssh-connection-review-macos.png)
+
+In a terminal:
+
+```sh
+kosha remote build-box --path /srv/projects
+```
+
+Kosha normally tries configured private key files. To use a key already
+loaded into your agent, provide its public key file in the desktop
+connection review or pass `--agent-key /absolute/path/to/key.pub`.
+On Unix, the agent must be accessible through `SSH_AUTH_SOCK`. On Windows,
+Kosha uses the Windows OpenSSH agent service. A Unix terminal can prompt
+for an encrypted key's passphrase with echo disabled. For an encrypted key
+in the desktop app, unlock it in your agent and select the public key.
+
+The SSH configuration supports direct connections and a subset of
+`~/.ssh/config`, including `Host`, `HostName`, `User`, `Port`,
+`IdentityFile`, `IdentitiesOnly`, `UserKnownHostsFile`,
+`StrictHostKeyChecking yes` and bounded `Include` entries inside `.ssh`.
+Explicit users and ports override the config. Jump hosts, proxy commands
+and host certificates are unavailable. Accepted login keys include
+Ed25519, ECDSA and RSA with SHA-2 signatures. The default user trust files
+are `known_hosts` and `known_hosts2` in `.ssh`. Kosha also checks the
+platform's system trust files and `ssh_known_hosts` in its settings
+directory. A non-default port uses a `[hostname]:port` known-hosts entry.
+
+The desktop shows a read-only SSH snapshot for browsing and search.
+File opening, cleanup and rescan actions against the recorded paths are
+unavailable. Start another SSH scan to refresh the result.
+
 ## What is not available yet
 
 - Scanning online accounts directly.
-- Scanning other machines from inside Kosha.
 - Importing QDirStat listings.
 
 ## Tell us what is missing
@@ -166,15 +226,24 @@ An rclone size of `-1` means unknown. These entries contribute zero, so totals
 can be lower bounds.
 Duplicate names are retained. File actions are unavailable in imported listings.
 
-Use `--from auto` to detect ncdu or rclone input. Use `--out FILE` to save
+Use `--from auto` to detect ncdu, rclone or QDirStat input. Use `--out FILE` to save
 the snapshot at a chosen path. An existing destination is preserved.
+
+## Import a QDirStat cache
+
+![A synthetic QDirStat listing in Kosha on macOS, with apparent sizes and dashes in the On Disk column](images/qdirstat-macos-listing.png)
+
+Use `qdirstat-cache-writer /srv srv.cache.gz` on the source machine, then
+run `kosha import --from qdirstat srv.cache.gz` where you want to browse it.
+The importer accepts plain and gzip caches in formats 1.0 and 2.0. Sizes
+are apparent and each hard-link name contributes its recorded size.
 
 ### Preview a listing in the desktop app
 
 ![The desktop import preview for a synthetic rclone listing](images/rclone-import-sheet.png)
 
 In the desktop app, choose **Import a listing…** under **Snapshots**, select
-an ncdu or rclone listing, and review the summary. You can name the record,
+an ncdu, rclone or QDirStat listing, and review the summary. You can name the record,
 then select **Save** to open it and retain it in the snapshot store. **Cancel**
 dismisses the import before a record is saved.
 

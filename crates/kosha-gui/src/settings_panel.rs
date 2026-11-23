@@ -58,6 +58,9 @@ enum OptionId {
     Mft,
     Image,
     Owners,
+    SshAccess,
+    DuplicateMin,
+    DuplicateBudget,
     Rescan,
     File,
     Version,
@@ -170,6 +173,30 @@ const OPTIONS: &[OptionSpec] = &[
         label: "Record who owns each file",
         description: "Show who is using the disk on a shared machine. The next scan records each file's owner.",
         keywords: "owner owners ownership user users account accounts uid sid permissions shared disk usage",
+        availability: Availability::Always,
+    },
+    OptionSpec {
+        id: OptionId::SshAccess,
+        group: Group::Scanning,
+        label: "SSH access",
+        description: "Allow scans of remote folders over SSH. Off by default.",
+        keywords: "remote network secure shell connection",
+        availability: Availability::Always,
+    },
+    OptionSpec {
+        id: OptionId::DuplicateMin,
+        group: Group::Scanning,
+        label: "Duplicate minimum file size",
+        description: "Files below this size are skipped by the duplicate hunt.",
+        keywords: "duplicates minimum size threshold",
+        availability: Availability::Always,
+    },
+    OptionSpec {
+        id: OptionId::DuplicateBudget,
+        group: Group::Scanning,
+        label: "Duplicate read budget",
+        description: "Estimates bytes for hashing. The final same-size group may exceed the budget.",
+        keywords: "duplicates ceiling budget bytes hash",
         availability: Availability::Always,
     },
     OptionSpec {
@@ -520,6 +547,34 @@ fn render_option(
             |settings| settings.collect_owners = !settings.collect_owners,
         )
         .into_any_element(),
+        OptionId::SshAccess => toggle(palette, spec.label, settings.ssh_access, cx, |settings| {
+            settings.ssh_access = !settings.ssh_access
+        })
+        .into_any_element(),
+        OptionId::DuplicateMin => choice(
+            palette,
+            spec.label,
+            &[
+                ("Any size", settings.duplicate_min_mib == 0),
+                ("1 MiB", settings.duplicate_min_mib == 1),
+                ("16 MiB", settings.duplicate_min_mib == 16),
+            ],
+            cx,
+            |index, settings| settings.duplicate_min_mib = [0, 1, 16][index],
+        )
+        .into_any_element(),
+        OptionId::DuplicateBudget => choice(
+            palette,
+            spec.label,
+            &[
+                ("1 GiB", settings.duplicate_budget_gib == 1),
+                ("8 GiB", settings.duplicate_budget_gib == 8),
+                ("32 GiB", settings.duplicate_budget_gib == 32),
+            ],
+            cx,
+            |index, settings| settings.duplicate_budget_gib = [1, 8, 32][index],
+        )
+        .into_any_element(),
         OptionId::Rescan => ui::primary("rescan", palette, false)
             .child(spec.label)
             .on_click(cx.listener(|this, _, window, cx| {
@@ -863,6 +918,7 @@ mod tests {
         assert_eq!(matches("settings.json"), vec![OptionId::File]);
         assert_eq!(matches("owner next"), vec![OptionId::Owners]);
         assert_eq!(matches("owners"), vec![OptionId::Owners]);
+        assert_eq!(matches("ssh remote"), vec![OptionId::SshAccess]);
     }
 
     #[test]

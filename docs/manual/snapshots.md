@@ -97,7 +97,8 @@ starts no program and makes no network request.
 
 From Kosha 0.14.0, you can also [import an rclone listing](command-line.md#import-an-rclone-listing).
 Choose **Import a listing** under **Snapshots** in the desktop app to preview,
-name and save an ncdu or rclone listing. rclone provides apparent sizes only.
+name and save an ncdu or rclone listing in a dialog. Press Escape to cancel
+reading or close the preview. rclone provides apparent sizes only.
 A listing can retain duplicate paths, which makes path comparison unavailable
 for that record.
 

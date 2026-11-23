@@ -7,6 +7,12 @@ available on Windows, WSL distributions. A drive click opens its last saved scan
 if one exists. Choose **Scan again** or **Ctrl+R** to refresh it. **Choose a
 folder** starts a fresh scan of any accessible folder.
 
+On macOS, mounted volumes under `/Volumes` appear in the sidebar, including
+external USB drives. Switch back to the Kosha window after connecting a drive
+to refresh the list. macOS may ask for permission when you start a scan.
+
+![Kosha on macOS showing an external USB volume named Untitled in the sidebar with its capacity bar](images/macos-external-usb-volume.png)
+
 By default, directory walks do not descend into other mounted filesystems.
 Scan settings can change this. Symbolic links are measured without following
 their targets. A scan describes its chosen scope, not necessarily an entire disk.

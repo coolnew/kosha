@@ -21,10 +21,11 @@
 //! everything depends on and nothing can change — which is the failure mode of
 //! every shared-components module that ever grew past its usefulness.
 
+use gpui_kit::base::{Input, h_flex, input::InputState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    Div, InteractiveElement, IntoElement, ParentElement, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, div, px,
+    App, Div, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, div, px,
 };
 
 use crate::theme::{Palette, metrics};
@@ -96,6 +97,26 @@ pub fn dialog(id: &'static str, palette: &Palette) -> Stateful<Div> {
         .border_1()
         .border_color(palette.hairline)
         .on_click(|_, _, cx| cx.stop_propagation())
+}
+
+pub fn dialog_input(
+    id: &'static str,
+    palette: &Palette,
+    input: &Entity<InputState>,
+    cx: &App,
+) -> Stateful<Div> {
+    h_flex()
+        .id(id)
+        .h(px(36.0))
+        .px(px(9.0))
+        .items_center()
+        .rounded(px(6.0))
+        .bg(palette.canvas)
+        .border_1()
+        .border_color(palette.text_faint)
+        .track_focus(&input.read(cx).focus_handle(cx))
+        .focus(|field| field.border_color(palette.accent))
+        .child(div().flex_1().min_w(px(0.0)).child(Input::new(input)))
 }
 
 /// The shape of a button, without any of its colours.

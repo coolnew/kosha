@@ -548,6 +548,7 @@ pub fn build(
 
         stats.max_depth = stats.max_depth.max(child_depth);
         publish(Progress {
+            recorded_counts: None,
             dirs_scanned: None,
             entries: stats.entries,
             dirs_pending: next.len() as u64,

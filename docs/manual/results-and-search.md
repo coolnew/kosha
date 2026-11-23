@@ -273,9 +273,13 @@ as duplicate. Review copies and locations before acting. These searches are
 unavailable over snapshots and disk-image views, which do not expose file bytes.
 Files stored in the cloud are skipped and counted, not downloaded; see
 [cloud-synced folders](scanning.md#cloud-synced-folders).
-A search takes same-size files, largest first, until it has about 200,000; if a
-very large tree has more, the result line says how many files, up to what size,
-were not checked, so a long list is never mistaken for a complete one.
+In **Settings**, use **Duplicate minimum file size** and **Duplicate read
+budget** to adjust the next hunt. The defaults are 1 MiB per file and an
+estimated 8 GiB of reads. A hunt takes whole same-size groups from largest
+to smallest. The final group can exceed the estimate. When the budget leaves
+groups out, the result line shows how many files and what sizes were omitted.
+
+![Kosha Settings on macOS showing the default duplicate minimum file size and estimated read budget](images/duplicate-macos-settings.png)
 
 Ownership collection is optional. Its view groups recorded usage by account,
 including identifiers the OS cannot resolve to a name. It can add work to a

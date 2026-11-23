@@ -20,7 +20,8 @@ SCHEMA = 'kosha.ci-validation.v1'
 HOSTS = {'Linux':('ubuntu-latest','x86_64-unknown-linux-gnu'),
          'Windows':('windows-latest','x86_64-pc-windows-msvc'),
          'macOS':('macos-latest','aarch64-apple-darwin')}
-RUST_STEPS = {'Check core crates','Test core crates','Build everything','Test GUI','Record reusable native validation','Upload native validation report'}
+RUST_STEPS = {'Check core crates','Test core crates','Build everything','Test GUI',
+              'Test opt-in SSH scanning','Record reusable native validation','Upload native validation report'}
 SHA = re.compile(r'[0-9a-f]{40}')
 
 

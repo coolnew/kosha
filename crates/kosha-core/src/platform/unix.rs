@@ -270,6 +270,60 @@ pub fn disk_usage(path: &Path) -> Option<DiskUsage> {
     })
 }
 
+/// Read cached mount metadata without opening the contents of mounted volumes.
+#[cfg(target_os = "macos")]
+pub fn macos_mounts() -> Vec<(std::path::PathBuf, Option<DiskUsage>)> {
+    use std::ffi::OsStr;
+    use std::mem::MaybeUninit;
+    use std::ptr;
+
+    // SAFETY: the null-buffer form queries the number of mount records.
+    let count = unsafe { libc::getfsstat(ptr::null_mut(), 0, libc::MNT_NOWAIT) };
+    if count <= 0 {
+        return Vec::new();
+    }
+    let capacity = count as usize + 16;
+    let Ok(bytes) = i32::try_from(capacity * size_of::<libc::statfs>()) else {
+        return Vec::new();
+    };
+    let mut records = vec![MaybeUninit::<libc::statfs>::uninit(); capacity];
+    // SAFETY: records is correctly aligned, writable, and bytes is its size.
+    let written = unsafe { libc::getfsstat(records.as_mut_ptr().cast(), bytes, libc::MNT_NOWAIT) };
+    if written <= 0 {
+        return Vec::new();
+    }
+    records
+        .into_iter()
+        .take(written as usize)
+        .filter_map(|record| {
+            // SAFETY: getfsstat filled this record within the reported prefix.
+            let record = unsafe { record.assume_init() };
+            let name: Vec<_> = record
+                .f_mntonname
+                .into_iter()
+                .take_while(|byte| *byte != 0)
+                .map(|byte| byte as u8)
+                .collect();
+            let path = Path::new(OsStr::from_bytes(&name));
+            if path != Path::new("/")
+                && !path
+                    .strip_prefix("/Volumes")
+                    .is_ok_and(|tail| !tail.as_os_str().is_empty())
+            {
+                return None;
+            }
+            let unit = u64::from(record.f_bsize);
+            let total = record.f_blocks.saturating_mul(unit);
+            let usage = (total != 0).then(|| DiskUsage {
+                total,
+                free: record.f_bfree.saturating_mul(unit),
+                available: record.f_bavail.saturating_mul(unit),
+            });
+            Some((path.to_path_buf(), usage))
+        })
+        .collect()
+}
+
 /// Bytes this file occupies on disk, from `st_blocks`.
 ///
 /// Exact here, unlike Windows: the same `lstat` the scanner already does

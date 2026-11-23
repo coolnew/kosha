@@ -77,6 +77,150 @@ fn damaged_creation_table_is_refused_before_allocating_its_claim() {
     assert!(read(&short[..]).is_err());
 }
 
+#[test]
+fn remote_record_replaces_peer_supplied_local_path_and_labels() {
+    let (directory, tree) = fixture();
+    let mut meta = Meta::of(&tree, UNIX_EPOCH, "peer label");
+    meta.root = directory.path().join("peer-selected-root");
+    meta.tool = "peer tool".into();
+    meta.image = "peer image".into();
+    let mut wire = Vec::new();
+    write(&tree, &meta, &mut wire).unwrap();
+    let record = RemoteRecord::read(wire.as_slice(), ReadLimits::default()).unwrap();
+    assert_eq!(record.meta().label, "SSH snapshot");
+    assert_eq!(record.meta().root, Path::new("[SSH snapshot]"));
+    assert_eq!(record.tree().root_path(), record.meta().root.as_path());
+    assert!(record.meta().tool.is_empty());
+    assert!(record.meta().image.is_empty());
+    assert!(record.tree().stats().image.is_none());
+    assert_eq!(record.tree().total_logical(), tree.total_logical());
+}
+
+#[test]
+fn bounded_snapshot_rejects_import_metadata_in_a_version_two_reply() {
+    let (_dir, tree) = fixture();
+    let mut meta = Meta::of(&tree, UNIX_EPOCH, "remote fixture");
+    meta.import = Some(Provenance::default());
+    let mut wire = Vec::new();
+    write(&tree, &meta, &mut wire).unwrap();
+    wire[8..12].copy_from_slice(&FORMAT.to_le_bytes());
+    assert!(read(wire.as_slice()).unwrap().0.import.is_some());
+    assert!(matches!(
+        read_limited(wire.as_slice(), ReadLimits::default()),
+        Err(ReadError::Damaged(
+            "a remote scan reply must describe a scan"
+        ))
+    ));
+}
+
+#[test]
+fn bounded_snapshot_applies_each_limit_at_exact_boundaries() {
+    let (_dir, tree) = fixture();
+    let meta = Meta::of(&tree, taken_at(1_700_000_000), "remote fixture");
+    let mut bytes = Vec::new();
+    write(&tree, &meta, &mut bytes).unwrap();
+    let (_, body) = header_and_body(&bytes);
+    let limits = ReadLimits {
+        max_wire_bytes: bytes.len() as u64,
+        max_body_bytes: body.len() as u64,
+        max_nodes: tree.len() as u64,
+        max_name_bytes: tree.names_bytes().len() as u64,
+    };
+    let (restored, result) = read_limited(bytes.as_slice(), limits).unwrap();
+    assert_eq!(restored.label, meta.label);
+    assert_eq!(result.total_logical(), tree.total_logical());
+    for (resource, limit) in [
+        (
+            "wire byte",
+            ReadLimits {
+                max_wire_bytes: limits.max_wire_bytes - 1,
+                ..limits
+            },
+        ),
+        (
+            "decoded byte",
+            ReadLimits {
+                max_body_bytes: limits.max_body_bytes - 1,
+                ..limits
+            },
+        ),
+        (
+            "node count",
+            ReadLimits {
+                max_nodes: limits.max_nodes - 1,
+                ..limits
+            },
+        ),
+        (
+            "name-arena byte",
+            ReadLimits {
+                max_name_bytes: limits.max_name_bytes - 1,
+                ..limits
+            },
+        ),
+    ] {
+        assert!(
+            matches!(read_limited(bytes.as_slice(), limit),
+            Err(ReadError::Limit { resource: got, .. }) if got == resource),
+            "{resource}"
+        );
+    }
+
+    for end in 0..bytes.len() {
+        assert!(
+            read_limited(&bytes[..end], limits).is_err(),
+            "accepted {end} bytes"
+        );
+    }
+    let mut trailing = bytes.clone();
+    trailing.push(17);
+    assert!(matches!(
+        read_limited(trailing.as_slice(), ReadLimits::default()),
+        Err(ReadError::Damaged(
+            "there are bytes after the snapshot stream"
+        ))
+    ));
+    assert!(read(trailing.as_slice()).is_ok());
+}
+
+#[test]
+fn bounded_snapshot_rejects_inconsistent_child_layout_depth_and_names() {
+    let (_dir, tree) = fixture();
+    let meta = Meta::of(&tree, taken_at(1_700_000_000), "remote fixture");
+    let mut bytes = Vec::new();
+    write(&tree, &meta, &mut bytes).unwrap();
+    let (header, body) = header_and_body(&bytes);
+    let second_node = 8 + RECORD;
+    let first_file = tree.nodes().iter().position(|node| !node.is_dir()).unwrap();
+    let at = 8 + first_file * RECORD;
+    let name_arena = 8 + tree.len() * RECORD + 8;
+    let name = name_arena + tree.nodes()[first_file].name_off as usize;
+
+    let mut invalid = body.clone();
+    invalid[second_node + 16..second_node + 20].copy_from_slice(&1u32.to_le_bytes());
+    let wrong_parent = padded(&header, &invalid, 0);
+    assert!(read_limited(wrong_parent.as_slice(), ReadLimits::default()).is_err());
+
+    let mut invalid = body.clone();
+    invalid[at + 43] = 255;
+    let wrong_depth = padded(&header, &invalid, 0);
+    assert!(matches!(
+        read_limited(wrong_depth.as_slice(), ReadLimits::default()),
+        Err(ReadError::Damaged(
+            "the tree depth exceeds 255 or is inconsistent"
+        ))
+    ));
+    assert!(read(wrong_depth.as_slice()).is_ok());
+
+    let mut invalid = body;
+    invalid[name] = b'/';
+    let invalid_component = padded(&header, &invalid, 0);
+    assert!(matches!(
+        read_limited(invalid_component.as_slice(), ReadLimits::default()),
+        Err(ReadError::Damaged("invalid snapshot path component"))
+    ));
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_walk_collects_birth_time_from_cached_metadata() {
@@ -312,6 +456,42 @@ fn a_snapshot_round_trips_every_node() {
             restored.name_lossy(id),
             "at {index}"
         );
+    }
+}
+
+#[test]
+fn snapshot_nodes_and_names_cross_a_read_block_boundary() {
+    let mut builder = crate::TreeBuilder::new("root", crate::Entry::default()).unwrap();
+    for index in 0..512 {
+        builder
+            .push(
+                0,
+                &format!("file-{index:04}"),
+                crate::Entry {
+                    logical: index,
+                    allocated: index * 2,
+                    mtime: index as u32,
+                    flags: Flags::default(),
+                },
+            )
+            .unwrap();
+    }
+    let (original, _) = builder
+        .finish(PathBuf::from("root"), ScanStats::default())
+        .unwrap();
+    let (_, restored) = round_trip(&original);
+
+    assert_eq!(restored.len(), 513);
+    assert_eq!(restored.names_bytes(), original.names_bytes());
+    for index in [255, 256, 511, 512] {
+        let id = NodeId::from_index(index);
+        let before = original.node(id);
+        let after = restored.node(id);
+        assert_eq!(
+            (after.logical, after.allocated, after.mtime),
+            (before.logical, before.allocated, before.mtime)
+        );
+        assert_eq!(restored.name(id), original.name(id));
     }
 }
 

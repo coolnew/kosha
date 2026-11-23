@@ -6,7 +6,7 @@
 use std::ffi::OsStr;
 
 use kosha_core::{NodeId, SizeTree};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::context::Context;
 use crate::insight::{Confidence, Insight, RuleId, Severity, Suggested};
@@ -93,18 +93,25 @@ impl Rule for BuildArtifacts {
     }
 
     fn evaluate(&self, tree: &SizeTree, ctx: &Context) -> Vec<Insight> {
-        let mut claimed: FxHashSet<NodeId> = FxHashSet::default();
-        let mut found: Vec<NodeId> = Vec::new();
+        let mut candidates = Vec::new();
+        let mut contains_checkout = FxHashSet::default();
 
-        // Arena order is breadth-first, so a parent is always visited before
-        // its children and `claimed` is populated by the time we need it.
         for index in 0..tree.len() {
             let id = NodeId::from_index(index);
             let node = tree.node(id);
+            let name = tree.name(id);
+            // A linked worktree has a .git file, while an ordinary checkout
+            // typically has a directory. The marker alone is enough reason
+            // to withhold a recursive Trash suggestion.
+            if id != NodeId::ROOT && name.as_encoded_bytes().eq_ignore_ascii_case(b".git") {
+                let mut parent = NodeId::from_index(node.parent as usize);
+                while contains_checkout.insert(parent) && parent != NodeId::ROOT {
+                    parent = NodeId::from_index(tree.node(parent).parent as usize);
+                }
+            }
             if !node.is_dir() || !util::is_countable(tree, id) {
                 continue;
             }
-            let name = tree.name(id);
             let Some(marker) = MARKERS.iter().find(|m| OsStr::new(m.dir) == name) else {
                 continue;
             };
@@ -113,12 +120,17 @@ impl Rule for BuildArtifacts {
                     .siblings
                     .iter()
                     .any(|s| tree.has_sibling_named(id, OsStr::new(s)));
-            if !proven {
-                continue;
+            if proven {
+                candidates.push(id);
             }
-            // A node_modules inside a node_modules is already inside the bytes
-            // we are about to report.
-            if util::has_claimed_ancestor(tree, id, &claimed) {
+        }
+
+        // Filter before claiming descendants. A protected parent can contain
+        // legitimate build artifacts below the checkout root.
+        let mut claimed = FxHashSet::default();
+        let mut found = Vec::new();
+        for id in candidates {
+            if contains_checkout.contains(&id) || util::has_claimed_ancestor(tree, id, &claimed) {
                 continue;
             }
             claimed.insert(id);
@@ -244,30 +256,39 @@ impl Rule for PackageManagerCache {
             return Vec::new();
         };
 
-        // Only build a path for nodes whose name could possibly end a pattern.
-        // Path reconstruction is cheap but not free, and this filter takes it
-        // from every directory in the tree down to a handful.
-        let mut insights = Vec::new();
-        for pattern in CACHE_DIRS {
-            let target = home.join(pattern.rel);
-            let Some(leaf) = target.file_name() else {
+        let targets: Vec<_> = CACHE_DIRS
+            .iter()
+            .map(|pattern| home.join(pattern.rel))
+            .collect();
+        let mut by_leaf: FxHashMap<&OsStr, Vec<usize>> = FxHashMap::default();
+        for (index, path) in targets.iter().enumerate() {
+            if let Some(leaf) = path.file_name() {
+                by_leaf.entry(leaf).or_default().push(index);
+            }
+        }
+
+        // Walk once and reconstruct paths only for eligible directories with
+        // a candidate leaf. Preserve the pattern order and all duplicate paths.
+        let mut findings = vec![Vec::new(); targets.len()];
+        for (index, node) in tree.nodes_slice().iter().enumerate() {
+            if !node.is_dir() || node.allocated < ctx.min_reclaimable {
+                continue;
+            }
+            let id = NodeId::from_index(index);
+            let Some(patterns) = by_leaf.get(tree.name(id)) else {
                 continue;
             };
-
-            for index in 0..tree.len() {
-                let id = NodeId::from_index(index);
-                let node = tree.node(id);
-                if !node.is_dir() || tree.name(id) != leaf || !util::is_countable(tree, id) {
+            if !util::is_countable(tree, id) {
+                continue;
+            }
+            let path = tree.path_of(id);
+            for &pattern_index in patterns {
+                if path != targets[pattern_index] {
                     continue;
                 }
-                if tree.path_of(id) != target {
-                    continue;
-                }
+                let pattern = &CACHE_DIRS[pattern_index];
                 let reclaimable = node.allocated;
-                if reclaimable < ctx.min_reclaimable {
-                    continue;
-                }
-                insights.push(Insight {
+                findings[pattern_index].push(Insight {
                     rule: self.id(),
                     title: pattern.rel.to_string(),
                     subject: "directory".into(),
@@ -285,7 +306,7 @@ impl Rule for PackageManagerCache {
                 });
             }
         }
-        insights
+        findings.into_iter().flatten().collect()
     }
 }
 

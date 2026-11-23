@@ -10,8 +10,9 @@ Kosha is maintained by Neeraj Sharma; its Microsoft Store publisher name is
 **Kosha processes your selected filesystem data locally. It does not automatically
 upload your files, scan results, searches, or snapshots to the developer.**
 File metadata can still be personal information; local processing does not make
-it anonymous. Optional marketplace downloads and visiting the website involve
-third-party network services, explained below.
+it anonymous. Optional marketplace downloads and website visits involve
+third-party network services. Source builds with SSH scanning can connect
+to a machine you choose.
 
 ## Information the app accesses and uses
 
@@ -110,6 +111,22 @@ loading personal recipes or contacting an AI provider. All included metadata
 remains readable to the recipient. This does not sandbox the agent or change
 ordinary CLI write capabilities. See [metadata views](docs/manual/metadata-views.md)
 for current-source availability, limits and retention/sharing responsibilities.
+
+## SSH scanning in opt-in builds
+
+SSH scanning requires an explicit build feature and is off in Settings by
+default. When enabled and requested, the client reads local SSH configuration,
+host keys and selected authentication material. It connects to the named host
+and sends the requested folder path and scan options over SSH. If you select a
+key held by an SSH agent, the agent signs the authentication request locally.
+Private key material stays on the client.
+
+On the scan host, Kosha walks the folder with the SSH account's permissions.
+It returns a read-only snapshot containing paths, sizes and available
+metadata. The scan sends no copies of file contents. The selected SSH host and
+its operator can receive ordinary connection and authentication information
+and can apply their own logging policies. See the
+[opt-in SSH instructions](docs/manual/cloud-and-other-machines.md#ssh-scanning-in-opt-in-builds).
 
 ## Optional marketplace network requests
 

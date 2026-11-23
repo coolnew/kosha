@@ -45,6 +45,10 @@ checks that they agree. Binaries report version, commit and build target.
 4. Rehearse the GitHub release workflow with `workflow_dispatch`. This builds
    archives/checksums as workflow artifacts but does not create a release.
 
+Keep [third-party source notices](THIRD-PARTY-NOTICES.md) aligned with the
+locked dependency versions. The packagers include the notice in offline
+documentation and inside the macOS app bundle.
+
 The hosted release workflow accepts reviewed `coolnew/kosha` source only and
 uses `xtask-release.py --execute` for each host. Verified CI evidence covers
 compatible Rust validation; repository/Python gates and production build/package

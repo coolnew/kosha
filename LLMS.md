@@ -36,6 +36,12 @@ kosha --snapshots
 kosha --caches --export json
 ```
 
+SSH scanning requires a source build with `remote-client` and the user's
+**SSH access** setting. An explicitly approved host running Kosha with
+`remote-serve` can be scanned with `kosha remote HOST --path REMOTE_PATH`.
+The command sends the folder path to that host and reports snapshot totals.
+See the [opt-in SSH instructions](https://coolnew.github.io/kosha/manual/cloud-and-other-machines/#ssh-scanning-in-opt-in-builds).
+
 Replace `PATH` with the folder or drive to inspect. Pass paths and complete
 queries as separate arguments, preferably using a process argument array.
 
@@ -68,10 +74,22 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
   `NAME.kosha` filenames. Existing local paths win; only missing bare filenames
   fall back to the explicit store. Use `./NAME.kosha` to forbid fallback or a
   full store path to select that copy. Source file/date diagnostics go to stderr.
+- `--dupe-min N` sets the smallest duplicate candidate in bytes (default 1 MiB).
+  `--dupe-budget N` sets an estimated read budget (default 8 GiB). The last
+  same-size group can take the hunt past the budget.
 - `kosha import --from rclone FILE|-` reads JSON from `rclone lsjson -R`.
   Use `--root` to label the source and `--observed-at` to record its observation time.
   Sizes are apparent, and totals are lower bounds when sizes are unknown.
-  Use `--from auto` to detect ncdu or rclone, and `--out FILE` to write a new record at a chosen path.
+- `kosha import --from qdirstat FILE|-` reads plain or gzip QDirStat 1.0 and 2.0 caches.
+  Imported totals use apparent sizes. Use `--from auto` to detect any supported listing
+  and `--out FILE` to write a new record at a chosen path.
+- `kosha duplicate-candidates --algorithm md5 LISTING [LISTING]` reports
+  equal-size checksum candidates from rclone `lsjson -R --hash` output.
+  Two inputs report groups present in both. Only the listing files are read.
+- `kosha compare LEFT RIGHT [--mtime-tolerance SECONDS] [--format jsonl]`
+  compares stored metadata in two explicit snapshot files. Paths are matched
+  byte for byte. Exit codes are 0 for matching metadata, 1 for known differences,
+  and 2 for errors or indeterminate results without known differences.
 - `kosha import --from ncdu FILE|-` (0.13.0+) reads an ncdu JSON export (plain,
   gzip or zstd) into the snapshot store. It runs no program and opens no listed
   path. Imported records report `source: imported; measured_by_kosha=false` on

@@ -279,6 +279,7 @@ fn read_ntfs(
         .read_table(
             |records| {
                 publish(Progress {
+                    recorded_counts: None,
                     dirs_scanned: None,
                     entries: records,
                     dirs_pending: 0,

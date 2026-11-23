@@ -224,6 +224,7 @@ pub fn build<R: ReadAt>(
             parent.child_count = kept;
 
             publish(Progress {
+                recorded_counts: None,
                 dirs_scanned: None,
                 entries: stats.entries,
                 dirs_pending: next.len() as u64,

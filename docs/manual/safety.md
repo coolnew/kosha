@@ -15,6 +15,10 @@ do not automatically enable Read-write mode.
 
 ## Review the plan
 
+The built-in Build output insight skips any candidate containing a Git
+checkout marker. This includes linked worktrees, which use a `.git` file.
+Build artifacts inside a checkout can still appear as separate candidates.
+
 For workflow-specific advice and reviewed AI prompts, see [the cleanup
 guide](cleanup-guide.md). Browser history time ranges belong in the browser's
 own controls. The guide does not execute cleanup or bypass modes.

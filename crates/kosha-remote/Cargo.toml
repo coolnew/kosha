@@ -1,0 +1,27 @@
+[package]
+name = "kosha-remote"
+description = "Opt-in SSH transport for read-only Kosha scans."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+ssh = ["dep:kosha-core", "dep:kosha-scan-wire", "dep:libc", "dep:ring", "dep:russh", "dep:thiserror", "dep:tokio", "dep:zeroize"]
+
+[dependencies]
+kosha-core = { workspace = true, optional = true }
+kosha-scan-wire = { path = "../kosha-scan-wire", version = "0.14.0", optional = true }
+russh = { version = "=0.65.4", default-features = false, features = ["ring", "rsa"], optional = true }
+ring = { version = "=0.17.14", optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }
+thiserror = { workspace = true, optional = true }
+zeroize = { version = "1.9", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

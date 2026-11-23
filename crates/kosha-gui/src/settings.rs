@@ -197,10 +197,14 @@ pub struct Settings {
     /// question nobody asked, and because on Windows the ordinary walk pays a
     /// call per entry for it. Free in an MFT scan, and nearly free on Unix.
     pub collect_owners: bool,
+    /// Allow opt-in SSH scans. This setting is also read by the CLI.
+    pub ssh_access: bool,
 
     // --- analysis -----------------------------------------------------------
     /// Findings smaller than this are not worth showing.
     pub min_reclaimable_mb: u64,
+    pub duplicate_min_mib: u64,
+    pub duplicate_budget_gib: u64,
     pub stale_installer_days: u32,
     pub cold_file_days: u32,
     /// Megabytes, to match `min_reclaimable_mb`: a settings file people edit
@@ -233,7 +237,10 @@ impl Default for Settings {
             read_mft: scan.use_mft,
             read_image: scan.use_image,
             collect_owners: scan.collect_owners,
+            ssh_access: false,
             min_reclaimable_mb: analysis.min_reclaimable / (1024 * 1024),
+            duplicate_min_mib: 1,
+            duplicate_budget_gib: 8,
             stale_installer_days: analysis.stale_installer_days,
             cold_file_days: analysis.cold_file_days,
             cold_file_mb: analysis.cold_file_bytes / (1024 * 1024),
@@ -256,6 +263,13 @@ pub const MAX_SAVED_QUERIES: usize = 40;
 pub const MAX_SAVED_SCOPES: usize = 12;
 
 impl Settings {
+    pub fn duplicate_options(&self) -> kosha_analyze::duplicates::DuplicateOptions {
+        kosha_analyze::duplicates::DuplicateOptions {
+            min_size: self.duplicate_min_mib.saturating_mul(1 << 20),
+            max_read_bytes: self.duplicate_budget_gib.saturating_mul(1 << 30),
+        }
+    }
+
     pub fn units(&self) -> Units {
         self.units.into()
     }
@@ -553,6 +567,31 @@ mod tests {
     /// they call the same function against the same path, which is what two
     /// windows do.
     #[test]
+    fn duplicate_settings_default_and_round_trip() {
+        let legacy: Settings = serde_json::from_str("{}").unwrap();
+        let options = legacy.duplicate_options();
+        assert_eq!(
+            options.min_size,
+            kosha_analyze::duplicates::DuplicateOptions::default().min_size
+        );
+        assert_eq!(
+            options.max_read_bytes,
+            kosha_analyze::duplicates::DuplicateOptions::default().max_read_bytes
+        );
+
+        let edited = Settings {
+            duplicate_min_mib: 16,
+            duplicate_budget_gib: 32,
+            ..legacy
+        };
+        let restored: Settings =
+            serde_json::from_str(&serde_json::to_string(&edited).unwrap()).unwrap();
+        let options = restored.duplicate_options();
+        assert_eq!(options.min_size, 16 << 20);
+        assert_eq!(options.max_read_bytes, 32 << 30);
+    }
+
+    #[test]
     fn two_windows_saving_at_once() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
@@ -767,6 +806,20 @@ mod tests {
         assert_eq!(settings.scan_options().dedup_hardlinks, Some(true));
         // Ticked, it dedups even where the walk would have to pay.
         assert!(settings.scan_options().dedups_hardlinks(false));
+    }
+
+    #[test]
+    fn ssh_access_is_off_for_old_settings_and_round_trips() {
+        let old: Settings = serde_json::from_str(r#"{"units":"decimal"}"#).unwrap();
+        assert!(!old.ssh_access);
+        let enabled = Settings {
+            ssh_access: true,
+            ..old
+        };
+        let serialized = serde_json::to_value(&enabled).unwrap();
+        assert_eq!(serialized["ssh-access"], true);
+        let restored: Settings = serde_json::from_value(serialized).unwrap();
+        assert!(restored.ssh_access);
     }
 
     #[test]

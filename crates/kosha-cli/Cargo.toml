@@ -22,7 +22,10 @@ kosha-core.workspace = true
 kosha-view.workspace = true
 kosha-analyze.workspace = true
 kosha-query.workspace = true
+kosha-remote = { path = "../kosha-remote", version = "0.14.0", features = ["ssh"], optional = true }
 kosha-search.workspace = true
+kosha-scan-wire = { path = "../kosha-scan-wire", version = "0.14.0", optional = true }
+crossbeam-channel = { workspace = true, optional = true }
 kosha-import.workspace = true
 kosha-marketplace.workspace = true
 ctrlc = "3"
@@ -31,6 +34,10 @@ serde.workspace = true
 sha2 = "0.10"
 # New view artifacts use atomic no-clobber publication; also used by fixtures.
 tempfile = "3"
+
+[features]
+remote-serve = ["dep:kosha-scan-wire", "dep:crossbeam-channel"]
+remote-client = ["dep:kosha-remote", "dep:kosha-scan-wire"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

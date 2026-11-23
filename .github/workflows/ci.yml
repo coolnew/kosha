@@ -91,6 +91,11 @@ jobs:
       - name: Test GUI
         run: cargo test --locked -p kosha-gui
 
+      - name: Test opt-in SSH scanning
+        run: >
+          cargo test --locked -p kosha-scan-wire -p kosha-remote -p kosha-cli -p kosha-gui
+          --features kosha-remote/ssh,kosha-cli/remote-client,kosha-cli/remote-serve,kosha-gui/remote-client
+
       - name: Executable recipe authoring manual
         if: runner.os == 'Linux'
         run: |

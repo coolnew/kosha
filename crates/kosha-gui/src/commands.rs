@@ -83,6 +83,8 @@ pub enum Action {
     /// Two offers that each do one thing beats one that does neither.
     ChooseImage,
     ImportListing,
+    #[cfg(feature = "remote-client")]
+    ScanSsh,
     InstallRecipePack,
     SyncMarketplace,
     DownloadRecipePack(String),
@@ -342,10 +344,19 @@ pub fn all(
 
     commands.push(Command {
         label: "Import a listing…".into(),
-        detail: "Preview and save an ncdu or rclone listing".into(),
+        detail: "Preview and save an ncdu, rclone or QDirStat listing".into(),
         binding: None,
-        keywords: &["import", "listing", "ncdu", "rclone"],
+        keywords: &["import", "listing", "ncdu", "rclone", "qdirstat"],
         action: Action::ImportListing,
+    });
+
+    #[cfg(feature = "remote-client")]
+    commands.push(Command {
+        label: "Scan a folder over SSH…".into(),
+        detail: "Open a read-only record from a remote folder".into(),
+        binding: None,
+        keywords: &["ssh", "remote", "network", "folder"],
+        action: Action::ScanSsh,
     });
 
     if situation.have_tree {

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use crate::ui::tooltip;
 use gpui_kit::base::input::{InputEvent, InputState};
-use gpui_kit::base::{Input, h_flex, v_flex};
+use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Theme, ThemeMode};
@@ -45,6 +45,9 @@ use crate::settings::{Settings, ThemePreference};
 use crate::state::{Duplicates, KeyIntent, PendingAction, Phase, Ready, Search, SortKey, State};
 use crate::theme::{Category, Palette, metrics};
 use crate::treemap::{self, Rect};
+
+#[cfg(feature = "remote-client")]
+mod remote_scan;
 
 /// How fragmented the selected entry is, once somebody has asked.
 ///
@@ -109,6 +112,8 @@ enum ListingImport {
 }
 
 pub struct KoshaApp {
+    #[cfg(feature = "remote-client")]
+    remote_scan: Option<remote_scan::RemoteScan>,
     pub(crate) handoff: Option<crate::handoff::Panel>,
     handoff_task: Option<gpui_kit::Task<()>>,
     treemap_previews: crate::treemap_preview::Store,
@@ -416,6 +421,8 @@ impl KoshaApp {
             state,
             load_generation: 0,
             listing_import: None,
+            #[cfg(feature = "remote-client")]
+            remote_scan: None,
             listing_label: cx.new(|cx| InputState::new(window, cx).placeholder("Listing name")),
             analysis_generation: 0,
             comparison_generation: 0,
@@ -578,6 +585,7 @@ impl KoshaApp {
         // An imported listing's root is somewhere else; "Scan again" would
         // scan a local path that only shares its name.
         let imported = tree.stats().strategy == kosha_core::Strategy::Imported;
+        let remote = ready.source.remote().is_some();
         let incomplete = tree.is_incomplete();
         let cancel = Arc::new(AtomicBool::new(false));
         self.search_cancel = Some(Arc::clone(&cancel));
@@ -611,6 +619,8 @@ impl KoshaApp {
                     if creation_unavailable {
                         warnings.push(if imported {
                             "Creation dates unavailable: imported listings do not record them.".into()
+                        } else if remote {
+                            "Creation dates unavailable in this SSH scan.".into()
                         } else if past {
                             format!("Creation dates unavailable: this saved scan recorded none for its {} entries. Scan again to collect available creation dates and rerun this search.", format::count(coverage.total as u64))
                         } else { "Creation dates unavailable in this scan. This source or scan method did not record them; modification dates are a separate field.".into() });
@@ -635,7 +645,7 @@ impl KoshaApp {
                 this.search_bar.update(cx, |bar, cx| {
                     bar.warning = (!warning.is_empty()).then_some(warning);
                     bar.creation_unavailable = creation_unavailable;
-                    bar.can_rescan_for_creation = creation_unavailable && past && !imported;
+                    bar.can_rescan_for_creation = creation_unavailable && past && !imported && !remote;
                     cx.notify();
                 });
                 cx.notify();
@@ -925,15 +935,11 @@ impl KoshaApp {
         match kosha_core::snapshot::store::remove(&path) {
             Ok(()) => {
                 self.state.notice = Some("Snapshot deleted.".into());
-                // If it was the one on screen, what is on screen is now a tree
-                // with no file behind it. Saying so beats leaving a rail row
-                // highlighted that no longer exists.
-                if self.snapshot_source().is_some_and(|one| one.path == path)
-                    && let Some(ready) = self.state.ready_mut()
-                {
-                    ready.source = crate::state::Source::Disk;
+                // Removing the saved file does not turn its displayed tree
+                // into a live scan. Retain the source and its action guards.
+                if self.snapshot_source().is_some_and(|one| one.path == path) {
                     self.state.notice = Some(
-                        "Snapshot deleted. What is on screen is the tree it held, and nothing now holds it."
+                        "Snapshot deleted. The displayed record remains read-only until you leave it."
                             .into(),
                     );
                 }
@@ -1757,7 +1763,9 @@ impl KoshaApp {
             commands::Action::Scan(path) => self.scan(path, cx),
             commands::Action::ChooseFolder => self.choose_folder(cx),
             commands::Action::ChooseImage => self.choose_image(cx),
-            commands::Action::ImportListing => self.choose_listing(cx),
+            commands::Action::ImportListing => self.choose_listing(window, cx),
+            #[cfg(feature = "remote-client")]
+            commands::Action::ScanSsh => self.open_remote_scan(window, cx),
             commands::Action::InstallRecipePack => self.choose_recipe_pack(cx),
             commands::Action::SyncMarketplace => self.sync_marketplace(cx),
             commands::Action::MarketplaceUnavailable(reason) => {
@@ -1942,13 +1950,12 @@ impl KoshaApp {
         }
         cx.notify();
 
+        let options = self.settings.duplicate_options();
         let task = cx.background_executor().spawn(async move {
-            kosha_analyze::duplicates::Hunt::new(
-                kosha_analyze::duplicates::DuplicateOptions::default(),
-            )
-            .with_cancel(cancel)
-            .with_progress(tx)
-            .run(&tree)
+            kosha_analyze::duplicates::Hunt::new(options)
+                .with_cancel(cancel)
+                .with_progress(tx)
+                .run(&tree)
         });
 
         // The same sixteen-times-a-second poll the scan uses, and for the same
@@ -2039,14 +2046,12 @@ impl KoshaApp {
                     ));
                 }
                 if found.over_ceiling > 0 {
-                    // The hunt opens a bounded number of same-size files, largest
-                    // first; say what that left out rather than let a very large
-                    // tree read as fully checked.
+                    // Name the files omitted by the read budget.
                     summary.push_str(&format!(
-                        " · {} up to {} not checked (a hunt takes same-size files largest first until it has about {})",
+                        " · {} up to {} not checked (estimated read budget: {}, largest sizes first)",
                         format::plural(found.over_ceiling, "file"),
                         format::bytes_in(found.over_ceiling_up_to, units),
-                        format::count(found.max_candidates as u64),
+                        format::bytes_in(found.max_read_bytes, units),
                     ));
                 }
                 if let Some(ready) = this.state.ready_mut() {
@@ -2098,6 +2103,9 @@ impl KoshaApp {
     /// a scan that quietly stopped recording owners next time would send them
     /// back here to wonder why. Settings has the switch to turn it off again.
     pub(crate) fn rescan_with_owners(&mut self, cx: &mut Context<Self>) {
+        if self.refuse_nonlocal_rescan(cx) {
+            return;
+        }
         self.settings.collect_owners = true;
         self.state.scan_options = self.settings.scan_options();
         if let Err(error) = crate::settings::save(&self.settings) {
@@ -2187,6 +2195,10 @@ impl KoshaApp {
     /// preference every time the app restarts is the kind of bug users never
     /// manage to report precisely.
     fn settings_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "remote-client")]
+        if !self.settings.ssh_access {
+            self.remote_scan = None;
+        }
         self.state.scan_options = self.settings.scan_options();
 
         match self.settings.theme {
@@ -2255,6 +2267,10 @@ impl KoshaApp {
     /// application that blocks. So it goes to the background pool like
     /// everything else.
     pub(crate) fn open_snapshot(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        #[cfg(feature = "remote-client")]
+        {
+            self.remote_scan = None;
+        }
         self.disarm();
         self.state.cancel_scan();
         self.cancel_search();
@@ -2346,6 +2362,16 @@ impl KoshaApp {
 
     /// Keep the tree on screen as a snapshot.
     pub(crate) fn take_snapshot(&mut self, cx: &mut Context<Self>) {
+        if self
+            .state
+            .ready()
+            .is_some_and(|ready| ready.source.remote().is_some())
+        {
+            self.state.notice =
+                Some("SSH scan results are available for read-only browsing.".into());
+            cx.notify();
+            return;
+        }
         // Explicit records are already kept. An automatic record can be kept
         // in the sidebar, preserving its original observation date and header.
         if self.snapshot_source().is_some_and(|one| !one.automatic) {
@@ -2443,11 +2469,16 @@ impl KoshaApp {
         options: kosha_core::ScanOptions,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(feature = "remote-client")]
+        {
+            self.remote_scan = None;
+        }
         let reference_entries = self
             .state
             .ready()
             .filter(|r| {
-                !r.tree.is_incomplete()
+                r.source.remote().is_none()
+                    && !r.tree.is_incomplete()
                     && kosha_core::snapshot::store::same_root(r.tree.root_path(), &path)
                     && r.tree.stats().cross_filesystems == options.cross_filesystems
             })
@@ -2785,10 +2816,11 @@ impl KoshaApp {
         .detach();
     }
 
-    fn choose_listing(&mut self, cx: &mut Context<Self>) {
+    fn choose_listing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.listing_import.is_some() {
             return;
         }
+        window.focus(&self.focus, cx);
         let prompt = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: true,
             directories: false,
@@ -2885,6 +2917,7 @@ impl KoshaApp {
         }
         self.listing_label
             .update(cx, |input, cx| input.set_value("", window, cx));
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 
@@ -2938,7 +2971,7 @@ impl KoshaApp {
                     let bytes = kosha_core::format::bytes(progress.bytes.load(Ordering::Relaxed));
                     v_flex()
                         .child(format!("Reading listing… {bytes} read"))
-                        .child(cancel)
+                        .child(h_flex().justify_end().child(cancel))
                 }
                 ListingImport::Preview(imported) => {
                     let stats = imported.tree.stats();
@@ -2962,10 +2995,16 @@ impl KoshaApp {
                             })
                         })
                         .child("Save creates a record in the snapshot store.")
-                        .child(Input::new(&self.listing_label))
+                        .child("Listing name")
+                        .child(crate::ui::dialog_input(
+                            "listing-name",
+                            palette,
+                            &self.listing_label,
+                            cx,
+                        ))
                         .child(
-                            h_flex().gap(px(6.0)).child(cancel).child(
-                                crate::ui::button("save-listing-import", palette)
+                            h_flex().justify_end().gap(px(6.0)).child(cancel).child(
+                                crate::ui::primary("save-listing-import", palette, false)
                                     .child("Save")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.save_listing(window, cx)
@@ -2974,7 +3013,24 @@ impl KoshaApp {
                         )
                 }
             };
-        Some(body.p(px(12.0)).bg(palette.surface).into_any_element())
+        Some(
+            crate::ui::scrim("listing-import-scrim", palette)
+                .items_center()
+                .justify_center()
+                .child(
+                    crate::ui::dialog("listing-import-dialog", palette)
+                        .debug_selector(|| "listing-import-dialog".into())
+                        .w(px(500.0))
+                        .max_w(relative(0.92))
+                        .child(
+                            div()
+                                .text_size(px(metrics::TEXT_LG))
+                                .child("Import listing"),
+                        )
+                        .child(body),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Ask for a disk image and read it.
@@ -3033,6 +3089,10 @@ impl KoshaApp {
     /// Browsing a drive prefers its last record. Explicit scan commands and
     /// Shift-click bypass this path, and an unreadable cache is never a wall.
     fn open_drive(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+        #[cfg(feature = "remote-client")]
+        {
+            self.remote_scan = None;
+        }
         self.disarm();
         self.state.cancel_scan();
         if self.is_scanning() {
@@ -3351,6 +3411,16 @@ impl KoshaApp {
     }
 
     fn on_scan_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "remote-client")]
+        if self.handle_remote_scan_key(event, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if event.keystroke.key == "escape" && self.listing_import.is_some() {
+            self.cancel_listing(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         // Capture Escape before a focused input can consume it. Other keys
         // retain normal bubbling and overlay dismissal keeps its usual order.
         if event.keystroke.key == "escape"
@@ -3364,6 +3434,14 @@ impl KoshaApp {
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
         let modified = event.keystroke.modifiers.secondary();
+
+        if self.listing_import.is_some() {
+            return;
+        }
+        #[cfg(feature = "remote-client")]
+        if self.remote_scan.is_some() {
+            return;
+        }
 
         if self.handoff.is_some() || self.handoff_task.is_some() {
             if key == "escape" {
@@ -3763,10 +3841,29 @@ impl KoshaApp {
     /// effect. Doing it automatically would be worse: the option is changed
     /// mid-browse and a surprise rescan loses the user's place.
     pub(crate) fn rescan(&mut self, cx: &mut Context<Self>) {
+        if self.refuse_nonlocal_rescan(cx) {
+            return;
+        }
         let root = self.state.session.root().to_path_buf();
         if root.is_dir() {
             self.scan(root, cx);
         }
+    }
+
+    fn refuse_nonlocal_rescan(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.state.ready().is_some_and(|ready| {
+            ready.source.remote().is_some()
+                || ready.tree.stats().strategy == kosha_core::Strategy::Imported
+                || ready
+                    .source
+                    .snapshot()
+                    .is_some_and(|snapshot| snapshot.meta.import.is_some())
+        }) {
+            self.state.notice = Some("Choose a local folder to start a new scan.".into());
+            cx.notify();
+            return true;
+        }
+        false
     }
 
     /// The plan awaiting approval, for the confirmation dialog to render.
@@ -4000,7 +4097,6 @@ impl Render for KoshaApp {
                 v_flex()
                     .size_full()
                     .child(self.render_title_bar(fits, &palette, window, cx))
-                    .children(self.render_listing_import(&palette, cx))
                     // One strip for both long jobs. A scan cannot say how
                     // far along it is — the tree is what it is finding out —
                     // so it slides; a hunt knows its candidate count before it
@@ -4022,6 +4118,14 @@ impl Render for KoshaApp {
             .children(owners_panel)
             .children(handoff_panel)
             .children(command_palette)
+            .children(self.render_listing_import(&palette, cx))
+            .children({
+                #[cfg(feature = "remote-client")]
+                let remote = self.render_remote_scan(&palette, cx);
+                #[cfg(not(feature = "remote-client"))]
+                let remote = None::<AnyElement>;
+                remote
+            })
             .children(dialog)
             .children(unlock)
             // Read-write mode is a standing fact about the window, so the
@@ -4824,7 +4928,7 @@ impl KoshaApp {
             .child(
                 crate::ui::button("import-listing", palette)
                     .child("Import a listing…")
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_listing(cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.choose_listing(window, cx))),
             )
             .children(snapshots)
             .child(div().h(px(10.0)))
@@ -7224,6 +7328,9 @@ impl KoshaApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let ready = self.state.ready()?;
+        if ready.source.remote().is_some() {
+            return None;
+        }
         let source = ready.source.snapshot();
         if source.is_some_and(|snapshot| snapshot.meta.import.is_some()) {
             return None;
@@ -7593,6 +7700,12 @@ impl KoshaApp {
             // A snapshot's status line is about the snapshot, not about a scan
             // that is not happening. The numbers below would all be true and
             // all be read as a description of the disk right now.
+            Phase::Ready(ready) if ready.source.remote().is_some() => format!(
+                "SSH scan · read-only · {} · {} apparent",
+                format::plural(ready.tree.stats().entries as usize, "entry"),
+                self.bytes(ready.tree.total_logical()),
+            )
+            .into(),
             Phase::Ready(ready) if ready.source.is_past() => {
                 let stats = ready.tree.stats();
                 let approx = if ready.tree.is_partial() { "~" } else { "" };
@@ -8088,6 +8201,14 @@ pub fn open(
         let view: Entity<KoshaApp> = cx.new(|cx| {
             let path = start.path.clone();
             let mut app = KoshaApp::new(window, loaded, start, theme, cx);
+            #[cfg(target_os = "macos")]
+            cx.observe_window_activation(window, |app, window, cx| {
+                if window.is_window_active() {
+                    app.volumes = crate::places::volumes();
+                    cx.notify();
+                }
+            })
+            .detach();
             if let Some(path) = path {
                 // A snapshot, a folder or an image. Told apart by what is in
                 // the file, the same way the command line tells them apart —

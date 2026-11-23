@@ -301,21 +301,31 @@ impl Rule for Compressible {
         // text instead of some ancestor that merely contains it.
         let mut totals: FxHashMap<u32, (u64, u64)> = FxHashMap::default();
 
-        for index in 0..tree.len() {
-            let id = NodeId::from_index(index);
-            let node = tree.node(id);
-            if node.is_dir() || !util::is_countable(tree, id) {
-                continue;
+        // Siblings usually arrive in a run. Sum that run before touching the
+        // map, and merge with any other run for the same parent.
+        let mut first = 0;
+        for siblings in tree.nodes_slice().chunk_by(|a, b| a.parent == b.parent) {
+            let mut total = 0u64;
+            let mut compressible = 0u64;
+            for (offset, node) in siblings.iter().enumerate() {
+                let id = NodeId::from_index(first + offset);
+                if node.is_dir()
+                    || !util::is_countable(tree, id)
+                    || node.flags.contains(Flags::SPARSE)
+                {
+                    continue;
+                }
+                total = total.saturating_add(node.allocated);
+                if util::has_extension(tree, id, COMPRESSIBLE_EXTS) {
+                    compressible = compressible.saturating_add(node.allocated);
+                }
             }
-            // Already-compressed files would make the ratio lie.
-            if node.flags.contains(Flags::SPARSE) {
-                continue;
+            if total > 0 {
+                let entry = totals.entry(siblings[0].parent).or_insert((0, 0));
+                entry.0 = entry.0.saturating_add(total);
+                entry.1 = entry.1.saturating_add(compressible);
             }
-            let entry = totals.entry(node.parent).or_insert((0, 0));
-            entry.0 = entry.0.saturating_add(node.allocated);
-            if util::has_extension(tree, id, COMPRESSIBLE_EXTS) {
-                entry.1 = entry.1.saturating_add(node.allocated);
-            }
+            first += siblings.len();
         }
 
         let mut found = Vec::new();
