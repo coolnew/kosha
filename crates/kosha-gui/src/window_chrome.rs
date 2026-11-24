@@ -19,10 +19,12 @@ pub fn title_bar(
     }
     #[cfg(not(windows))]
     {
-        use gpui_kit::{ParentElement, Styled, px};
+        use gpui_kit::{ParentElement, Styled};
         let _ = (palette, window, cx);
         gpui_kit::component::TitleBar::new()
-            .h(px(crate::theme::metrics::TITLE_BAR_HEIGHT))
+            .h(crate::theme::metrics::scaled(
+                crate::theme::metrics::TITLE_BAR_HEIGHT,
+            ))
             .child(content)
             .into_any_element()
     }
@@ -82,7 +84,7 @@ mod windows {
 
         h_flex()
             .id("kosha-title-bar")
-            .h(px(metrics::TITLE_BAR_HEIGHT))
+            .h(crate::theme::metrics::scaled(metrics::TITLE_BAR_HEIGHT))
             .flex_none()
             .items_center()
             .bg(palette.surface)

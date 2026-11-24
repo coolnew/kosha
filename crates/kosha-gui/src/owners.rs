@@ -63,7 +63,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                         .items_center()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_LG))
+                                .text_size(metrics::scaled(metrics::TEXT_LG))
                                 .text_color(palette.text)
                                 .child("Who is using the disk"),
                         )
@@ -103,7 +103,7 @@ fn table(shares: &[Share], total: u64, app: &KoshaApp, palette: &Palette) -> Any
                     .pt(px(6.0))
                     .border_t_1()
                     .border_color(palette.hairline)
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child(
                         "The operating system's own accounts. These are real owners and \
@@ -169,14 +169,14 @@ fn row(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(text)
                         .child(SharedString::from(share.label())),
                 )
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(text)
                         .child(SharedString::from(format::bytes_in(share.allocated, units))),
                 )
@@ -184,7 +184,7 @@ fn row(
                     div()
                         .flex_none()
                         .w(px(46.0))
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(palette.text_faint)
                         .child(SharedString::from(format::percent(share.allocated, total))),
                 ),
@@ -209,7 +209,7 @@ fn row(
         )
         .child(
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_faint)
                 .child(SharedString::from(match unknown.or(unreadable) {
                     Some(note) => format!(
@@ -237,7 +237,7 @@ fn not_collected(palette: &Palette, cx: &mut Context<KoshaApp>) -> AnyElement {
         .gap(px(10.0))
         .child(
             div()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_dim)
                 .child(
                     "This scan did not record who owns each file, so there is nothing to \
@@ -248,7 +248,7 @@ fn not_collected(palette: &Palette, cx: &mut Context<KoshaApp>) -> AnyElement {
         .when(kosha_core::owner_costs_extra(), |this| {
             this.child(
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child(
                         "On Windows the ordinary scan asks the filesystem once per file for \
@@ -272,7 +272,7 @@ fn not_collected(palette: &Palette, cx: &mut Context<KoshaApp>) -> AnyElement {
 /// while their scan is running reads as the window having lost track of it.
 fn nothing_yet(app: &KoshaApp, palette: &Palette) -> AnyElement {
     div()
-        .text_size(px(metrics::TEXT_SM))
+        .text_size(metrics::scaled(metrics::TEXT_SM))
         .text_color(palette.text_dim)
         .child(if app.is_scanning() {
             "The scan is still running. This will fill in when it finishes."

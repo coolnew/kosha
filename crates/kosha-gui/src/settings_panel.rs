@@ -15,7 +15,9 @@ use gpui_kit::{
 };
 
 use crate::app::KoshaApp;
-use crate::settings::{AccentSource, Settings, ThemePreference, UnitPreference};
+use crate::settings::{
+    AccentSource, Settings, TEXT_SCALE_MAX, TEXT_SCALE_MIN, ThemePreference, UnitPreference,
+};
 use crate::theme::{Palette, metrics};
 use crate::ui;
 
@@ -50,6 +52,7 @@ impl Group {
 enum OptionId {
     Units,
     Theme,
+    TextSize,
     Accent,
     Tint,
     Cross,
@@ -98,6 +101,14 @@ struct OptionSpec {
 // Search and rendering read the same labels and explanations, so a phrase a
 // person has just read remains findable after the wording changes.
 const OPTIONS: &[OptionSpec] = &[
+    OptionSpec {
+        id: OptionId::TextSize,
+        group: Group::Display,
+        label: "Text size",
+        description: "Resize desktop text immediately. System default uses the display's normal scaling.",
+        keywords: "accessibility zoom font dpi larger smaller zoom percentage",
+        availability: Availability::Always,
+    },
     OptionSpec {
         id: OptionId::Units,
         group: Group::Display,
@@ -357,13 +368,14 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
     ui::scrim("settings-scrim", palette)
         .items_start()
         .justify_end()
-        .pt(px(metrics::TITLE_BAR_HEIGHT + 8.0))
+        .pt(metrics::scaled(metrics::TITLE_BAR_HEIGHT + 8.0))
         .pr(px(metrics::CARD_PADDING))
         .pb(px(metrics::CARD_PADDING))
         .on_click(cx.listener(|this, _, window, cx| this.close_settings(window, cx)))
         .child(
             ui::dialog("settings-panel", palette)
-                .w(px(380.0))
+                .w(metrics::scaled(380.0))
+                .max_w(relative(1.0))
                 .gap(px(8.0))
                 .max_h(relative(1.0))
                 .child(
@@ -373,7 +385,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                         .items_center()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_LG))
+                                .text_size(metrics::scaled(metrics::TEXT_LG))
                                 .text_color(palette.text)
                                 .child("Settings"),
                         )
@@ -387,7 +399,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     h_flex()
                         .id("settings-search-field")
                         .flex_none()
-                        .h(px(36.0))
+                        .h(metrics::scaled(36.0))
                         .px(px(9.0))
                         .items_center()
                         .gap(px(6.0))
@@ -398,7 +410,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                         .track_focus(&focus)
                         .focus(|this| this.border_color(palette.accent))
                         .text_color(palette.text)
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .child(div().flex_1().min_w(px(0.0)).child(Input::new(input)))
                         .when(!text.is_empty(), |field| {
                             field.child(
@@ -420,7 +432,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.text_faint)
                         .child(SharedString::from(count)),
                 )
@@ -479,6 +491,7 @@ fn render_option(
             },
         )
         .into_any_element(),
+        OptionId::TextSize => text_size(settings, palette, cx).into_any_element(),
         OptionId::Theme => choice(
             palette,
             spec.label,
@@ -602,7 +615,7 @@ fn render_option(
             }))
             .into_any_element(),
         OptionId::File | OptionId::Version => div()
-            .text_size(px(metrics::TEXT_SM))
+            .text_size(metrics::scaled(metrics::TEXT_SM))
             .text_color(palette.text)
             .child(spec.label)
             .into_any_element(),
@@ -622,7 +635,7 @@ fn render_option(
             div()
                 .min_w(px(0.0))
                 .whitespace_normal()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_dim)
                 .child(SharedString::from(location.to_owned())),
         );
@@ -630,13 +643,68 @@ fn render_option(
     if spec.id == OptionId::Version {
         row = row.child(
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .font_family(cx.theme().mono_font_family.clone())
                 .text_color(palette.text_faint)
                 .child(SharedString::from(kosha_core::version::long())),
         );
     }
     row.into_any_element()
+}
+
+fn text_size(
+    settings: &Settings,
+    palette: &Palette,
+    cx: &mut Context<KoshaApp>,
+) -> impl IntoElement {
+    let percent = settings.text_scale_percent();
+    let step = |label, hint, delta, disabled: bool, cx: &mut Context<KoshaApp>| {
+        ui::button(hint, palette)
+            .when(!disabled, |button| button.focusable().tab_stop(true))
+            .focus(|button| button.border_color(palette.accent))
+            .child(label)
+            .when(disabled, |button| button.opacity(0.5).cursor_default())
+            .tooltip(move |window, cx| ui::tooltip(hint).build(window, cx))
+            .on_click(cx.listener(move |app, _, _, cx| app.step_text_scale(delta, cx)))
+    };
+    v_flex().gap(px(6.0)).child("Text size").child(
+        h_flex()
+            .gap(px(6.0))
+            .flex_wrap()
+            .child(step(
+                "−",
+                "Decrease text size",
+                -10,
+                percent == TEXT_SCALE_MIN,
+                cx,
+            ))
+            .child(
+                div()
+                    .min_w(metrics::scaled(40.0))
+                    .text_center()
+                    .child(format!("{percent}%")),
+            )
+            .child(step(
+                "+",
+                "Increase text size",
+                10,
+                percent == TEXT_SCALE_MAX,
+                cx,
+            ))
+            .child(
+                ui::button("text-size-system", palette)
+                    .focusable()
+                    .tab_stop(true)
+                    .focus(|button| button.border_color(palette.accent))
+                    .child("System default")
+                    .when(settings.text_scale.is_none(), |button| {
+                        button
+                            .border_color(palette.accent)
+                            .text_color(palette.accent)
+                    })
+                    .on_click(cx.listener(|app, _, _, cx| app.reset_text_scale(cx))),
+            ),
+    )
 }
 
 /// The kept queries, each removable.
@@ -707,7 +775,7 @@ fn saved_searches(
                         .overflow_hidden()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.text_dim)
                                 .child(SharedString::from(saved.name.clone())),
                         )
@@ -716,7 +784,7 @@ fn saved_searches(
                         .when(named, |this| {
                             this.child(
                                 div()
-                                    .text_size(px(metrics::TEXT_XS))
+                                    .text_size(metrics::scaled(metrics::TEXT_XS))
                                     .text_color(palette.text_faint)
                                     .child(SharedString::from(saved.query.clone())),
                             )
@@ -797,13 +865,13 @@ fn pinned_folders(
                         .overflow_hidden()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.text_dim)
                                 .child(SharedString::from(scope.name.clone())),
                         )
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_faint)
                                 .child(SharedString::from(scope.path.display().to_string())),
                         ),
@@ -837,11 +905,11 @@ fn toggle(
     h_flex()
         .id(label)
         .cursor_pointer()
-        .h(px(metrics::ROW_HEIGHT))
+        .h(metrics::scaled(metrics::ROW_HEIGHT))
         .justify_between()
         .items_center()
         .rounded(px(metrics::RADIUS_SM))
-        .text_size(px(metrics::TEXT))
+        .text_size(metrics::scaled(metrics::TEXT))
         .text_color(palette.text)
         .hover(|this| this.bg(palette.hover))
         .child(div().child(label))
@@ -897,10 +965,10 @@ fn choice(
     }
 
     h_flex()
-        .h(px(metrics::ROW_HEIGHT))
+        .h(metrics::scaled(metrics::ROW_HEIGHT))
         .justify_between()
         .items_center()
-        .text_size(px(metrics::TEXT))
+        .text_size(metrics::scaled(metrics::TEXT))
         .text_color(palette.text)
         .child(div().child(label))
         .child(
@@ -930,6 +998,7 @@ mod tests {
 
     #[test]
     fn settings_are_findable_by_visible_words_and_common_names() {
+        assert_eq!(matches("font dpi"), vec![OptionId::TextSize]);
         assert!(matches("Theme").contains(&OptionId::Theme));
         assert_eq!(matches("slow compressed"), vec![OptionId::Exact]);
         assert_eq!(matches("mft admin"), vec![OptionId::Mft]);
@@ -945,13 +1014,17 @@ mod tests {
         assert_eq!(
             matches(" DISPLAY "),
             vec![
+                OptionId::TextSize,
                 OptionId::Units,
                 OptionId::Theme,
                 OptionId::Accent,
                 OptionId::Tint
             ]
         );
-        assert_eq!(matches("display desktop"), vec![OptionId::Accent]);
+        assert_eq!(
+            matches("display desktop"),
+            vec![OptionId::TextSize, OptionId::Accent]
+        );
         assert_eq!(matches("\tTHEME  DARK\n"), vec![OptionId::Theme]);
         assert!(matches("theme owner").is_empty());
         assert!(matches("no-such-setting-9c8e").is_empty());

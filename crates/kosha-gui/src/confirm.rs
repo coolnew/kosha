@@ -54,7 +54,7 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .gap(px(10.0))
                     .child(
                         div()
-                            .text_size(px(metrics::TEXT_LG))
+                            .text_size(metrics::scaled(metrics::TEXT_LG))
                             .text_color(palette.text)
                             .child("Let this window change files?"),
                     )
@@ -72,7 +72,7 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             .bg(palette.surface)
                             .border_1()
                             .border_color(palette.hairline)
-                            .text_size(px(metrics::TEXT_SM))
+                            .text_size(metrics::scaled(metrics::TEXT_SM))
                             .text_color(palette.text_dim)
                             .child(if cfg!(windows) {
                                 "Move to trash — recoverable from the Recycle Bin"
@@ -86,7 +86,7 @@ pub fn unlock(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     )
                     .child(
                         div()
-                            .text_size(px(metrics::TEXT_SM))
+                            .text_size(metrics::scaled(metrics::TEXT_SM))
                             .text_color(palette.text_faint)
                             .child(
                                 "Nothing happens without a second confirmation: each action \
@@ -178,7 +178,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .gap(px(metrics::CARD_PADDING))
                     .child(
                         div()
-                            .text_size(px(metrics::TEXT_LG))
+                            .text_size(metrics::scaled(metrics::TEXT_LG))
                             .text_color(palette.text)
                             .child(SharedString::from(pending.title.clone())),
                     )
@@ -188,7 +188,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .when_some(skipped_note, |this, note| {
                         this.child(
                             div()
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.text_dim)
                                 .child(note),
                         )
@@ -229,7 +229,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .when(preview.bytes_trashed > 0, |this| {
                         this.child(
                             div()
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.text_faint)
                                 .child(
                                     "The trash is on this volume, so the space comes back when \
@@ -244,7 +244,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                 .rounded(px(metrics::RADIUS_SM))
                                 .bg(palette.danger.opacity(0.14))
                                 .text_color(palette.danger)
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .child("This cannot be undone from the trash."),
                         )
                     })
@@ -256,7 +256,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                 .rounded(px(metrics::RADIUS_SM))
                                 .bg(palette.danger.opacity(0.14))
                                 .text_color(palette.danger)
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .child(title)
                                 .children(cloud_body),
                         )
@@ -273,7 +273,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             .border_1()
                             .border_color(palette.hairline)
                             .overflow_y_scroll()
-                            .text_size(px(metrics::TEXT_SM))
+                            .text_size(metrics::scaled(metrics::TEXT_SM))
                             .text_color(palette.text_dim)
                             .children(paths.into_iter().map(|path| div().child(path)))
                             .when(more > 0, |this| {
@@ -292,7 +292,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                         this.child(
                             v_flex()
                                 .gap(px(2.0))
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.caution)
                                 .children(caution.into_iter().map(|line| div().child(line))),
                         )

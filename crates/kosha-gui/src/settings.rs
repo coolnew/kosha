@@ -112,6 +112,9 @@ pub struct SavedScope {
 pub struct Settings {
     pub units: UnitPreference,
     pub theme: ThemePreference,
+    /// Optional percentage of the default desktop text size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_scale: Option<u16>,
     pub accent: AccentSource,
     /// Tint the window's neutrals toward the accent's hue.
     ///
@@ -215,6 +218,17 @@ pub struct Settings {
     pub vm_image_days: u32,
 }
 
+pub const TEXT_SCALE_MIN: u16 = 80;
+pub const TEXT_SCALE_MAX: u16 = 150;
+
+impl Settings {
+    pub fn text_scale_percent(&self) -> u16 {
+        self.text_scale
+            .unwrap_or(100)
+            .clamp(TEXT_SCALE_MIN, TEXT_SCALE_MAX)
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         let scan = ScanOptions::default();
@@ -222,6 +236,7 @@ impl Default for Settings {
         Settings {
             units: UnitPreference::default(),
             theme: ThemePreference::default(),
+            text_scale: None,
             accent: AccentSource::default(),
             tint_chrome: false,
             show_places: true,
@@ -1084,6 +1099,24 @@ mod tests {
             .filter(|name| name.ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "left behind {leftovers:?}");
+    }
+
+    #[test]
+    fn text_scale_defaults_and_saved_values() {
+        let defaults: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.text_scale_percent(), 100);
+        assert!(
+            !serde_json::to_value(defaults)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("text-scale")
+        );
+        let custom: Settings = serde_json::from_str(r#"{"text-scale":130}"#).unwrap();
+        assert_eq!(custom.text_scale_percent(), 130);
+        assert_eq!(serde_json::to_value(custom).unwrap()["text-scale"], 130);
+        let oversized: Settings = serde_json::from_str(r#"{"text-scale":999}"#).unwrap();
+        assert_eq!(oversized.text_scale_percent(), TEXT_SCALE_MAX);
     }
 
     #[test]

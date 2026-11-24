@@ -22,9 +22,17 @@ switch either preference back to System without resetting the other.
 
 | Group | What to look for |
 | --- | --- |
-| Display | Units, light/dark/system appearance, accent and window tint |
+| Display | Text size, units, light/dark/system appearance, accent and window tint |
 | Scanning | Mount boundaries, image reading, ownership collection, and platform-specific allocation, hardlink, or NTFS options |
 | Advanced | Analysis thresholds in the JSON settings file and the version to include in bug reports |
+
+In **Settings → Display → Text size**, use **−** and **+** to resize text live
+from 80% to 150%. Kosha remembers your preference. **System default** restores
+the normal size for your display. You can also use **Ctrl+Plus**, **Ctrl+Minus**,
+**Ctrl+0**, or hold **Ctrl** while scrolling over the app. Use **Command** in
+place of **Ctrl** on macOS.
+
+![macOS Display settings showing the text-size controls at 130%](images/gui-macos-text-size.png)
 
 To pin the current folder, open the command palette and choose **Pin … to the
 sidebar**. Select the pinned location in the sidebar to scan it. Use the

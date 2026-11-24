@@ -63,7 +63,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                 .on_click(cx.listener(|app, _, _, cx| app.finish_tool_handoff(cx))));
     } else if let Some(plan) = &panel.tool_plan {
         content = content
-            .child(div().text_size(px(metrics::TEXT_LG)).child("Preview · prune unused uv cache"))
+            .child(div().text_size(metrics::scaled(metrics::TEXT_LG)).child("Preview · prune unused uv cache"))
             .child(ui::note(palette, "Permanent removal by your trusted installed uv. No Trash or undo. No downloads, project config or shell. This does not empty the whole cache or promise specific savings."))
             .child(div().child(SharedString::from(format!("Executable: {}", kosha_core::json::escaped(&plan.executable().to_string_lossy())))))
             .child(ui::note(palette, SharedString::from(format!("BLAKE3: {}", plan.executable_digest()))))
@@ -129,7 +129,11 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                     .p(px(12.0))
                     .rounded(px(metrics::RADIUS))
                     .bg(palette.raised)
-                    .child(div().text_size(px(metrics::TEXT_LG)).child(guide.title))
+                    .child(
+                        div()
+                            .text_size(metrics::scaled(metrics::TEXT_LG))
+                            .child(guide.title),
+                    )
                     .child(ui::note(
                         palette,
                         SharedString::from(format!(
@@ -186,7 +190,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
         .on_click(cx.listener(|app, _, _, cx| app.close_handoff(cx)))
         .child(ui::dialog("handoff-panel", palette).w(px(720.0)).max_w(relative(0.95)).max_h(relative(0.88))
             .child(h_flex().justify_between().items_center()
-                .child(div().text_size(px(metrics::TEXT_LG)).child(title))
+                .child(div().text_size(metrics::scaled(metrics::TEXT_LG)).child(title))
                 .child(ui::close("handoff-close", palette, "Close (Esc)").on_click(cx.listener(|app, _, _, cx| app.close_handoff(cx)))))
             .when(panel.tool_finished, |dialog| dialog.child(ui::note(palette, "Cleanup may have changed disk contents. Closing this panel rescans before further file actions.")))
             .when(!panel.tool_finished && (panel.historical || panel.tree.is_partial() || panel.tree.is_incomplete()), |dialog| dialog.child(ui::note(palette, "Historical, incomplete or partially unreadable scan: recorded data may be stale or incomplete. Rescan before making decisions.")))

@@ -101,7 +101,7 @@ fn header(
                 .items_center()
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_LG))
+                        .text_size(metrics::scaled(metrics::TEXT_LG))
                         .text_color(palette.text)
                         .child("Comparison"),
                 )
@@ -153,11 +153,11 @@ fn header(
         )
         .child(
             div()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_faint)
                 .child(counted),
         )
-        .child(div().text_size(px(metrics::TEXT_XS)).text_color(palette.text_faint)
+        .child(div().text_size(metrics::scaled(metrics::TEXT_XS)).text_color(palette.text_faint)
             .child(SharedString::from(format!("Diff computed in {} · stored trees, no rescan · folder totals overlap files and are excluded from the net", format::duration(comparison.elapsed)))))
         // What the comparison rests on, when it rests on less than the reader
         // would assume: another folder's record, or one with almost nothing in
@@ -165,7 +165,7 @@ fn header(
         // the list is where a difference between two folders reads as a change.
         .children(comparison.footing.clone().map(|footing| {
             div()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.caution)
                 .child(footing)
         }))
@@ -196,20 +196,20 @@ fn observation(
         .border_color(palette.hairline)
         .child(
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_faint)
                 .child(title),
         )
         .child(
             div()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text)
                 .child(SharedString::from(date)),
         )
         .child(
             div()
                 .truncate()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_dim)
                 .child(path),
         )
@@ -270,12 +270,12 @@ fn columns(palette: &Palette) -> AnyElement {
         // *replaces* the table: it was 24px high on the bare canvas while the
         // one it stands in for is 28 on a surface, so switching to a
         // comparison moved the headings up and took their background away.
-        .h(px(metrics::ROW_HEIGHT))
+        .h(metrics::scaled(metrics::ROW_HEIGHT))
         .px(px(12.0))
         .gap(px(12.0))
         .items_center()
         .bg(palette.surface)
-        .text_size(px(metrics::TEXT_XS))
+        .text_size(metrics::scaled(metrics::TEXT_XS))
         .text_color(palette.text_faint)
         .border_b_1()
         .border_color(palette.hairline)
@@ -347,7 +347,7 @@ fn row(index: usize, change: &Change, units: format::Units, palette: &Palette) -
         .px(px(12.0))
         .gap(px(12.0))
         .items_center()
-        .text_size(px(metrics::TEXT))
+        .text_size(metrics::scaled(metrics::TEXT))
         .child(
             div()
                 .w(px(110.0))
@@ -363,7 +363,7 @@ fn row(index: usize, change: &Change, units: format::Units, palette: &Palette) -
             div()
                 .w(px(64.0))
                 .flex_none()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_faint)
                 .child(SharedString::from(format!(
                     "{} {}",
@@ -385,7 +385,7 @@ fn row(index: usize, change: &Change, units: format::Units, palette: &Palette) -
             div()
                 .w(px(100.0))
                 .flex_none()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_dim)
                 .child(SharedString::from(if change.kind == Kind::Added {
                     "—".into()
@@ -397,7 +397,7 @@ fn row(index: usize, change: &Change, units: format::Units, palette: &Palette) -
             div()
                 .w(px(100.0))
                 .flex_none()
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_dim)
                 .child(SharedString::from(if change.kind == Kind::Removed {
                     "—".into()

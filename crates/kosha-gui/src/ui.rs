@@ -107,7 +107,7 @@ pub fn dialog_input(
 ) -> Stateful<Div> {
     h_flex()
         .id(id)
-        .h(px(36.0))
+        .h(metrics::scaled(36.0))
         .px(px(9.0))
         .items_center()
         .rounded(px(6.0))
@@ -134,7 +134,8 @@ pub fn dialog_input(
 fn shell(id: impl Into<gpui_kit::ElementId>) -> Stateful<Div> {
     div()
         .id(id.into())
-        .h(px(metrics::HIT_TARGET))
+        .h(metrics::scaled(metrics::HIT_TARGET))
+        .min_h(px(metrics::HIT_TARGET))
         .px(px(metrics::CARD_PADDING))
         .flex()
         .items_center()
@@ -143,7 +144,7 @@ fn shell(id: impl Into<gpui_kit::ElementId>) -> Stateful<Div> {
         .rounded(px(metrics::RADIUS_SM))
         .border_1()
         .cursor_pointer()
-        .text_size(px(metrics::TEXT_SM))
+        .text_size(metrics::scaled(metrics::TEXT_SM))
 }
 
 /// What a button looks like when it is not asking for anything.
@@ -196,13 +197,13 @@ pub fn primary(
 pub fn chip(id: impl Into<gpui_kit::ElementId>) -> Stateful<Div> {
     div()
         .id(id.into())
-        .h(px(metrics::HIT_TARGET))
+        .h(metrics::scaled(metrics::HIT_TARGET))
         .px(px(10.0))
         .flex()
         .items_center()
         .rounded(px(metrics::RADIUS_SM))
         .cursor_pointer()
-        .text_size(px(metrics::TEXT_SM))
+        .text_size(metrics::scaled(metrics::TEXT_SM))
 }
 
 /// One character you can click: `✕`, `?`, `☆`.
@@ -235,14 +236,14 @@ pub fn glyph(
     div()
         .id(id.into())
         .flex_none()
-        .h(px(metrics::HIT_TARGET))
+        .h(metrics::scaled(metrics::HIT_TARGET))
         .px(px(8.0))
         .flex()
         .items_center()
         .justify_center()
         .rounded(px(metrics::RADIUS_SM))
         .cursor_pointer()
-        .text_size(px(metrics::TEXT))
+        .text_size(metrics::scaled(metrics::TEXT))
         .text_color(palette.text_faint)
         .tooltip(move |window, cx| tooltip(hint.clone()).build(window, cx))
 }
@@ -314,7 +315,7 @@ pub fn remove(
         asking
             .bg(palette.danger.opacity(0.18))
             .text_color(palette.danger)
-            .text_size(px(metrics::TEXT_SM))
+            .text_size(metrics::scaled(metrics::TEXT_SM))
             .child(SharedString::from(format!("{verb}?")))
     } else {
         asking.child(MARK)
@@ -330,7 +331,7 @@ pub fn section_label(palette: &Palette, text: impl Into<SharedString>) -> impl I
     div()
         .pt(px(4.0))
         .pb(px(4.0))
-        .text_size(px(metrics::TEXT_XS))
+        .text_size(metrics::scaled(metrics::TEXT_XS))
         .text_color(palette.text_faint)
         .child(text.into())
 }
@@ -341,7 +342,7 @@ pub fn section_label(palette: &Palette, text: impl Into<SharedString>) -> impl I
 pub fn hint(palette: &Palette, text: impl Into<SharedString>) -> impl IntoElement {
     div()
         .pb(px(8.0))
-        .text_size(px(metrics::TEXT_XS))
+        .text_size(metrics::scaled(metrics::TEXT_XS))
         .text_color(palette.text_faint)
         .child(text.into())
 }
@@ -357,7 +358,7 @@ pub fn hint(palette: &Palette, text: impl Into<SharedString>) -> impl IntoElemen
 /// and then quietly disagree about the size to do them at.
 pub fn note(palette: &Palette, text: impl Into<SharedString>) -> impl IntoElement {
     div()
-        .text_size(px(metrics::TEXT_SM))
+        .text_size(metrics::scaled(metrics::TEXT_SM))
         .text_color(palette.text_faint)
         .child(text.into())
 }

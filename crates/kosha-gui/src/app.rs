@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::ui::tooltip;
 use gpui_kit::base::input::{InputEvent, InputState};
@@ -31,8 +31,8 @@ use gpui_kit::{
     Animation, AnimationExt, AnyElement, App, AppContext, ClickEvent, Context, CursorStyle, Entity,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollStrategy,
-    SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle, Window, div,
-    ease_in_out, px, relative, uniform_list,
+    ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, UniformListScrollHandle,
+    Window, div, ease_in_out, px, relative, uniform_list,
 };
 
 use kosha_analyze::{Confidence, Insight, Suggested};
@@ -170,6 +170,7 @@ pub struct KoshaApp {
     /// defaults over it destroys all of that to record a preference they did
     /// not even change.
     settings_unusable: Option<String>,
+    last_text_scale_scroll: Option<Instant>,
     settings_open: bool,
     /// Whether quick look is showing. It follows the selection rather than
     /// pinning one entry, so there is nothing else to remember.
@@ -449,6 +450,7 @@ impl KoshaApp {
             filter_open: start.query.is_some(),
             settings: loaded.settings,
             settings_unusable,
+            last_text_scale_scroll: None,
             handoff: None,
             handoff_task: None,
             settings_open: false,
@@ -3127,7 +3129,7 @@ impl KoshaApp {
                         .max_w(relative(0.92))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_LG))
+                                .text_size(metrics::scaled(metrics::TEXT_LG))
                                 .child("Import listing"),
                         )
                         .child(body),
@@ -3285,7 +3287,7 @@ impl KoshaApp {
                 .debug_selector(|| "background-activity".into())
                 .absolute()
                 .right(px(12.0))
-                .bottom(px(metrics::STATUS_BAR_HEIGHT + 10.0))
+                .bottom(metrics::scaled(metrics::STATUS_BAR_HEIGHT + 10.0))
                 .w(px(310.0))
                 .rounded(px(8.0))
                 .border_1()
@@ -3303,10 +3305,14 @@ impl KoshaApp {
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .gap(px(3.0))
-                                .child(div().text_size(px(metrics::TEXT_SM)).child(row.title))
                                 .child(
                                     div()
-                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_size(metrics::scaled(metrics::TEXT_SM))
+                                        .child(row.title),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(metrics::scaled(metrics::TEXT_XS))
                                         .text_color(palette.text_dim)
                                         .whitespace_nowrap()
                                         .overflow_hidden()
@@ -3637,7 +3643,8 @@ impl KoshaApp {
     fn fitting_rails(&self, window: &Window) -> metrics::Rails {
         metrics::rails_for(
             f32::from(window.viewport_size().width),
-            self.settings.columns.fixed_width(),
+            self.settings.columns.fixed_width() * f32::from(self.settings.text_scale_percent())
+                / 100.0,
         )
     }
 
@@ -3700,6 +3707,26 @@ impl KoshaApp {
     }
 
     fn on_scan_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.secondary() && !modifiers.alt {
+            match event.keystroke.key.as_str() {
+                "+" | "=" => self.step_text_scale(10, cx),
+                "-" | "_" => self.step_text_scale(-10, cx),
+                "0" => self.reset_text_scale(cx),
+                _ => return self.capture_escape(event, window, cx),
+            }
+            cx.stop_propagation();
+            return;
+        }
+        self.capture_escape(event, window, cx);
+    }
+
+    fn capture_escape(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         #[cfg(feature = "remote-client")]
         if self.handle_remote_scan_key(event, window, cx) {
             cx.stop_propagation();
@@ -4117,6 +4144,53 @@ impl KoshaApp {
         self.settings_changed(window, cx);
     }
 
+    pub(crate) fn step_text_scale(&mut self, step: i16, cx: &mut Context<Self>) {
+        let current = self.settings.text_scale_percent();
+        let next = current.saturating_add_signed(step).clamp(
+            crate::settings::TEXT_SCALE_MIN,
+            crate::settings::TEXT_SCALE_MAX,
+        );
+        if next != current {
+            self.settings.text_scale = Some(next);
+            self.persist_settings();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn reset_text_scale(&mut self, cx: &mut Context<Self>) {
+        if self.settings.text_scale.take().is_some() {
+            self.persist_settings();
+            cx.notify();
+        }
+    }
+
+    fn on_text_scale_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.modifiers.secondary() || event.modifiers.alt {
+            return;
+        }
+        let delta = event.delta.pixel_delta(px(metrics::ROW_HEIGHT));
+        let vertical = f32::from(delta.y);
+        if vertical.abs() < 1.0 || delta.x.abs() > delta.y.abs() {
+            return;
+        }
+        cx.stop_propagation();
+        if event.delta.precise() {
+            if self
+                .last_text_scale_scroll
+                .is_some_and(|last| last.elapsed() < Duration::from_millis(140))
+            {
+                return;
+            }
+            self.last_text_scale_scroll = Some(Instant::now());
+        }
+        self.step_text_scale(if vertical > 0.0 { 10 } else { -10 }, cx);
+    }
+
     pub(crate) fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_open = false;
         window.focus(&self.focus, cx);
@@ -4323,6 +4397,9 @@ impl Focusable for KoshaApp {
 
 impl Render for KoshaApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let scale = f32::from(self.settings.text_scale_percent()) / 100.0;
+        window.set_rem_size(cx.theme().font_size * scale);
+        let app = cx.entity().downgrade();
         let palette = self.palette;
         let read_write = self.state.mode().is_read_write();
         // `Some(None)` is a job with no measurable end, `Some(Some(f))` one
@@ -4387,8 +4464,26 @@ impl Render for KoshaApp {
             .size_full()
             .bg(palette.canvas)
             .text_color(palette.text)
-            .text_size(px(metrics::TEXT))
+            .text_size(metrics::scaled(metrics::TEXT))
             .font_family(cx.theme().font_family.clone())
+            .child(
+                gpui_kit::canvas(
+                    |_, _, _| (),
+                    move |_, (), window, _| {
+                        window.on_mouse_event(
+                            move |event: &ScrollWheelEvent, phase, window, cx| {
+                                if phase == gpui_kit::DispatchPhase::Capture {
+                                    let _ = app.update(cx, |app, cx| {
+                                        app.on_text_scale_scroll(event, window, cx)
+                                    });
+                                }
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
             .child(
                 v_flex()
                     .size_full()
@@ -4516,7 +4611,7 @@ impl KoshaApp {
         crate::window_chrome::title_bar(
             h_flex()
                 .w_full()
-                .h(px(metrics::TITLE_BAR_HEIGHT))
+                .h(metrics::scaled(metrics::TITLE_BAR_HEIGHT))
                 .px(px(12.0))
                 .gap(px(12.0))
                 .items_center()
@@ -4527,7 +4622,7 @@ impl KoshaApp {
                         .items_center()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_LG))
+                                .text_size(metrics::scaled(metrics::TEXT_LG))
                                 .text_color(palette.text)
                                 .child("kosha"),
                         )
@@ -4827,7 +4922,7 @@ impl KoshaApp {
             .gap(px(4.0))
             .items_center()
             .text_color(palette.text_dim)
-            .text_size(px(metrics::TEXT_SM))
+            .text_size(metrics::scaled(metrics::TEXT_SM))
             .when(elided, |this| {
                 this.child(div().text_color(palette.text_faint).child("…"))
             })
@@ -4870,13 +4965,13 @@ impl KoshaApp {
 /// thing that should decide them.
 fn chip() -> gpui_kit::Div {
     div()
-        .h(px(metrics::TITLE_CONTROL))
+        .h(metrics::scaled(metrics::TITLE_CONTROL))
         .px(px(10.0))
         .flex()
         .items_center()
         .rounded(px(metrics::RADIUS_SM))
         .border_1()
-        .text_size(px(metrics::TEXT_SM))
+        .text_size(metrics::scaled(metrics::TEXT_SM))
 }
 
 /// A title-bar toggle that shows whether the panel it controls is open.
@@ -5039,7 +5134,7 @@ fn scanning(
                 .child(pulse(palette, reduce_motion))
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_XL))
+                        .text_size(metrics::scaled(metrics::TEXT_XL))
                         .text_color(palette.text)
                         .child(if stopping {
                             "Stopping scan…"
@@ -5060,7 +5155,7 @@ fn scanning(
             // something is happening, and on a slow volume the first level can
             // take long enough that a word on its own would not be believed.
             div()
-                .text_size(px(metrics::TEXT_LG))
+                .text_size(metrics::scaled(metrics::TEXT_LG))
                 .text_color(palette.text)
                 .child(match progress {
                     Some(p) => SharedString::from(format!(
@@ -5074,7 +5169,7 @@ fn scanning(
         .child(
             div()
                 .mt(px(6.0))
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text_faint)
                 .child(if stopping {
                     "Waiting for current filesystem reads to finish"
@@ -5087,7 +5182,7 @@ fn scanning(
                 v_flex()
                     .items_center()
                     .gap(px(4.0))
-                    .text_size(px(metrics::TEXT_SM))
+                    .text_size(metrics::scaled(metrics::TEXT_SM))
                     .text_color(palette.text_dim)
                     .child(match estimate {
                         Some(estimate) => {
@@ -5270,13 +5365,13 @@ impl KoshaApp {
         h_flex()
             .id(SharedString::from(place.path.display().to_string()))
             .cursor_pointer()
-            .h(px(metrics::ROW_HEIGHT))
+            .h(metrics::scaled(metrics::ROW_HEIGHT))
             .px(px(8.0))
             .gap(px(8.0))
             .items_center()
             .flex_none()
             .rounded(px(metrics::RADIUS_SM))
-            .text_size(px(metrics::TEXT))
+            .text_size(metrics::scaled(metrics::TEXT))
             .when(active, |this| {
                 this.bg(palette.selected).text_color(palette.text)
             })
@@ -5325,13 +5420,13 @@ impl KoshaApp {
         h_flex()
             .id(("scope", index))
             .when(present, |this| this.cursor_pointer())
-            .h(px(metrics::ROW_HEIGHT))
+            .h(metrics::scaled(metrics::ROW_HEIGHT))
             .px(px(8.0))
             .gap(px(8.0))
             .items_center()
             .flex_none()
             .rounded(px(metrics::RADIUS_SM))
-            .text_size(px(metrics::TEXT))
+            .text_size(metrics::scaled(metrics::TEXT))
             .when(active, |this| {
                 this.bg(palette.selected).text_color(palette.text)
             })
@@ -5349,7 +5444,7 @@ impl KoshaApp {
                 this.child(
                     div()
                         .flex_none()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.caution)
                         .child("gone"),
                 )
@@ -5407,7 +5502,7 @@ impl KoshaApp {
             .gap(px(2.0))
             .flex_none()
             .rounded(px(metrics::RADIUS_SM))
-            .text_size(px(metrics::TEXT))
+            .text_size(metrics::scaled(metrics::TEXT))
             .when(active, |this| {
                 this.bg(palette.selected).text_color(palette.text)
             })
@@ -5429,7 +5524,7 @@ impl KoshaApp {
             // image is, or it is not where it said. "0 B" would be a claim.
             .children(image.map(|image| {
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child(image)
             }))
@@ -5493,7 +5588,7 @@ impl KoshaApp {
             .gap(px(4.0))
             .flex_none()
             .rounded(px(metrics::RADIUS_SM))
-            .text_size(px(metrics::TEXT))
+            .text_size(metrics::scaled(metrics::TEXT))
             .when(active, |this| {
                 this.bg(palette.selected).text_color(palette.text)
             })
@@ -5513,7 +5608,7 @@ impl KoshaApp {
                     .children(percent.map(|percent| {
                         div()
                             .flex_none()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.text_faint)
                             .child(percent)
                     })),
@@ -5539,7 +5634,7 @@ impl KoshaApp {
             }))
             .children(free.map(|free| {
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child(free)
             }))
@@ -5646,7 +5741,7 @@ impl KoshaApp {
             .bg(palette.canvas)
             .border_b_1()
             .border_color(palette.hairline)
-            .text_size(px(metrics::TEXT_XS))
+            .text_size(metrics::scaled(metrics::TEXT_XS))
             .text_color(palette.text_dim)
             .child("Space usage")
             .child(
@@ -5685,7 +5780,7 @@ impl KoshaApp {
             .gap(px(10.0))
             .child(
                 div()
-                    .text_size(px(metrics::TEXT_XL))
+                    .text_size(metrics::scaled(metrics::TEXT_XL))
                     .text_color(palette.text)
                     .child("What is eating your disk?"),
             )
@@ -5754,7 +5849,7 @@ impl KoshaApp {
                 // was a step smaller than its two siblings — which made the
                 // failure the quietest of the three states, exactly backwards.
                 div()
-                    .text_size(px(metrics::TEXT_XL))
+                    .text_size(metrics::scaled(metrics::TEXT_XL))
                     .text_color(palette.danger)
                     .child("That scan could not start"),
             )
@@ -5920,7 +6015,7 @@ impl KoshaApp {
                                         .overflow_hidden()
                                         .whitespace_nowrap()
                                         .text_ellipsis_middle()
-                                        .text_size(px(if nested {
+                                        .text_size(metrics::scaled(if nested {
                                             metrics::TEXT_XS
                                         } else {
                                             metrics::TEXT_SM
@@ -5940,7 +6035,7 @@ impl KoshaApp {
                                         .min_w(px(0.0))
                                         .overflow_hidden()
                                         .whitespace_nowrap()
-                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_size(metrics::scaled(metrics::TEXT_XS))
                                         .text_color(if palette.dark {
                                             palette.canvas.opacity(0.75)
                                         } else {
@@ -6141,7 +6236,7 @@ fn pooled_caption(palette: &Palette, pooled: usize) -> Option<gpui_kit::Div> {
             .bg(palette.raised)
             .border_1()
             .border_color(palette.hairline)
-            .text_size(px(metrics::TEXT_XS))
+            .text_size(metrics::scaled(metrics::TEXT_XS))
             .text_color(palette.text_faint)
             .child(SharedString::from(format!(
                 "+{} smaller",
@@ -6184,7 +6279,7 @@ impl KoshaApp {
             .map(|(_, _, state)| state);
         let note = |text: String| {
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_dim)
                 .child(SharedString::from(text))
         };
@@ -6290,13 +6385,13 @@ impl KoshaApp {
                 .gap(px(12.0))
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(palette.text_faint)
                         .child(label),
                 )
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .font_family(mono.clone())
                         .text_color(palette.text)
                         .child(SharedString::from(value)),
@@ -6424,7 +6519,7 @@ impl KoshaApp {
                     .iter()
                     .map(|caveat| {
                         div()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.caution)
                             .child(caveat.line())
                     })
@@ -6446,13 +6541,13 @@ impl KoshaApp {
                         .gap(px(2.0))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT))
+                                .text_size(metrics::scaled(metrics::TEXT))
                                 .text_color(palette.text)
                                 .child(SharedString::from(d.name.clone())),
                         )
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_faint)
                                 .child(SharedString::from(format!(
                                     "{} · {}",
@@ -6467,7 +6562,7 @@ impl KoshaApp {
                                 // cannot read or retype, which is most of why
                                 // it is here.
                                 .mb(px(8.0))
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .font_family(mono.clone())
                                 .text_color(palette.text_dim)
                                 .child(SharedString::from(d.path.clone())),
@@ -6480,6 +6575,61 @@ impl KoshaApp {
                 .into_any_element(),
         )
     }
+}
+
+#[cfg(all(
+    test,
+    any(windows, target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_text_size_routes_modified_wheel_through_the_window() {
+    use gpui_kit::{Modifiers, ScrollDelta, TestAppContext, VisualTestContext, point};
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    visual.refresh().unwrap();
+
+    let wheel = |delta, modifiers| ScrollWheelEvent {
+        position: point(px(100.0), px(100.0)),
+        delta: ScrollDelta::Lines(point(0.0, delta)),
+        modifiers,
+        ..Default::default()
+    };
+    visual.simulate_event(wheel(1.0, Modifiers::default()));
+    window
+        .update(&mut cx, |app, _, _| {
+            assert_eq!(app.settings.text_scale, None)
+        })
+        .unwrap();
+
+    visual.simulate_event(wheel(1.0, Modifiers::secondary_key()));
+    window
+        .update(&mut cx, |app, _, _| {
+            assert_eq!(app.settings.text_scale, Some(110))
+        })
+        .unwrap();
+
+    visual.simulate_event(wheel(-1.0, Modifiers::secondary_key()));
+    window
+        .update(&mut cx, |app, _, _| {
+            assert_eq!(app.settings.text_scale, Some(100))
+        })
+        .unwrap();
 }
 
 #[cfg(all(
@@ -6662,7 +6812,7 @@ impl KoshaApp {
                 div()
                     .px(px(12.0))
                     .py(px(4.0))
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_dim)
                     .child(status)
             }))
@@ -6671,7 +6821,7 @@ impl KoshaApp {
                 div()
                     .relative()
                     .flex_1()
-                    .min_h(px(metrics::ROW_HEIGHT * 2.0))
+                    .min_h(metrics::scaled(metrics::ROW_HEIGHT * 2.0))
                     .overflow_hidden()
                     .child(
                         uniform_list(
@@ -6729,13 +6879,13 @@ impl KoshaApp {
         let sort = deep.flatten().is_none().then_some(sort);
         h_flex()
             .flex_none()
-            .h(px(metrics::ROW_HEIGHT))
+            .h(metrics::scaled(metrics::ROW_HEIGHT))
             .px(px(12.0))
             .items_center()
             .bg(palette.surface)
             .border_b_1()
             .border_color(palette.hairline)
-            .text_size(px(metrics::TEXT_XS))
+            .text_size(metrics::scaled(metrics::TEXT_XS))
             .child(name_header(palette, sort, cx))
             .children(
                 self.settings
@@ -6787,7 +6937,8 @@ impl KoshaApp {
         };
         // The fixed columns sit to the right of the flexible name column, so
         // the handle on a column's left edge widens it when pulled left.
-        let width = drag.width - (f32::from(event.position.x) - drag.origin);
+        let scale = f32::from(self.settings.text_scale_percent()) / 100.0;
+        let width = drag.width - (f32::from(event.position.x) - drag.origin) / scale;
         if width == self.settings.columns.width(drag.column) {
             return;
         }
@@ -6829,7 +6980,7 @@ impl KoshaApp {
                     if creation_unavailable && matches!(search, Search::Results { matched: 0, .. })
                     {
                         div()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.caution)
                             .child("Creation-date results unavailable")
                             .into_any_element()
@@ -6850,7 +7001,7 @@ impl KoshaApp {
                                 .items_center()
                                 .child(
                                     div()
-                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_size(metrics::scaled(metrics::TEXT_XS))
                                         .text_color(palette.text_dim)
                                         .child("Export all:"),
                                 )
@@ -7001,7 +7152,7 @@ impl KoshaApp {
                 .flex_1()
                 .min_w(px(0.0))
                 .truncate()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(colour)
                 .tooltip(move |window, cx| tooltip(hint.clone()).build(window, cx))
                 .child(SharedString::from(text))
@@ -7123,7 +7274,7 @@ fn column_header(
 ) -> AnyElement {
     h_flex()
         .h_full()
-        .w(px(width))
+        .w(metrics::scaled(width))
         .items_center()
         // The handle overhangs into the gap on the left, so grabbing it does
         // not mean hitting the exact boundary pixel.
@@ -7281,7 +7432,7 @@ fn row(
         .w_full()
         .px(px(12.0))
         .items_center()
-        .text_size(px(metrics::TEXT))
+        .text_size(metrics::scaled(metrics::TEXT))
         .when(selected, |this| this.bg(palette.selected))
         .when(!selected, |this| this.hover(|s| s.bg(palette.hover)))
         .child(
@@ -7333,7 +7484,7 @@ fn row(
                 .when(node.is_partial(), |this| {
                     this.child(
                         div()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.caution)
                             .child("partial"),
                     )
@@ -7346,7 +7497,7 @@ fn row(
             layout
                 .visible()
                 .map(|(column, width)| {
-                    let cell = div().w(px(width)).text_right();
+                    let cell = div().w(metrics::scaled(width)).text_right();
                     match column {
                         Column::Allocated => cell
                             .font_family(mono.clone())
@@ -7370,7 +7521,7 @@ fn row(
                             })),
                         Column::Modified => cell
                             .text_color(palette.text_faint)
-                            .text_size(px(metrics::TEXT_SM))
+                            .text_size(metrics::scaled(metrics::TEXT_SM))
                             .child(SharedString::from(format::age(node.mtime, now))),
                     }
                 })
@@ -7838,13 +7989,13 @@ impl KoshaApp {
                         .pb(px(6.0))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XL))
+                                .text_size(metrics::scaled(metrics::TEXT_XL))
                                 .text_color(palette.positive)
                                 .child(SharedString::from(self.bytes(total))),
                         )
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_faint)
                                 .child("reclaimable with confidence"),
                         ),
@@ -8089,7 +8240,7 @@ impl KoshaApp {
                     .child(div().w(px(3.0)).h(px(12.0)).rounded(px(2.0)).bg(accent))
                     .child(
                         div()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(accent)
                             .child(match insight.confidence {
                                 Confidence::Certain => "CERTAIN",
@@ -8101,7 +8252,7 @@ impl KoshaApp {
                         this.child(
                             div()
                                 .ml_auto()
-                                .text_size(px(metrics::TEXT_SM))
+                                .text_size(metrics::scaled(metrics::TEXT_SM))
                                 .text_color(palette.text)
                                 .child(SharedString::from(self.bytes(insight.reclaimable))),
                         )
@@ -8117,7 +8268,7 @@ impl KoshaApp {
             // Rendering from the live node list keeps the number true.
             .child(
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child(SharedString::from(if insight.superseded > 0 {
                         format!(
@@ -8131,7 +8282,7 @@ impl KoshaApp {
             )
             .child(
                 div()
-                    .text_size(px(metrics::TEXT_SM))
+                    .text_size(metrics::scaled(metrics::TEXT_SM))
                     .text_color(palette.text_dim)
                     .child(SharedString::from(insight.detail.clone())),
             )
@@ -8379,7 +8530,7 @@ impl KoshaApp {
         };
 
         h_flex()
-            .h(px(metrics::STATUS_BAR_HEIGHT))
+            .h(metrics::scaled(metrics::STATUS_BAR_HEIGHT))
             .flex_none()
             .px(px(12.0))
             .gap(px(12.0))
@@ -8387,7 +8538,7 @@ impl KoshaApp {
             .bg(palette.surface)
             .border_t_1()
             .border_color(palette.hairline)
-            .text_size(px(metrics::TEXT_XS))
+            .text_size(metrics::scaled(metrics::TEXT_XS))
             .text_color(palette.text_faint)
             // The one part of this bar that may shrink. The legend is a key
             // and a half-drawn key is useless; the narrow-window hint is an
@@ -8573,7 +8724,7 @@ fn legend(palette: &Palette) -> impl IntoElement {
         .flex_none()
         .gap(px(10.0))
         .items_center()
-        .text_size(px(metrics::TEXT_XS))
+        .text_size(metrics::scaled(metrics::TEXT_XS))
         .text_color(palette.text_faint)
         .children(Category::ALL.map(|category| {
             h_flex()

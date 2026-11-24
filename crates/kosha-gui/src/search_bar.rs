@@ -523,7 +523,7 @@ impl Render for SearchBar {
                 .id("scan-search-input")
                 .flex_1()
                 .min_w(px(0.0))
-                .h(px(36.0))
+                .h(metrics::scaled(36.0))
                 .px(px(10.0))
                 .items_center()
                 .rounded(px(6.0))
@@ -532,7 +532,7 @@ impl Render for SearchBar {
                 .border_color(palette.text_faint)
                 .track_focus(&focus)
                 .focus(|this| this.border_color(palette.accent))
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.text)
                 .child(Input::new(&self.input))
                 .when(!empty, |field| {
@@ -580,7 +580,7 @@ impl Render for SearchBar {
         );
 
         let mut body = v_flex().min_w(px(0.0)).gap(px(5.0)).child(row)
-            .child(div().text_size(px(metrics::TEXT_XS)).text_color(palette.text_faint)
+            .child(div().text_size(metrics::scaled(metrics::TEXT_XS)).text_color(palette.text_faint)
                 .child("Scope: whole scanned tree · Size: on disk when recorded · local dates · scan metadata, no file contents"));
         if empty {
             let mut examples = h_flex().flex_wrap().gap(px(6.0));
@@ -593,7 +593,7 @@ impl Render for SearchBar {
                 for summary in &self.date_summaries {
                     body = body.child(
                         div()
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.accent)
                             .whitespace_normal()
                             .child(SharedString::from(summary.clone())),
@@ -629,7 +629,7 @@ impl Render for SearchBar {
                             .whitespace_normal()
                             .px(px(5.0))
                             .bg(palette.raised)
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .text_color(palette.text_dim)
                             .child(SharedString::from(format!(
                                 "{:?}: {}",
@@ -652,7 +652,7 @@ impl Render for SearchBar {
                     .max(start);
                 body = body.child(
                     div()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.danger)
                         .whitespace_normal()
                         .child(SharedString::from(format!(
@@ -665,7 +665,7 @@ impl Render for SearchBar {
         if let Some(warning) = &self.warning {
             body = body.child(
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.caution)
                     .whitespace_normal()
                     .child(SharedString::from(warning.clone()))
@@ -735,7 +735,7 @@ impl Render for SearchBar {
                         .gap(px(4.0))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_dim)
                                 .child(self.recipe_pack.as_ref().map_or_else(
                                     || SharedString::from("Your recipes"),
@@ -744,7 +744,7 @@ impl Render for SearchBar {
                         )
                         .children(self.recipe_pack.as_ref().map(|pack| {
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_dim)
                                 .whitespace_normal()
                                 .child(SharedString::from(pack.description.clone()))
@@ -773,7 +773,7 @@ impl Render for SearchBar {
                         .gap(px(4.0))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_dim)
                                 .child(label),
                         )
@@ -787,7 +787,7 @@ impl Render for SearchBar {
                         .gap(px(4.0))
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_XS))
+                                .text_size(metrics::scaled(metrics::TEXT_XS))
                                 .text_color(palette.text_dim)
                                 .child(group.label),
                         )

@@ -1012,7 +1012,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                             this.child(
                                 div()
                                     .p(px(12.0))
-                                    .text_size(px(metrics::TEXT_SM))
+                                    .text_size(metrics::scaled(metrics::TEXT_SM))
                                     .text_color(palette.text_faint)
                                     .child("Nothing here matches that."),
                             )
@@ -1054,13 +1054,13 @@ fn row(
                 .gap(px(1.0))
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT))
+                        .text_size(metrics::scaled(metrics::TEXT))
                         .text_color(palette.text)
                         .child(label),
                 )
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.text_faint)
                         .when(mono, |this| this.text_color(palette.accent))
                         .child(detail),
@@ -1075,7 +1075,7 @@ fn row(
                 .bg(palette.surface)
                 .border_1()
                 .border_color(palette.hairline)
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_faint)
                 .child(binding)
         }))

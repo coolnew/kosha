@@ -183,7 +183,7 @@ impl Render for Preview {
             .min_w(px(0.0))
             .gap(px(7.0))
             .text_color(palette.text)
-            .text_size(px(metrics::TEXT_SM))
+            .text_size(metrics::scaled(metrics::TEXT_SM))
             .child(
                 div()
                     .min_w(px(0.0))
@@ -208,7 +208,7 @@ impl Render for Preview {
                 body = body.child(
                     div()
                         .text_color(palette.text_faint)
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .child(SharedString::from(if summary.total == 0 {
                             "No children recorded".into()
                         } else {
@@ -266,7 +266,7 @@ impl Render for Preview {
                     body = body.child(
                         div()
                             .text_color(palette.text_faint)
-                            .text_size(px(metrics::TEXT_XS))
+                            .text_size(metrics::scaled(metrics::TEXT_XS))
                             .child(SharedString::from(format!(
                                 "+{} more",
                                 format::count((summary.total - summary.children.len()) as u64)
@@ -292,7 +292,7 @@ impl Render for Preview {
         body.child(
             div()
                 .text_color(palette.text_faint)
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .whitespace_normal()
                 .child(if node.is_dir() {
                     "Click to browse · Right-click for actions"

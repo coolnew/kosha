@@ -248,7 +248,7 @@ pub fn rail(
                 .id(("snapshot-problem", index))
                 .px(px(8.0))
                 .py(px(4.0))
-                .text_size(px(metrics::TEXT_SM))
+                .text_size(metrics::scaled(metrics::TEXT_SM))
                 .text_color(palette.caution)
                 .child(problem.clone())
                 .into_any_element(),
@@ -360,7 +360,7 @@ fn row(
                 )
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.text_faint)
                         .child(clock),
                 )
@@ -388,20 +388,20 @@ fn row(
         .when(!label.is_empty(), |this| {
             this.child(
                 div()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.accent)
                     .child(SharedString::from(label.clone())),
             )
         })
         .child(
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_faint)
                 .child(root),
         )
         .child(
             div()
-                .text_size(px(metrics::TEXT_XS))
+                .text_size(metrics::scaled(metrics::TEXT_XS))
                 .text_color(palette.text_faint)
                 .child(detail),
         )

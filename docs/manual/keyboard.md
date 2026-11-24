@@ -11,6 +11,10 @@ The shortcuts below use **Ctrl** on Windows and Linux. On macOS, substitute
 | Ctrl+O | Choose a folder |
 | Ctrl+F | Open search |
 | Ctrl+R | Start a fresh scan of the current root |
+| Ctrl+Plus or Ctrl+Equals | Increase desktop text size |
+| Ctrl+Minus | Decrease desktop text size |
+| Ctrl+0 | Restore the system default text size |
+| Ctrl+scroll | Increase or decrease desktop text size |
 | Ctrl+/ or Ctrl+? | Open query help |
 | Ctrl+Shift+M | Request a change between Read-only and Read-write |
 

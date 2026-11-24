@@ -8,7 +8,7 @@
 //! is one edit, and so the light and dark themes cannot drift apart.
 
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::{App, Hsla, Pixels, hsla, px, rgb};
+use gpui_kit::{App, Hsla, hsla, rgb};
 
 use crate::accent;
 use kosha_core::{NodeId, SizeTree};
@@ -393,8 +393,6 @@ impl Category {
 
 /// Named spacing and sizing tokens based on a 4px grid.
 pub mod metrics {
-    use super::*;
-
     pub const ROW_HEIGHT: f32 = 28.0;
     pub const SIDEBAR_WIDTH: f32 = 208.0;
     pub const INSIGHTS_WIDTH: f32 = 300.0;
@@ -460,8 +458,13 @@ pub mod metrics {
     /// ends of itself.
     pub const NAME_MIN_WIDTH: f32 = 220.0;
 
-    pub fn row_height() -> Pixels {
-        px(ROW_HEIGHT)
+    /// Express a baseline logical pixel dimension relative to the desktop text size.
+    pub const fn scaled(baseline: f32) -> gpui_kit::Rems {
+        gpui_kit::rems(baseline / 16.0)
+    }
+
+    pub fn row_height() -> gpui_kit::Rems {
+        scaled(ROW_HEIGHT)
     }
 
     /// Which side rails a window of this width can hold.

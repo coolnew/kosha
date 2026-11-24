@@ -64,13 +64,13 @@ pub fn suggestions(
                     div()
                         .flex_none()
                         .font_family(app.mono())
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(accent)
                         .child(SharedString::from(suggestion.query.clone())),
                 )
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.text_faint)
                         .child(SharedString::from(suggestion.reason.clone())),
                 )
@@ -96,7 +96,7 @@ pub fn suggestions(
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(metrics::TEXT_XS))
+                    .text_size(metrics::scaled(metrics::TEXT_XS))
                     .text_color(palette.text_faint)
                     .child("try"),
             )
@@ -172,7 +172,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                         .items_center()
                         .child(
                             div()
-                                .text_size(px(metrics::TEXT_LG))
+                                .text_size(metrics::scaled(metrics::TEXT_LG))
                                 .text_color(palette.text)
                                 .child("What can I search for?"),
                         )
@@ -182,7 +182,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                 )
                 .child(
                     div()
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(palette.text_dim)
                         .child(
                             "Search in your own words — \"big\", \"old\", \"video\", \
@@ -229,7 +229,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                                     this.child(
                                         div()
                                             .p(px(12.0))
-                                            .text_size(px(metrics::TEXT_SM))
+                                            .text_size(metrics::scaled(metrics::TEXT_SM))
                                             .text_color(palette.text_faint)
                                             .child(
                                                 "Nothing matches that. Try a plainer word — \
@@ -277,7 +277,7 @@ fn row(
                     div()
                         .flex_none()
                         .w(px(56.0))
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         // One neutral for all five kinds. There are five and
                         // the palette has four colours that mean something, so
                         // the fifth had been taken from `category` — the
@@ -292,13 +292,13 @@ fn row(
                 .child(
                     div()
                         .text_color(palette.text)
-                        .text_size(px(metrics::TEXT))
+                        .text_size(metrics::scaled(metrics::TEXT))
                         .child(SharedString::from(label.to_owned())),
                 )
                 .child(
                     div()
                         .ml_auto()
-                        .text_size(px(metrics::TEXT_XS))
+                        .text_size(metrics::scaled(metrics::TEXT_XS))
                         .text_color(palette.text_faint)
                         .child("click to use"),
                 ),
@@ -311,7 +311,7 @@ fn row(
                 .child(
                     div()
                         .flex_1()
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         .text_color(palette.text_dim)
                         .child(SharedString::from(summary.to_owned())),
                 ),
@@ -331,7 +331,7 @@ fn row(
                         .bg(palette.surface)
                         .border_1()
                         .border_color(palette.hairline)
-                        .text_size(px(metrics::TEXT_SM))
+                        .text_size(metrics::scaled(metrics::TEXT_SM))
                         // The accent, which is what a query is drawn in
                         // everywhere else: the result count, the resume chip,
                         // a saved search in the command palette. This is the

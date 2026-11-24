@@ -448,7 +448,11 @@ impl KoshaApp {
                         .w(px(560.0))
                         .max_w(relative(0.92))
                         .max_h(relative(0.9))
-                        .child(div().text_size(px(metrics::TEXT_LG)).child(title))
+                        .child(
+                            div()
+                                .text_size(crate::theme::metrics::scaled(metrics::TEXT_LG))
+                                .child(title),
+                        )
                         .child(
                             div()
                                 .id("ssh-scan-content")

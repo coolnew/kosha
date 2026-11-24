@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+Adjust desktop text size live in Settings → Display, with the keyboard, or
+by holding Ctrl (Command on macOS) while scrolling. Kosha saves the setting
+and can restore the system default.
+
 The Deep Scan Fragmentation column shows folder percentages. Hover over
 a percentage to see how many files were fragmented and how many were checked.
 
