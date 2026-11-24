@@ -4255,7 +4255,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kosha-analyze"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -4270,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-cli"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "crossbeam-channel",
  "ctrlc",
@@ -4293,7 +4293,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-core"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "crossbeam-channel",
  "flate2",
@@ -4308,7 +4308,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-fsops"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "blake3",
  "kosha-core",
@@ -4320,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-gui"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-import"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "flate2",
  "kosha-core",
@@ -4360,7 +4360,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-marketplace"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "kosha-analyze",
  "kosha-core",
@@ -4374,7 +4374,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-query"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "kosha-core",
  "rustc-hash 2.1.3",
@@ -4383,7 +4383,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-remote"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "kosha-core",
  "kosha-scan-wire",
@@ -4398,7 +4398,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-scan-wire"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -4407,7 +4407,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-search"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "kosha-core",
  "kosha-query",
@@ -4419,7 +4419,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-update"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "flate2",
  "kosha-core",
@@ -4439,7 +4439,7 @@ dependencies = [
 
 [[package]]
 name = "kosha-view"
-version = "0.17.1"
+version = "0.17.2"
 dependencies = [
  "kosha-core",
  "kosha-query",

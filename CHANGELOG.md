@@ -4,6 +4,17 @@
 
 Nothing yet.
 
+## [0.17.2] — 2026-11-24
+
+### Fix downloads for in-app updates
+
+Kosha can retrieve and verify the signed bundle that GitHub returns by
+download link for Linux archives, Windows Setup and Apple Silicon disk
+images. Version 0.17.1 can report an available update but cannot read this
+bundle format. Use the [release downloads](https://github.com/coolnew/kosha/releases)
+to install 0.17.2 once. Later attested releases can use the updater from
+Settings or `kosha update install`.
+
 ## [0.17.1] — 2026-11-24
 
 ### Check for and install Kosha updates
@@ -1067,7 +1078,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.17.2...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -1118,3 +1129,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.16.0]: https://github.com/coolnew/kosha/releases/tag/v0.16.0
 
 [0.17.1]: https://github.com/coolnew/kosha/releases/tag/v0.17.1
+
+[0.17.2]: https://github.com/coolnew/kosha/releases/tag/v0.17.2
