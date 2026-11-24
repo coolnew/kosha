@@ -1,8 +1,43 @@
 # Changelog
 
-## [Unreleased]
+## [0.15.0] — 2026-11-24
 
-Nothing yet.
+### Browse a QDirStat cache or import a listing
+
+Open plain or gzip-compressed QDirStat 1.0 and 2.0 caches in the desktop app
+or with `kosha import --from qdirstat`. Results show apparent sizes. The
+desktop listing importer opens in a centered dialog with a preview before
+you save the record.
+
+### Compare snapshots and find checksum candidates
+
+Run `kosha compare BEFORE AFTER` to compare recorded paths, types, sizes and
+timestamps in two saved snapshots. Use `--format jsonl` for structured output.
+
+Run `kosha duplicate-candidates --algorithm md5 LISTING` on an rclone listing to
+find equal-size files with a shared recorded checksum. These are candidates
+for review based on the listing. Kosha does not open the referenced files.
+
+### Scan over SSH from an opt-in source build
+
+Build Kosha with the SSH client feature and use `kosha remote HOST --path PATH` or the
+desktop SSH dialog. The remote machine needs a compatible `kosha serve-scan`.
+The client verifies the server against `known_hosts`, uses an SSH agent or a
+selected key, and opens the returned snapshot read-only. Standard downloads
+keep SSH scanning disabled.
+
+### Refine duplicate searches and review cleanup safely
+
+Adjust the minimum file size and estimated read budget in desktop Settings.
+The result shows how many files and what sizes were omitted when the budget
+limited the search. Build-cache cleanup suggestions skip directories that
+contain a Git worktree. See issue #19.
+
+### See mounted external drives on macOS
+
+Mounted volumes under `/Volumes` appear in the sidebar, and the list refreshes
+when you return to Kosha. macOS may request permission when you start a scan.
+See issue #20.
 
 ## [0.14.0] — 2026-11-22
 
@@ -967,7 +1002,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.15.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -1012,3 +1047,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.13.2]: https://github.com/coolnew/kosha/releases/tag/v0.13.2
 
 [0.14.0]: https://github.com/coolnew/kosha/releases/tag/v0.14.0
+
+[0.15.0]: https://github.com/coolnew/kosha/releases/tag/v0.15.0

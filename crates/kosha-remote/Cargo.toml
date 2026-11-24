@@ -13,7 +13,7 @@ ssh = ["dep:kosha-core", "dep:kosha-scan-wire", "dep:libc", "dep:ring", "dep:rus
 
 [dependencies]
 kosha-core = { workspace = true, optional = true }
-kosha-scan-wire = { path = "../kosha-scan-wire", version = "0.14.0", optional = true }
+kosha-scan-wire = { workspace = true, optional = true }
 russh = { version = "=0.65.4", default-features = false, features = ["ring", "rsa"], optional = true }
 ring = { version = "=0.17.14", optional = true }
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }

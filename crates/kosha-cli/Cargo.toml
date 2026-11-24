@@ -22,9 +22,9 @@ kosha-core.workspace = true
 kosha-view.workspace = true
 kosha-analyze.workspace = true
 kosha-query.workspace = true
-kosha-remote = { path = "../kosha-remote", version = "0.14.0", features = ["ssh"], optional = true }
+kosha-remote = { workspace = true, optional = true }
 kosha-search.workspace = true
-kosha-scan-wire = { path = "../kosha-scan-wire", version = "0.14.0", optional = true }
+kosha-scan-wire = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 kosha-import.workspace = true
 kosha-marketplace.workspace = true
