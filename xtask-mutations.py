@@ -84,6 +84,24 @@ EXCEPTIONS = {
     ),
 }
 
+# Allow these updater operations individually. The launcher is removed only
+# if this transaction created it and it still points to our current release.
+# The other calls touch newly staged executables and the managed pointer
+# under Kosha's user-private installation directory.
+MANAGED_LINUX = "crates/kosha-update/src/managed_linux.rs"
+MANAGED_LINUX_STATEMENTS = {
+    "let _ = fs::remove_file(path);",
+    "file.set_permissions(fs::Permissions::from_mode(0o755))?;",
+    "fs::rename(staging.path(), &destination)?;",
+    'fs::rename(staging.path().join("current"), self.root.join("current"))?;',
+}
+
+
+def is_exception(path: str, statement: str) -> bool:
+    return path in EXCEPTIONS or (
+        path == MANAGED_LINUX and statement in MANAGED_LINUX_STATEMENTS
+    )
+
 
 def production(path: pathlib.Path):
     """The file's lines, with any `#[cfg(test)] mod …` block left out.
@@ -130,7 +148,7 @@ def main() -> int:
                         continue
                     if crate.name == ALLOWED_CRATE:
                         explained += 1
-                    elif posix in EXCEPTIONS:
+                    elif is_exception(posix, stripped):
                         explained += 1
                     else:
                         unexplained.append((posix, number, word, stripped[:70]))
@@ -149,7 +167,7 @@ def main() -> int:
         print("it — which is a thing a reviewer should stop on.")
         return 1
 
-    print(f"Only {ALLOWED_CRATE} mutates, plus {len(EXCEPTIONS)} argued exceptions.")
+    print(f"Only {ALLOWED_CRATE} mutates, plus documented exceptions.")
     print(f"{explained} call sites, all accounted for.")
     return 0
 

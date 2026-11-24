@@ -4,51 +4,10 @@
 
 Nothing yet.
 
-## [0.17.0] — 2026-11-24
+## 0.17.0 ? packaging stopped
 
-### Check for and install Kosha updates
-
-Check for a new stable release in Settings → **Software updates** or with
-`kosha update check`. Optional daily notifications are shared by the desktop
-and terminal. The manual explains each installation channel.
-
-- **Linux:** Install a newer attested release from Settings or with
-  `kosha update install`. The managed CLI and GUI launchers switch together.
-  Use `kosha update rollback` to restore the previous retained release.
-- **Windows:** Setup installs can verify and open the newer installer for the
-  registered installation. Store installs open Microsoft Store updates.
-  Portable ZIP users can extract a new copy to a fresh folder.
-- **macOS:** Verify and open the newer GitHub disk image from Settings or the
-  CLI, then replace the app in Finder. macOS may ask for approval when opening
-  builds distributed without Apple notarization.
-
-### Adjust desktop text size
-
-Change text size live in Settings → **Display**, with the keyboard, or by
-holding Ctrl (Command on macOS) while scrolling. Kosha saves the setting and
-can restore the system default.
-
-### Read folder fragmentation more easily
-
-The Deep Scan Fragmentation column shows folder percentages. Hover over a
-percentage to see how many files were fragmented and how many were checked.
-
-Check for new stable releases from desktop Settings or `kosha update`,
-with optional daily notifications, package integrity checks, and installation
-guidance for your channel.
-
-Install a newer attested Linux release from Settings or `kosha update install`.
-Both managed launchers switch together, and `kosha update rollback` restores
-a retained release. Windows Setup copies can verify and open the newer
-installer directly. Store copies open Microsoft Store updates. Apple Silicon
-copies can verify and open the newer GitHub disk image for installation in Finder.
-
-Adjust desktop text size live in Settings → Display, with the keyboard, or
-by holding Ctrl (Command on macOS) while scrolling. Kosha saves the setting
-and can restore the system default.
-
-The Deep Scan Fragmentation column shows folder percentages. Hover over
-a percentage to see how many files were fragmented and how many were checked.
+The release workflow stopped before publishing binaries. Version 0.17.1
+replaces this attempt.
 
 ## [0.16.0] — 2026-11-24
 
@@ -1128,5 +1087,3 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.15.0]: https://github.com/coolnew/kosha/releases/tag/v0.15.0
 
 [0.16.0]: https://github.com/coolnew/kosha/releases/tag/v0.16.0
-
-[0.17.0]: https://github.com/coolnew/kosha/releases/tag/v0.17.0

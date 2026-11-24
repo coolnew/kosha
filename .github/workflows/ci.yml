@@ -186,6 +186,9 @@ jobs:
       - name: Release and publication script tests
         run: python3 -m unittest discover -p 'test_*.py'
 
+      - name: Filesystem mutation boundaries
+        run: python3 xtask-mutations.py
+
       # CONTRIBUTING.md says the DCO is enforced here. Until
       # this step existed they were describing something that did not happen,
       # and an unsigned commit would have merged with the build green.

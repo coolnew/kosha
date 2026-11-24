@@ -38,6 +38,19 @@ def git(root, *args):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_managed_updater_mutations_have_narrow_exceptions(self):
+        guard = load("xtask-mutations")
+        actual = {
+            line.strip()
+            for _, line in guard.production(ROOT / guard.MANAGED_LINUX)
+            if not line.strip().startswith("//")
+            and any(word in line for word in guard.MUTATIONS)
+        }
+        self.assertEqual(actual, guard.MANAGED_LINUX_STATEMENTS)
+        self.assertFalse(guard.is_exception(guard.MANAGED_LINUX, 'fs::remove_file(user_file)?;'))
+        for statement in actual:
+            self.assertFalse(guard.is_exception("crates/kosha-cli/src/update.rs", statement))
+
     def test_ci_reuse_omits_only_rust_validation_and_keeps_native_python_gates(self):
         normal=release.validation_commands(ROOT)
         reused=release.validation_commands(ROOT,reuse_rust=True)
