@@ -119,6 +119,32 @@ fn run(args: &[&str], home: &Path) -> Output {
         .expect("kosha runs")
 }
 
+#[test]
+fn opted_in_updates_leave_redirected_scan_and_export_untouched() {
+    let home = tempfile::tempdir().unwrap();
+    let fixture = fixture();
+    let root = fixture.path().to_str().unwrap();
+    let enabled = run(&["update", "automatic", "on"], home.path());
+    assert!(enabled.status.success());
+    let data = if cfg!(windows) {
+        home.path().join("local/coolnew/kosha")
+    } else if cfg!(target_os = "macos") {
+        home.path()
+            .join("Library/Application Support/app.coolnew.kosha")
+    } else {
+        home.path().join("data/kosha")
+    };
+    let state = data.join("updates/state.json");
+    let before = std::fs::read(&state).unwrap();
+    let ordinary = run(&[root], home.path());
+    assert!(ordinary.status.success());
+    let export = run(&[root, "--export", "json"], home.path());
+    assert!(export.status.success());
+    assert!(serde_json::from_slice::<serde_json::Value>(&export.stdout).is_ok());
+    assert_eq!(std::fs::read(state).unwrap(), before);
+    assert!(!String::from_utf8_lossy(&ordinary.stderr).contains("Update guide"));
+}
+
 fn text(out: &Output) -> String {
     assert!(
         out.status.success(),

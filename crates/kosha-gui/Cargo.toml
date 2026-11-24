@@ -32,6 +32,7 @@ kosha-remote = { workspace = true, optional = true }
 kosha-scan-wire = { workspace = true, optional = true }
 kosha-search.workspace = true
 kosha-marketplace.workspace = true
+kosha-update.workspace = true
 gpui-kit = "0.6"
 rustc-hash.workspace = true
 anyhow.workspace = true

@@ -136,6 +136,32 @@ its operator can receive ordinary connection and authentication information
 and can apply their own logging policies. See the
 [opt-in SSH instructions](docs/manual/cloud-and-other-machines.md#ssh-scanning-in-opt-in-builds).
 
+## Optional software update checks
+
+On request, or at launch if you turn on daily checks, Kosha queries the public
+GitHub Releases API for the latest stable release. The request includes a fixed
+Kosha user agent. It carries no files, scan paths, search terms, local version,
+account credentials or installation identifier. GitHub receives ordinary
+connection information such as the IP address. A local state file records the
+preference, the daily check reservation, the last result and the version shown.
+Structured output, export and internal remote scan helpers never make launch
+update checks. Selecting a download or installation link opens the relevant
+service in the browser or system application.
+
+When you request package verification, Kosha fetches the selected release's
+asset metadata and checks the local file without uploading it. The optional
+Linux direct download also contacts GitHub's release delivery service and
+writes the checked archive into the directory you select. A managed Linux
+install also retrieves public attestation records by package digest, stages
+the download locally, and updates Kosha's per-user executable files and
+launchers after verification.
+On Windows, requesting a Setup update retrieves the same public provenance
+records and opens the verified installer interactively. The downloaded
+installer stays in Kosha's local update directory so Setup can relaunch
+itself if needed. The macOS update action uses the same GitHub requests and
+opens the checked image in macOS DiskImageMounter. The image stays in local
+update storage while you finish installation.
+
 ## Optional marketplace network requests
 
 When you request a marketplace sync or download a recipe or insight pack, Kosha makes HTTPS

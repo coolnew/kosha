@@ -31,8 +31,10 @@ Var PathMode
 Var PathType
 Var PathAdded
 Var RequestedDir
+Var UpdateOnly
 !insertmacro MUI_PAGE_WELCOME
 Page custom Options OptionsLeave
+!define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPre
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -66,6 +68,9 @@ Function Elevate
   System::Call 'shell32::IsUserAnAdmin() i.r0'
   ${If} $0 == 0
     StrCpy $0 "/ALLUSERS /AddToPath=$AddPath"
+    ${If} $UpdateOnly == 1
+      StrCpy $0 "$0 /KOSHAUPDATE"
+    ${EndIf}
     ${If} ${Silent}
       StrCpy $0 "$0 /S"
     ${EndIf}
@@ -94,6 +99,13 @@ Function .onInit
   StrCpy $Machine 0
   StrCpy $AddPath 1
   ${GetParameters} $Args
+  StrCpy $UpdateOnly 0
+  ClearErrors
+  ${GetOptions} $Args "/KOSHAUPDATE" $0
+  ${IfNot} ${Errors}
+    StrCpy $UpdateOnly 1
+    StrCpy $RequestedDir ""
+  ${EndIf}
   ClearErrors
   ${GetOptions} $Args "/ALLUSERS" $0
   ${IfNot} ${Errors}
@@ -115,7 +127,16 @@ Function .onInit
   Call SetScope
 FunctionEnd
 
+Function DirectoryPre
+  ${If} $UpdateOnly == 1
+    Abort
+  ${EndIf}
+FunctionEnd
+
 Function Options
+  ${If} $UpdateOnly == 1
+    Abort
+  ${EndIf}
   nsDialogs::Create 1018
   Pop $Dialog
   ${NSD_CreateLabel} 0 0 100% 28u "Install Kosha for yourself, or choose all users (requires administrator approval). Close Kosha before upgrading."
@@ -241,7 +262,42 @@ FunctionEnd
 !insertmacro ChangePath ""
 !insertmacro ChangePath "un."
 
+!macro ProbeUpdateFile Name
+  ; Open for write without altering the file. A running image or other writer
+  ; can prevent overwriting it. Check the pair before copying either file.
+  System::Call 'kernel32::CreateFileW(w "$INSTDIR\${Name}", i 0x40000000, i 1, p 0, i 3, i 0x80, p 0) p.r0'
+  ${If} $0 P= -1
+    Goto update_busy
+  ${EndIf}
+  System::Call 'kernel32::CloseHandle(p r0)'
+!macroend
+
+Function CheckUpdateTarget
+  ReadRegStr $0 SHCTX "${KEY}" "InstallLocation"
+  ${If} $0 == ""
+  ${OrIf} $0 != $INSTDIR
+    MessageBox MB_ICONSTOP "The existing Kosha installation could not be found for this scope." /SD IDOK
+    SetErrorLevel 1605
+    Abort
+  ${EndIf}
+  IfFileExists "$INSTDIR\Uninstall.exe" update_retry
+  MessageBox MB_ICONSTOP "The existing Kosha installation could not be verified." /SD IDOK
+  SetErrorLevel 1605
+  Abort
+update_retry:
+  !insertmacro ProbeUpdateFile "kosha.exe"
+  !insertmacro ProbeUpdateFile "kosha-gui.exe"
+  Return
+update_busy:
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close Kosha and any terminal scans, then choose Retry. If they are already closed, check that you can modify this installation." /SD IDCANCEL IDRETRY update_retry
+  SetErrorLevel 1602
+  Abort
+FunctionEnd
+
 Section "Kosha"
+  ${If} $UpdateOnly == 1
+    Call CheckUpdateTarget
+  ${EndIf}
   ReadRegStr $0 SHCTX "${KEY}" "NumericVersion"
   ${If} $0 != ""
     ${VersionCompare} $0 "@NUMERIC@" $1

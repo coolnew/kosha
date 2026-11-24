@@ -24,6 +24,16 @@ artifact when data or scope changes; view sessions cannot refresh or widen it.
 
 ## Discover and run
 
+`kosha update check` explicitly contacts GitHub for release metadata. Launch
+checks are opt-in and skip redirected and structured-output commands. Set
+`KOSHA_NO_UPDATE_CHECK=1` to disable checks in a process.
+On supported Linux builds, user-approved `kosha update install` downloads and
+verifies a newer attested release and switches the managed user launchers.
+`kosha update rollback [VERSION]` restores a retained Linux release locally.
+On recognized Windows Setup installs it downloads and verifies Setup and
+opens the interactive installer. Store-installed copies use Microsoft Store.
+On Apple Silicon it verifies and opens the GitHub DMG for installation in Finder.
+
 Use installed help as the authority for the available version:
 
 ```sh

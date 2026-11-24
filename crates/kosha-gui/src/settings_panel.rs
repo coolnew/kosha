@@ -68,6 +68,7 @@ enum OptionId {
     Rescan,
     File,
     Version,
+    Updates,
 }
 #[derive(Clone, Copy)]
 enum Availability {
@@ -101,6 +102,14 @@ struct OptionSpec {
 // Search and rendering read the same labels and explanations, so a phrase a
 // person has just read remains findable after the wording changes.
 const OPTIONS: &[OptionSpec] = &[
+    OptionSpec {
+        id: OptionId::Updates,
+        group: Group::Advanced,
+        label: "Software updates",
+        description: "Kosha checks GitHub at most once every 24 hours. Install updates using the channel you already use.",
+        keywords: "check download release upgrade installer",
+        availability: Availability::Always,
+    },
     OptionSpec {
         id: OptionId::TextSize,
         group: Group::Display,
@@ -474,6 +483,7 @@ fn render_option(
 ) -> AnyElement {
     let settings = app.settings();
     let control = match spec.id {
+        OptionId::Updates => updates(app, palette, cx).into_any_element(),
         OptionId::Units => choice(
             palette,
             spec.label,
@@ -650,6 +660,175 @@ fn render_option(
         );
     }
     row.into_any_element()
+}
+
+fn updates(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> impl IntoElement {
+    let status = if let Some(verification) = &app.update_verification {
+        verification.clone()
+    } else if app.update_busy {
+        "Checking for updates…".into()
+    } else if app.update_preference_error {
+        "Could not save the update preference. Try again shortly.".into()
+    } else {
+        app.update_status.as_ref().map_or_else(
+            || "Check GitHub for a newer stable release.".into(),
+            kosha_update::Check::message,
+        )
+    };
+    let downloads = match &app.update_status {
+        Some(kosha_update::Check::Latest(release)) => release.release_url(),
+        _ => kosha_update::RELEASES.to_owned(),
+    };
+    let packages = match &app.update_status {
+        Some(kosha_update::Check::Latest(release)) if release.is_newer() => Some(release),
+        _ => None,
+    };
+    #[cfg(target_os = "linux")]
+    let linux_install = packages.is_some_and(|_| {
+        kosha_update::Package::for_host().contains(&kosha_update::Package::LinuxArchive)
+    });
+    #[cfg(windows)]
+    let windows_install = packages.is_some_and(|_| kosha_update::windows_setup_scope().is_some());
+    #[cfg(target_os = "macos")]
+    let macos_install = packages
+        .is_some_and(|_| kosha_update::Package::for_host().contains(&kosha_update::Package::Dmg));
+    let managed = matches!(app.update_status, Some(kosha_update::Check::Managed));
+    let automatic = if app.update_automatic == Some(true) {
+        "Turn off daily checks"
+    } else {
+        "Turn on daily checks"
+    };
+    let panel = v_flex()
+        .gap(px(6.0))
+        .child("Software updates")
+        .child(ui::hint(
+            palette,
+            format!("Installed Kosha {} · {status}", kosha_core::version::NUMBER),
+        ))
+        .when_some(packages, |panel, release| {
+            panel.child(
+                h_flex().gap(px(6.0)).flex_wrap().children(
+                    kosha_update::Package::for_host()
+                        .iter()
+                        .enumerate()
+                        .map(|(index, &package)| {
+                            let url = release.download_url(package);
+                            ui::primary(("update-package", index), palette, false)
+                                .focusable()
+                                .tab_stop(true)
+                                .child(package.label())
+                                .on_click(move |_, _, cx| cx.open_url(&url))
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        })
+        .child(
+            h_flex()
+                .gap(px(6.0))
+                .flex_wrap()
+                .when(!managed, |buttons| {
+                    buttons.child(
+                        ui::button("update-check", palette)
+                            .focusable()
+                            .tab_stop(true)
+                            .child("Check for updates")
+                            .when(app.update_busy, |button| button.opacity(0.5))
+                            .on_click(cx.listener(|app, _, _, cx| app.check_updates(true, cx))),
+                    )
+                })
+                .when(managed, |buttons| {
+                    buttons.child(
+                        ui::button("update-store", palette)
+                            .focusable()
+                            .tab_stop(true)
+                            .child("Open Microsoft Store updates")
+                            .on_click(|_, _, cx| cx.open_url(kosha_update::STORE_UPDATES)),
+                    )
+                })
+                .child(
+                    ui::button("update-downloads", palette)
+                        .focusable()
+                        .tab_stop(true)
+                        .child("Release downloads")
+                        .on_click(move |_, _, cx| cx.open_url(&downloads)),
+                )
+                .child(
+                    ui::button("update-guide", palette)
+                        .focusable()
+                        .tab_stop(true)
+                        .child("Update guide")
+                        .on_click(|_, _, cx| cx.open_url(kosha_update::GUIDE)),
+                )
+                .when(
+                    matches!(app.update_status, Some(kosha_update::Check::Latest(_))),
+                    |buttons| {
+                        buttons.child(
+                            ui::button("update-verify", palette)
+                                .focusable()
+                                .tab_stop(true)
+                                .child("Verify downloaded file")
+                                .when(app.update_busy, |button| button.opacity(0.5))
+                                .on_click(
+                                    cx.listener(|app, _, _, cx| app.verify_update_download(cx)),
+                                ),
+                        )
+                    },
+                ),
+        )
+        .when(!managed, |panel| {
+            panel.child(
+                ui::button("update-automatic", palette)
+                    .focusable()
+                    .tab_stop(true)
+                    .child(automatic)
+                    .when(app.update_busy, |button| button.opacity(0.5))
+                    .on_click(cx.listener(|app, _, _, cx| app.toggle_update_checks(cx))),
+            )
+        });
+    #[cfg(target_os = "linux")]
+    let panel = panel.when(linux_install, |panel| {
+        panel.child(ui::hint(palette, "Install a managed copy for your account using ~/.local/bin. Existing launchers are preserved."))
+            .child(ui::primary("update-install-linux", palette, false)
+                .focusable()
+                .tab_stop(true)
+                .child("Download and install update")
+                .when(app.update_busy, |button| button.opacity(0.5))
+                .on_click(cx.listener(|app, _, _, cx| app.install_release_update(cx))))
+    });
+    #[cfg(windows)]
+    let panel = panel.when(windows_install, |panel| {
+        panel
+            .child(ui::hint(
+                palette,
+                "Open the verified installer, then close Kosha and finish the upgrade in Setup.",
+            ))
+            .child(
+                ui::primary("update-install-windows", palette, false)
+                    .focusable()
+                    .tab_stop(true)
+                    .child("Download and open Setup")
+                    .when(app.update_busy, |button| button.opacity(0.5))
+                    .on_click(cx.listener(|app, _, _, cx| app.install_release_update(cx))),
+            )
+    });
+    #[cfg(target_os = "macos")]
+    let panel = panel.when(macos_install, |panel| {
+        panel
+            .child(ui::hint(
+                palette,
+                "Open the verified disk image, then replace Kosha in Applications.",
+            ))
+            .child(
+                ui::primary("update-install-macos", palette, false)
+                    .focusable()
+                    .tab_stop(true)
+                    .child("Download and open DMG")
+                    .when(app.update_busy, |button| button.opacity(0.5))
+                    .on_click(cx.listener(|app, _, _, cx| app.install_release_update(cx))),
+            )
+    });
+    panel
 }
 
 fn text_size(

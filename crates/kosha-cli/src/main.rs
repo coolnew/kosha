@@ -31,6 +31,7 @@ mod search;
 #[cfg(feature = "remote-serve")]
 mod serve_scan;
 mod snapshots;
+mod update;
 mod views;
 
 const USAGE: &str = "\
@@ -40,6 +41,7 @@ USAGE:
     kosha <PATH> [OPTIONS]
     kosha <SNAPSHOT.kosha> [OPTIONS]   full/relative path, or exact saved filename
     kosha --snapshots
+    kosha update [check|open|download [PACKAGE] [--to DIR]|verify FILE|install|rollback [VERSION]|automatic on|automatic off]
     kosha fragmentation PATH [--max-files N] [--export json]
     kosha --caches [--cache-dir DIR] [--export json|jsonl]
     kosha search --describe \"files larger than ten megabytes\"
@@ -293,12 +295,20 @@ fn main() -> ExitCode {
         }
     }
     let result = match parse() {
-        Ok(Parsed::Run(args)) => run(*args),
+        Ok(Parsed::Run(args)) => {
+            let notice = update::for_scan(&args);
+            let result = run(*args);
+            if result.is_ok() {
+                update::finish_notice(notice);
+            }
+            result
+        }
         Ok(Parsed::View(args)) => return views::run(&args),
         Ok(Parsed::Caches(args)) => cache::list(&args),
         Ok(Parsed::Fragmentation(args)) => fragmentation_report(&args),
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
+        Ok(Parsed::Update(args)) => update::run(&args).map_err(Into::into),
         Ok(Parsed::Import(args)) => import::run(&args),
         Ok(Parsed::ChecksumCandidates(args)) => checksum_candidates::run(&args),
         Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
@@ -1993,6 +2003,7 @@ enum Parsed {
     Run(Box<Args>),
     Search(Box<search::Args>),
     Marketplace(Vec<String>),
+    Update(Vec<String>),
     Import(Box<import::Args>),
     ChecksumCandidates(Vec<String>),
     CompareSnapshots(Vec<String>),
@@ -2037,6 +2048,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "marketplace") {
         argv.next();
         return Ok(Parsed::Marketplace(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "update") {
+        argv.next();
+        return Ok(Parsed::Update(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "import") {
         argv.next();

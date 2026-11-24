@@ -49,6 +49,37 @@ fn config_dir(home: &Path) -> std::path::PathBuf {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn update_rollback_switches_the_managed_pair_from_the_cli() {
+    use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let home = tempfile::tempdir().unwrap();
+    let root = data_dir(home.path()).join("managed-install");
+    fs::create_dir_all(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    for version in ["v1.0.0", "v1.1.0"] {
+        let directory = root.join(version);
+        fs::create_dir(&directory).unwrap();
+        for binary in ["kosha", "kosha-gui"] {
+            let path = directory.join(binary);
+            fs::write(&path, version).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    symlink("v1.1.0", root.join("current")).unwrap();
+
+    let output = run(&["update", "rollback"], home.path());
+    assert!(output.status.success(), "{}", err(&output));
+    assert!(out(&output).contains("Kosha 1.0.0 is active"));
+    assert_eq!(fs::read(root.join("current/kosha-gui")).unwrap(), b"v1.0.0");
+
+    let output = run(&["update", "rollback", "1.1.0"], home.path());
+    assert!(output.status.success(), "{}", err(&output));
+    assert_eq!(fs::read(root.join("current/kosha")).unwrap(), b"v1.1.0");
+}
+
 #[test]
 fn cache_inventory_lists_shared_and_custom_records_without_reading_the_source() {
     let home = tempfile::tempdir().unwrap();

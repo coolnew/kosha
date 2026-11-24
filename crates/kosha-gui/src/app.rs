@@ -155,6 +155,12 @@ pub struct KoshaApp {
     changing_recipe_packs: bool,
     marketplace_catalog: Option<Arc<kosha_marketplace::catalog::Catalog>>,
     syncing_marketplace: bool,
+    pub(crate) update_automatic: Option<bool>,
+    pub(crate) update_busy: bool,
+    pub(crate) update_status: Option<kosha_update::Check>,
+    update_notice: bool,
+    pub(crate) update_preference_error: bool,
+    pub(crate) update_verification: Option<String>,
     search_generation: u64,
     search_cancel: Option<Arc<AtomicBool>>,
     search_index: Option<Arc<kosha_search::SearchIndex>>,
@@ -444,6 +450,12 @@ impl KoshaApp {
             changing_recipe_packs: false,
             marketplace_catalog: kosha_marketplace::catalog::cached().ok().map(Arc::new),
             syncing_marketplace: false,
+            update_automatic: None,
+            update_busy: false,
+            update_status: None,
+            update_notice: false,
+            update_preference_error: false,
+            update_verification: None,
             search_generation: 0,
             search_cancel: None,
             search_index: None,
@@ -2807,6 +2819,127 @@ impl KoshaApp {
             .ok();
         })
         .detach();
+    }
+
+    pub(crate) fn check_updates(&mut self, manual: bool, cx: &mut Context<Self>) {
+        self.update_request(manual, None, cx);
+    }
+
+    pub(crate) fn toggle_update_checks(&mut self, cx: &mut Context<Self>) {
+        self.update_request(false, Some(!self.update_automatic.unwrap_or_default()), cx);
+    }
+
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    pub(crate) fn install_release_update(&mut self, cx: &mut Context<Self>) {
+        if self.update_busy {
+            return;
+        }
+        let Some(kosha_update::Check::Latest(release)) = self.update_status.clone() else {
+            return;
+        };
+        if !release.is_newer() {
+            return;
+        }
+        let version = release.version().to_string();
+        self.update_busy = true;
+        self.update_verification = Some(format!("Downloading and verifying Kosha {version}…"));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    #[cfg(target_os = "linux")]
+                    let result = kosha_update::managed_linux::install_update(&release)
+                        .map(|()| format!("Kosha {version} is installed. Quit and open ~/.local/bin/kosha-gui to use it."));
+                    #[cfg(windows)]
+                    let result = kosha_update::install_windows_update(&release)
+                        .map(|()| "Setup opened. Close Kosha, then finish the upgrade in Setup.".into());
+                    #[cfg(target_os = "macos")]
+                    let result = kosha_update::open_macos_update(&release)
+                        .map(|()| "Disk image opened. Quit Kosha and replace Kosha.app in Applications.".into());
+                    result
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                app.update_busy = false;
+                app.update_verification = Some(match result {
+                    Ok(message) => {
+                        app.update_status = None;
+                        app.update_notice = false;
+                        message
+                    }
+                    Err(error) => format!("Could not install the update. {error}"),
+                });
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    pub(crate) fn verify_update_download(&mut self, cx: &mut Context<Self>) {
+        if self.update_busy {
+            return;
+        }
+        let Some(kosha_update::Check::Latest(release)) = self.update_status.clone() else {
+            return;
+        };
+        self.update_busy = true;
+        self.update_verification = Some("Choose the package you downloaded.".into());
+        cx.notify();
+        let prompt = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Verify package".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let selection = prompt.await;
+            let path = this.update(cx, |app, cx| {
+                app.file_picker_selection(selection, cx).and_then(|paths| paths.into_iter().next())
+            }).ok().flatten();
+            let message = if let Some(path) = path {
+                this.update(cx, |app, cx| {
+                    app.update_verification = Some("Checking size and SHA-256…".into());
+                    cx.notify();
+                }).ok();
+                let result = cx.background_spawn(async move { kosha_update::verify_package(&release, &path) }).await;
+                Some(match result {
+                    Ok(()) => "Package size and SHA-256 match GitHub. Follow the update guide to install it.".into(),
+                    Err(error) => format!("Could not verify the package. {error}"),
+                })
+            } else { None };
+            this.update(cx, |app, cx| {
+                app.update_busy = false;
+                app.update_verification = message;
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    fn update_request(&mut self, manual: bool, preference: Option<bool>, cx: &mut Context<Self>) {
+        if self.update_busy {
+            return;
+        }
+        self.update_busy = true;
+        self.update_preference_error = false;
+        self.update_verification = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let (automatic, status, notice, error) = cx.background_spawn(async move {
+                let error = preference.is_some_and(|enabled| kosha_update::set_automatic(enabled).is_err());
+                let automatic = kosha_update::automatic().ok();
+                let status = kosha_update::check(manual);
+                let notice = matches!(&status, kosha_update::Check::Latest(release) if kosha_update::take_notice(release));
+                (automatic, status, notice, error)
+            }).await;
+            this.update(cx, |app, cx| {
+                app.update_busy = false;
+                app.update_automatic = automatic;
+                app.update_preference_error = error;
+                app.update_notice = automatic == Some(true) && (app.update_notice || notice)
+                    && matches!(&status, kosha_update::Check::Latest(release) if release.is_newer());
+                app.update_status = Some(status);
+                cx.notify();
+            }).ok();
+        }).detach();
     }
 
     fn choose_recipe_pack(&mut self, cx: &mut Context<Self>) {
@@ -8547,6 +8680,28 @@ impl KoshaApp {
             // it is the one that gives way — and it ellipsises rather than
             // being clipped, so it is visibly abbreviated rather than broken.
             .child(div().min_w(px(0.0)).truncate().child(text))
+            .when(self.update_notice, |bar| {
+                bar.child(
+                    div()
+                        .id("update-available")
+                        .flex_none()
+                        .cursor_pointer()
+                        .focusable()
+                        .tab_stop(true)
+                        .text_color(palette.accent)
+                        .child("Update available")
+                        .on_click(cx.listener(|app, _, window, cx| {
+                            app.settings_search.update(cx, |input, cx| {
+                                input.set_value("software updates", window, cx)
+                            });
+                            if !app.settings_open {
+                                app.toggle_settings(window, cx);
+                            }
+                            app.update_notice = false;
+                            cx.notify();
+                        })),
+                )
+            })
             // **The skipped list, which was a number and nowhere to go.**
             // `ui.md` has promised since the beginning that "the status bar
             // links to the skipped list", and the query language has had an
@@ -8916,6 +9071,7 @@ pub fn open(
         let view: Entity<KoshaApp> = cx.new(|cx| {
             let path = start.path.clone();
             let mut app = KoshaApp::new(window, loaded, start, theme, cx);
+            app.check_updates(false, cx);
             #[cfg(target_os = "macos")]
             cx.observe_window_activation(window, |app, window, cx| {
                 if window.is_window_active() {

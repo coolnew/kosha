@@ -1,0 +1,30 @@
+[package]
+name = "kosha-update"
+description = "Shared release discovery and update guidance for Kosha"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+kosha-core.workspace = true
+semver = "1"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tempfile = "3"
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+
+[target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
+sigstore-trust-root = { version = "0.16", default-features = false }
+sigstore-types = "0.16"
+sigstore-verify = { version = "0.16", default-features = false, features = ["aws-lc-rs"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+flate2 = "1"
+tar = { version = "0.4.46", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Storage_Packaging_Appx", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

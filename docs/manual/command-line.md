@@ -21,6 +21,12 @@ is `kosha-gui`. Quote paths and queries containing spaces or shell operators.
 Ordinary path invocations scan freshly at full depth. They do not read or update
 the GUI cache. A depth limit requires an explicit `--depth` flag.
 
+## Software updates
+
+Run `kosha update check` to view the installed version, the latest stable
+release, and the update guide. Run `kosha update open` to open the relevant
+release or installer guidance. See [updating an existing installation](downloads.md#update-an-existing-installation).
+
 ## Scan and query
 
 For deliberately shared metadata and a fixed-source automation session, see

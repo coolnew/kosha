@@ -11,6 +11,7 @@ members = [
     "crates/kosha-scan-wire",
     "crates/kosha-remote",
     "crates/kosha-marketplace",
+    "crates/kosha-update",
     "crates/kosha-cli",
     "crates/kosha-gui",
 ]
@@ -35,6 +36,7 @@ kosha-scan-wire = { path = "crates/kosha-scan-wire", version = "0.16.0" }
 kosha-remote = { path = "crates/kosha-remote", version = "0.16.0", features = ["ssh"] }
 
 kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.16.0" }
+kosha-update = { path = "crates/kosha-update", version = "0.16.0" }
 
 rayon = "1.10"
 rustc-hash = "2"

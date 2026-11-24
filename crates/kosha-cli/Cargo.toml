@@ -28,6 +28,7 @@ kosha-scan-wire = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 kosha-import.workspace = true
 kosha-marketplace.workspace = true
+kosha-update.workspace = true
 ctrlc = "3"
 serde_json.workspace = true
 serde.workspace = true

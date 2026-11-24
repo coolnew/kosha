@@ -26,6 +26,9 @@ switch either preference back to System without resetting the other.
 | Scanning | Mount boundaries, image reading, ownership collection, and platform-specific allocation, hardlink, or NTFS options |
 | Advanced | Analysis thresholds in the JSON settings file and the version to include in bug reports |
 
+Search for **Software updates** to check the current version, turn daily
+checks on or off, and find the [installation route for your copy](downloads.md#update-an-existing-installation).
+
 In **Settings → Display → Text size**, use **−** and **+** to resize text live
 from 80% to 150%. Kosha remembers your preference. **System default** restores
 the normal size for your display. You can also use **Ctrl+Plus**, **Ctrl+Minus**,

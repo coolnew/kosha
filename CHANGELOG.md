@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+Check for new stable releases from desktop Settings or `kosha update`,
+with optional daily notifications, package integrity checks, and installation
+guidance for your channel.
+
+Install a newer attested Linux release from Settings or `kosha update install`.
+Both managed launchers switch together, and `kosha update rollback` restores
+a retained release. Windows Setup copies can verify and open the newer
+installer directly. Store copies open Microsoft Store updates. Apple Silicon
+copies can verify and open the newer GitHub disk image for installation in Finder.
+
 Adjust desktop text size live in Settings → Display, with the keyboard, or
 by holding Ctrl (Command on macOS) while scrolling. Kosha saves the setting
 and can restore the system default.
