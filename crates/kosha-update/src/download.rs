@@ -16,7 +16,7 @@ use super::{ENDPOINT, Package, Release, bounded, decode, managed_windows_package
 const MAX_ASSET_BYTES: u64 = 512 * 1024 * 1024;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 const MAX_PROVENANCE_BYTES: usize = 512 * 1024;
-#[cfg(any(windows, target_os = "linux", target_os = "macos", test))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 const PROVENANCE_COUNT: usize = 8;
 
 #[derive(Deserialize)]
@@ -379,6 +379,15 @@ pub fn prepare_package(
     {
         return Err(invalid("Choose a newer release for this installation"));
     }
+    prepare_download(release, package, staging_dir)
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn prepare_download(
+    release: &Release,
+    package: Package,
+    staging_dir: &Path,
+) -> io::Result<PreparedPackage> {
     let asset = asset(release, package)?;
     let digest = asset
         .digest
@@ -411,17 +420,19 @@ fn provenance_bundles(digest: &str) -> io::Result<Vec<serde_json::Value>> {
     if response.status() != 200 {
         return Err(invalid("GitHub did not return release provenance"));
     }
-    read_bundles(&bounded(
-        response.into_body().into_reader(),
-        MAX_PROVENANCE_BYTES,
-    )?)
+    let data = bounded(response.into_body().into_reader(), MAX_PROVENANCE_BYTES)?;
+    read_bundles(&data, fetch_bundle)
 }
 
-#[cfg(any(windows, target_os = "linux", target_os = "macos", test))]
-fn read_bundles(data: &[u8]) -> io::Result<Vec<serde_json::Value>> {
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn read_bundles(
+    data: &[u8],
+    fetch: impl Fn(&str) -> io::Result<serde_json::Value>,
+) -> io::Result<Vec<serde_json::Value>> {
     #[derive(Deserialize)]
     struct Attestation {
         bundle: Option<serde_json::Value>,
+        bundle_url: Option<String>,
     }
     #[derive(Deserialize)]
     struct Reply {
@@ -433,13 +444,58 @@ fn read_bundles(data: &[u8]) -> io::Result<Vec<serde_json::Value>> {
     }
     let bundles: Vec<_> = records
         .into_iter()
-        .filter_map(|record| record.bundle)
-        .filter(serde_json::Value::is_object)
+        .filter_map(|record| {
+            record
+                .bundle
+                .filter(serde_json::Value::is_object)
+                .or_else(|| {
+                    let url = record.bundle_url.filter(|url| allowed_bundle_url(url))?;
+                    fetch(&url).ok().filter(serde_json::Value::is_object)
+                })
+        })
         .collect();
     if bundles.is_empty() {
         return Err(invalid("This release has no available provenance bundle"));
     }
     Ok(bundles)
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn allowed_bundle_url(url: &str) -> bool {
+    url.len() <= 8192
+        && url.parse::<ureq::http::Uri>().is_ok_and(|uri| {
+            uri.scheme_str() == Some("https")
+                && uri.authority().map(|authority| authority.as_str())
+                    == Some("tmaproduction.blob.core.windows.net")
+                && uri.path().starts_with("/attestations/")
+        })
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn fetch_bundle(url: &str) -> io::Result<serde_json::Value> {
+    let response = agent(Duration::from_secs(10))
+        .get(url)
+        .header("User-Agent", "kosha-update")
+        .call()
+        .map_err(|_| io::Error::other("Could not download GitHub's attestation bundle"))?;
+    if response.status() != 200 {
+        return Err(invalid("GitHub did not return an attestation bundle"));
+    }
+    let data = bounded(response.into_body().into_reader(), MAX_PROVENANCE_BYTES)?;
+    decode_bundle(&data)
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+fn decode_bundle(data: &[u8]) -> io::Result<serde_json::Value> {
+    let size = snap::raw::decompress_len(data)
+        .map_err(|_| invalid("Invalid Snappy attestation bundle"))?;
+    if size > MAX_PROVENANCE_BYTES {
+        return Err(invalid("Attestation bundle exceeds size limit"));
+    }
+    let decoded = snap::raw::Decoder::new()
+        .decompress_vec(data)
+        .map_err(|_| invalid("Invalid Snappy attestation bundle"))?;
+    Ok(serde_json::from_slice(&decoded)?)
 }
 
 fn download(
@@ -520,19 +576,74 @@ mod tests {
         assert!(prepared.authenticate().is_err());
     }
 
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     #[test]
-    fn accepts_only_inline_provenance_bundles_and_bounds_the_record_count() {
-        let data = br#"{"attestations":[{"bundle_url":"https://invalid.example/bundle"},{"bundle":{"example":true}}]}"#;
+    fn accepts_only_inline_or_approved_provenance_delivery() {
+        let data = br#"{"attestations":[{"bundle_url":"https://invalid.example/bundle"},{"bundle":{"example":true}},{"bundle_url":"https://tmaproduction.blob.core.windows.net/attestations/example.json.sn"}]}"#;
+        let fetch = |url: &str| {
+            assert_eq!(
+                url,
+                "https://tmaproduction.blob.core.windows.net/attestations/example.json.sn"
+            );
+            Ok(serde_json::json!({"downloaded": true}))
+        };
         assert_eq!(
-            read_bundles(data).unwrap(),
-            [serde_json::json!({"example": true})]
+            read_bundles(data, fetch).unwrap(),
+            [
+                serde_json::json!({"example": true}),
+                serde_json::json!({"downloaded": true})
+            ]
         );
         assert!(
-            read_bundles(br#"{"attestations":[{"bundle_url":"https://invalid.example/bundle"}]}"#)
-                .is_err()
+            read_bundles(
+                br#"{"attestations":[{"bundle_url":"https://invalid.example/bundle"}]}"#,
+                fetch
+            )
+            .is_err()
         );
         let excessive = serde_json::json!({"attestations": vec![serde_json::json!({"bundle": {}}); PROVENANCE_COUNT + 1]});
-        assert!(read_bundles(&serde_json::to_vec(&excessive).unwrap()).is_err());
+        assert!(read_bundles(&serde_json::to_vec(&excessive).unwrap(), fetch).is_err());
+        assert!(!allowed_bundle_url(
+            "https://tmaproduction.blob.core.windows.net/not-attestations/example"
+        ));
+        assert!(!allowed_bundle_url(
+            "https://tmaproduction.blob.core.windows.net:444/attestations/example"
+        ));
+    }
+
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn decodes_raw_snappy_and_rejects_oversized_expansion() {
+        let mut encoder = snap::raw::Encoder::new();
+        let bundle = encoder.compress_vec(br#"{"mediaType":"example"}"#).unwrap();
+        assert_eq!(decode_bundle(&bundle).unwrap()["mediaType"], "example");
+        assert!(decode_bundle(b"invalid").is_err());
+        let large = encoder
+            .compress_vec(&vec![0; MAX_PROVENANCE_BYTES + 1])
+            .unwrap();
+        assert!(decode_bundle(&large).is_err());
+    }
+
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    #[test]
+    #[ignore = "uses a published GitHub release; set KOSHA_TEST_ATTESTED_TAG"]
+    fn authenticates_published_update() {
+        let tag = std::env::var("KOSHA_TEST_ATTESTED_TAG").unwrap();
+        let release = Release::parse(&tag).unwrap();
+        let package = Package::for_host()[0];
+        let staging = tempfile::tempdir().unwrap();
+        let verified = prepare_download(&release, package, staging.path())
+            .expect("download package and attestation")
+            .authenticate()
+            .expect("authenticate public workflow and release digest");
+        assert_eq!(verified.release(), &release);
+        #[cfg(target_os = "linux")]
+        {
+            let root = staging.path().join("installation");
+            let install = crate::managed_linux::Installation::open(&root).unwrap();
+            install.install_package(verified).unwrap();
+            assert_eq!(install.current().unwrap().as_ref(), Some(release.version()));
+        }
     }
 
     #[test]

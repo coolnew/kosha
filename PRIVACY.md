@@ -162,6 +162,10 @@ itself if needed. The macOS update action uses the same GitHub requests and
 opens the checked image in macOS DiskImageMounter. The image stays in local
 update storage while you finish installation.
 
+GitHub can return an attestation download link to its Azure Blob Storage
+endpoint. Kosha follows that link to retrieve the signed bundle without
+sending account credentials or local files.
+
 ## Optional marketplace network requests
 
 When you request a marketplace sync or download a recipe or insight pack, Kosha makes HTTPS

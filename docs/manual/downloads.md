@@ -25,6 +25,11 @@ The packaging gate checks ordinary and delay-load PE imports before distribution
 
 ## Update an existing installation
 
+If you are using Kosha 0.17.1, update once using the package from
+[GitHub Releases](https://github.com/coolnew/kosha/releases).
+Version 0.17.2 adds support for the attestation download format used by
+GitHub's public API.
+
 In the desktop app, search Settings for **Software updates**. Select **Check
 for updates** to compare your version with GitHub's latest stable release.
 **Release downloads** opens the matching release in your browser. Enable
