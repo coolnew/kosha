@@ -710,7 +710,7 @@ impl DeepLayout {
         }
     }
 
-    pub fn cell(&self, tree: &SizeTree, id: NodeId) -> Option<String> {
+    pub fn cell(&self, id: NodeId) -> Option<String> {
         if let Some(file) = self.files.get(&id) {
             let prefix = if file.truncated { ">=" } else { "" };
             return Some(format!(
@@ -720,9 +720,14 @@ impl DeepLayout {
         }
         let &(fragmented, checked) = self.folders.get(&id)?;
         let percent = (fragmented * 100 + checked / 2) / checked;
+        Some(format!("{percent}%"))
+    }
+
+    pub fn folder_coverage(&self, tree: &SizeTree, id: NodeId) -> Option<String> {
+        let &(fragmented, checked) = self.folders.get(&id)?;
+        let total = tree.node(id).subtree_files;
         Some(format!(
-            "{percent}% ({checked}/{})",
-            tree.node(id).subtree_files
+            "{fragmented} of {checked} checked files fragmented. {checked} of {total} recorded files checked."
         ))
     }
 
@@ -1390,11 +1395,21 @@ mod tests {
             ..Default::default()
         };
         let mut layout = DeepLayout::new(&tree, root, report);
-        assert_eq!(layout.cell(&tree, root).as_deref(), Some("50% (2/3)"));
-        assert_eq!(layout.cell(&tree, big).as_deref(), Some("100% (1/1)"));
-        assert_eq!(layout.cell(&tree, mid).as_deref(), Some("0% (1/1)"));
-        assert_eq!(layout.cell(&tree, x).as_deref(), Some("3 extents"));
-        assert!(layout.cell(&tree, empty).is_none());
+        assert_eq!(layout.cell(root).as_deref(), Some("50%"));
+        assert_eq!(layout.cell(big).as_deref(), Some("100%"));
+        assert_eq!(layout.cell(mid).as_deref(), Some("0%"));
+        assert_eq!(layout.cell(x).as_deref(), Some("3 extents"));
+        assert!(layout.cell(empty).is_none());
+        assert_eq!(
+            layout.folder_coverage(&tree, root).as_deref(),
+            Some("1 of 2 checked files fragmented. 2 of 3 recorded files checked.")
+        );
+        assert_eq!(
+            layout.folder_coverage(&tree, mid).as_deref(),
+            Some("0 of 1 checked files fragmented. 1 of 1 recorded files checked.")
+        );
+        assert!(layout.folder_coverage(&tree, x).is_none());
+        assert!(layout.folder_coverage(&tree, empty).is_none());
         layout.descending = Some(false);
         ready.deep_layout = Some(layout);
         ready.rebuild_rows();

@@ -6626,7 +6626,7 @@ impl KoshaApp {
     fn render_table(&mut self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
         let deep_status = self.state.ready().and_then(|ready| ready.visible_deep_layout()).map(|layout| {
             let report = &layout.report;
-            format!("Fragmentation column added. {} of {} eligible files checked, {} unavailable. Folder rates use checked files.",
+            format!("Fragmentation column added. {} of {} eligible files checked, {} unavailable. Folder percentages show the share of checked files that are fragmented.",
                 report.checked.len(), report.eligible, report.unavailable)
         });
         let palette = *palette;
@@ -6761,7 +6761,7 @@ impl KoshaApp {
                     .text_right().text_color(palette.accent).cursor_pointer().child(label)
                     .tooltip(|window,cx| tooltip(concat!(
                         "Files show allocated extents. Folders show the percentage of checked files ",
-                        "that were fragmented, plus checked files over recorded files. ",
+                        "that were fragmented. Hover over a folder percentage for sample coverage. ",
                         "An extent is a contiguous run of allocated blocks."
                     )).build(window,cx))
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -7380,16 +7380,16 @@ fn row(
         )
         .children(ready.visible_deep_layout().map(|layout| {
             div()
+                .id(("fragmentation-cell", id.index()))
                 .w(px(DEEP_LAYOUT_WIDTH))
                 .flex_none()
                 .text_right()
                 .font_family(mono.clone())
                 .text_color(palette.text_dim)
-                .child(
-                    layout
-                        .cell(&ready.tree, id)
-                        .unwrap_or_else(|| "\u{2014}".into()),
-                )
+                .child(layout.cell(id).unwrap_or_else(|| "\u{2014}".into()))
+                .when_some(layout.folder_coverage(&ready.tree, id), |cell, coverage| {
+                    cell.tooltip(move |window, cx| tooltip(coverage.clone()).build(window, cx))
+                })
         }))
         // One click selects, two open — the convention everywhere else, and
         // previously the rows had an id and no handler at all, so clicking a

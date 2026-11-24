@@ -119,13 +119,15 @@ Rows without a measurement appear after measured rows.
 
 ![Windows Deep Scan table showing sample coverage and the Media folder at 33 percent fragmented with three of three files checked](images/windows-fragmentation-column.png)
 
-![macOS Deep Scan table showing the Fragmentation column after all four eligible files were checked](images/macos-fragmentation-column.png)
+![macOS Deep Scan showing folder percentages and the sample coverage tooltip](images/macos-fragmentation-column.png)
 
-A folder value such as **25% (4/20)** means one of four checked files was
-fragmented, with 20 files in the recorded subtree. Unmeasured rows show a
-dash. Hover over the column heading for an explanation of extents and
-coverage. **Hide fragmentation column** clears the temporary report from the
-table. The report is associated with the current live tree and folder.
+A folder value such as **25%** means one quarter of the checked files were
+fragmented. Hover over the percentage to see how many checked files were
+fragmented and how many of the folder's recorded files were checked. In the
+Windows screenshot from v0.16.0, sample coverage appears in parentheses.
+Unmeasured rows show a dash. Hover over the heading for more about extents.
+**Hide fragmentation column** clears the temporary report from the table.
+The report is associated with the current live tree and folder.
 
 ### Treemap, volume bars, and scan status
 

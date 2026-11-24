@@ -2,7 +2,8 @@
 
 ## [Unreleased]
 
-Nothing yet.
+The Deep Scan Fragmentation column shows folder percentages. Hover over
+a percentage to see how many files were fragmented and how many were checked.
 
 ## [0.16.0] — 2026-11-24
 
