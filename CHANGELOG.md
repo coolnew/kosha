@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.15.0] — 2026-11-24
 
 ### Browse a QDirStat cache or import a listing
