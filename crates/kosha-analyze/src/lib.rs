@@ -36,7 +36,7 @@ pub mod pack;
 mod rules;
 
 pub use context::{Context, KnownLocations};
-pub use engine::{analyze, findings, findings_with, rank, total_reclaimable};
+pub use engine::{analyze, findings, findings_for_source, findings_with, rank, total_reclaimable};
 pub use insight::{Confidence, Insight, RuleId, Severity, Suggested};
 pub use rules::Rule;
 

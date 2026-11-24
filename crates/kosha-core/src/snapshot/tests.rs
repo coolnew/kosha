@@ -294,7 +294,7 @@ fn finished_scan_with_access_errors_survives_switching_drive_records() {
     assert_eq!(reopened.stats().unreadable, 1);
     assert!(!reopened.is_incomplete());
     assert_eq!(reopened.stats().entries, first.stats().entries);
-    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 3);
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn automatic_scans_replace_one_slot_without_changing_explicit_snapshots() {
     let first = store::save_automatic_in(&automatic_dir, &tree, taken_at(20)).unwrap();
     let second = store::save_automatic_in(&automatic_dir, &tree, taken_at(30)).unwrap();
     assert_eq!(first, second);
-    assert_eq!(std::fs::read_dir(&automatic_dir).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(&automatic_dir).unwrap().count(), 2);
     assert_eq!(store::open(&second).unwrap().0.taken, 30);
     assert_eq!(std::fs::read(explicit).unwrap(), original);
     assert_eq!(
@@ -404,6 +404,28 @@ fn automatic_slots_are_separate_for_different_roots() {
 
 #[cfg(windows)]
 #[test]
+fn a_wsl_root_opens_from_its_unc_aliases_without_a_live_distribution() {
+    use std::path::{Path, PathBuf};
+
+    let (_source, mut tree) = fixture();
+    let cache = tempfile::tempdir().unwrap();
+    tree.root_path = PathBuf::from(r"\\wsl.localhost\Kosha-Fictitious");
+    let record = store::save_automatic_in(cache.path(), &tree, taken_at(20)).unwrap();
+    for alias in [
+        r"\\wsl$\KOSHA-FICTITIOUS",
+        r"\\?\UNC\wsl.localhost\kosha-fictitious\",
+        "//wsl.localhost/Kosha-Fictitious/",
+    ] {
+        let (opened, _, restored) =
+            store::open_automatic_in(cache.path(), Path::new(alias)).unwrap();
+        assert_eq!(opened, record);
+        assert_eq!(restored.len(), tree.len());
+    }
+    assert!(store::open_automatic_in(cache.path(), &tree.root_path.join("home")).is_err());
+}
+
+#[cfg(windows)]
+#[test]
 fn a_failed_windows_cache_replacement_preserves_the_old_file() {
     let (_source, tree) = fixture();
     let cache = tempfile::tempdir().unwrap();
@@ -417,7 +439,7 @@ fn a_failed_windows_cache_replacement_preserves_the_old_file() {
     std::fs::set_permissions(&path, original_permissions).unwrap();
     assert!(outcome.is_err());
     assert_eq!(std::fs::read(&path).unwrap(), original);
-    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(cache.path()).unwrap().count(), 2);
 }
 
 fn round_trip(tree: &SizeTree) -> (Meta, SizeTree) {

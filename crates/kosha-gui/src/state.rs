@@ -674,6 +674,78 @@ impl From<kosha_core::snapshot::RemoteRecord> for Ready {
     }
 }
 
+/// Bounded measurements for one folder view, tied to its live tree.
+pub struct DeepLayout {
+    pub scope: NodeId,
+    pub report: kosha_analyze::fragmented::Review,
+    files: rustc_hash::FxHashMap<NodeId, kosha_core::Fragmentation>,
+    folders: rustc_hash::FxHashMap<NodeId, (usize, usize)>,
+    pub descending: Option<bool>,
+}
+
+impl DeepLayout {
+    pub fn new(tree: &SizeTree, scope: NodeId, report: kosha_analyze::fragmented::Review) -> Self {
+        let mut files = rustc_hash::FxHashMap::default();
+        let mut folders = rustc_hash::FxHashMap::<NodeId, (usize, usize)>::default();
+        for file in &report.checked {
+            files.insert(file.node, file.layout);
+            // A truncated map with fewer than two observed extents is inconclusive.
+            if file.layout.truncated && !file.layout.is_fragmented() {
+                continue;
+            }
+            let mut current = file.node;
+            while current != scope {
+                current = NodeId::from_index(tree.node(current).parent as usize);
+                let (fragmented, checked) = folders.entry(current).or_default();
+                *checked += 1;
+                *fragmented += usize::from(file.layout.is_fragmented());
+            }
+        }
+        Self {
+            scope,
+            report,
+            files,
+            folders,
+            descending: None,
+        }
+    }
+
+    pub fn cell(&self, tree: &SizeTree, id: NodeId) -> Option<String> {
+        if let Some(file) = self.files.get(&id) {
+            let prefix = if file.truncated { ">=" } else { "" };
+            return Some(format!(
+                "{prefix}{}",
+                kosha_core::format::plural(file.extents as usize, "extent")
+            ));
+        }
+        let &(fragmented, checked) = self.folders.get(&id)?;
+        let percent = (fragmented * 100 + checked / 2) / checked;
+        Some(format!(
+            "{percent}% ({checked}/{})",
+            tree.node(id).subtree_files
+        ))
+    }
+
+    fn key(&self, id: NodeId) -> Option<(bool, u64)> {
+        if let Some(&(fragmented, checked)) = self.folders.get(&id) {
+            Some((true, (fragmented as u64 * 1_000_000) / checked as u64))
+        } else {
+            self.files.get(&id).map(|file| (false, file.extents))
+        }
+    }
+
+    fn compare(&self, a: NodeId, b: NodeId, descending: bool) -> std::cmp::Ordering {
+        match (self.key(a), self.key(b)) {
+            (Some((a_folder, a)), Some((b_folder, b))) => b_folder
+                .cmp(&a_folder)
+                .then_with(|| if descending { b.cmp(&a) } else { a.cmp(&b) }),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
 pub struct Ready {
     pub tree: Arc<SizeTree>,
     /// Whether this is the disk or a record of it.
@@ -684,6 +756,7 @@ pub struct Ready {
     pub selected: Option<NodeId>,
     /// `None` while analysis is still running in the background.
     pub insights: Option<Arc<Vec<Insight>>>,
+    pub deep_layout: Option<DeepLayout>,
     /// The focused directory's children, filtered and ordered for display.
     /// Cached and rebuilt on change rather than recomputed per frame.
     pub rows: Vec<NodeId>,
@@ -792,6 +865,7 @@ impl Ready {
             focus,
             selected: None,
             insights: None,
+            deep_layout: None,
             rows: Vec::new(),
             filter: String::new(),
             search: Search::Browsing,
@@ -871,16 +945,22 @@ impl Ready {
 
         let tree = Arc::clone(&self.tree);
         let sort = self.sort;
-        let compare = move |a: NodeId, b: NodeId| sort.compare(&tree, a, b);
-
-        // Duplicates own their ordering, because theirs has to keep the groups
-        // together; everything else is one flat list.
+        // Duplicate ordering keeps its groups together.
         if let Some(mut found) = self.duplicates.take() {
-            found.reorder(rows, compare);
+            found.reorder(rows, |a, b| sort.compare(&tree, a, b));
             self.rows = found.rows.clone();
             self.duplicates = Some(found);
         } else {
-            rows.sort_unstable_by(|&a, &b| compare(a, b));
+            let layout_order = self
+                .visible_deep_layout()
+                .and_then(|layout| layout.descending.map(|descending| (layout, descending)));
+            rows.sort_unstable_by(|&a, &b| {
+                layout_order
+                    .map_or(std::cmp::Ordering::Equal, |(layout, descending)| {
+                        layout.compare(a, b, descending)
+                    })
+                    .then_with(|| sort.compare(&tree, a, b))
+            });
             self.rows = rows;
         }
 
@@ -940,7 +1020,16 @@ impl Ready {
         self.search = Search::Invalid { message };
     }
 
+    pub fn visible_deep_layout(&self) -> Option<&DeepLayout> {
+        self.deep_layout.as_ref().filter(|layout| {
+            layout.scope == self.focus && !self.showing_results() && !self.source.is_past()
+        })
+    }
+
     pub fn set_sort(&mut self, key: SortKey) {
+        if let Some(layout) = &mut self.deep_layout {
+            layout.descending = None;
+        }
         self.sort = self.sort.toggled(key);
         self.rebuild_rows();
     }
@@ -1264,6 +1353,54 @@ mod tests {
 
     fn name(ready: &Ready, id: NodeId) -> String {
         kosha_core::format::printable(&ready.tree.name_lossy(id)).into_owned()
+    }
+
+    #[test]
+    fn deep_layout_rolls_up_checked_files_and_sorts_unknown_last() {
+        use kosha_analyze::fragmented::{CheckedFile, Review};
+        use std::ffi::OsStr;
+        let (_directory, mut ready) = fixture();
+        let tree = Arc::clone(&ready.tree);
+        let root = tree.root();
+        let big = tree.child_named(root, OsStr::new("big")).unwrap();
+        let mid = tree.child_named(root, OsStr::new("mid")).unwrap();
+        let deep = tree.child_named(big, OsStr::new("deep")).unwrap();
+        let x = tree.child_named(deep, OsStr::new("x.bin")).unwrap();
+        let y = tree.child_named(mid, OsStr::new("y.bin")).unwrap();
+        let empty = tree.child_named(root, OsStr::new("empty")).unwrap();
+
+        let report = Review {
+            eligible: 3,
+            checked: vec![
+                CheckedFile {
+                    node: x,
+                    layout: kosha_core::Fragmentation {
+                        extents: 3,
+                        ..Default::default()
+                    },
+                },
+                CheckedFile {
+                    node: y,
+                    layout: kosha_core::Fragmentation {
+                        extents: 1,
+                        ..Default::default()
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+        let mut layout = DeepLayout::new(&tree, root, report);
+        assert_eq!(layout.cell(&tree, root).as_deref(), Some("50% (2/3)"));
+        assert_eq!(layout.cell(&tree, big).as_deref(), Some("100% (1/1)"));
+        assert_eq!(layout.cell(&tree, mid).as_deref(), Some("0% (1/1)"));
+        assert_eq!(layout.cell(&tree, x).as_deref(), Some("3 extents"));
+        assert!(layout.cell(&tree, empty).is_none());
+        layout.descending = Some(false);
+        ready.deep_layout = Some(layout);
+        ready.rebuild_rows();
+        assert_eq!(&ready.rows[..2], &[mid, big]);
+        ready.set_sort(SortKey::Name);
+        assert_eq!(ready.rows[0], big);
     }
 
     #[test]

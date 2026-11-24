@@ -82,8 +82,9 @@ pub use platform::wsl;
 pub use platform::{
     DiskUsage, EntryMeta, Fragmentation, MediaType, PlatformCtx, allocated_size,
     can_cross_filesystems, compression_available_at, current_owner, current_owners, disk_usage,
-    elevated, exact_size_costs_extra, fragmentation, hardlinks_cost_extra, long_paths_enabled,
-    media_type, owner_costs_extra, resolve_owner, supports_compression, supports_fragmentation,
+    elevated, exact_size_costs_extra, fragmentation, fragmentation_with_cancel,
+    hardlinks_cost_extra, long_paths_enabled, media_type, owner_costs_extra, resolve_owner,
+    supports_compression, supports_fragmentation,
 };
 pub use scan::{Progress, ScanOptions, Scanner, scan};
 pub use tree::{ScanStats, SizeTree, Strategy, Unavailable};

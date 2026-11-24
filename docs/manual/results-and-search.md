@@ -68,10 +68,64 @@ measurement and exports keep both sizes.
 | **files below** | Descendant files and folders, listed separately. |
 | **deepest**, **largest inside** | Levels below the selected directory to its deepest observed entry, and the largest immediate child by allocated size. |
 | **By extension**, **everything else** | Allocated bytes and file counts grouped by extension in the directory subtree. Remaining extensions are pooled. **No extension** groups names without one. |
-| Fragmentation | When available and relevant, **in** reports how many file extents were observed. **Over** marks a lower bound. |
+| Fragmentation | On supported filesystems, **Check fragmentation** measures the selected live file or samples files in the selected folder. |
 
 Quick look also explains links, already-counted hardlinks, skipped mounts,
 cloud placeholders, and unreadable entries when a caveat applies.
+
+### Check file or folder fragmentation
+
+On supported Windows volumes, Linux ext4, and macOS APFS, select a live
+file or folder, open Quick Look with **Space**, and choose
+**Check fragmentation**. The same action is available in the command palette.
+
+![Windows Quick Look for the Media folder with the Check fragmentation button](images/windows-fragmentation-check.png)
+
+Quick Look explains extents below the result. An extent is a contiguous run
+of allocated blocks. A file with one extent is contiguous. Two or more extents
+mean the file is stored in pieces. An empty or resident file can have zero
+allocated extents. A sparse hole separates runs but contributes no extent of
+its own. A result
+marked **At least** is a lower bound.
+
+A folder check examines up to 256 of its largest eligible files and shows the
+number checked, how many were fragmented, and which checks were unavailable.
+Quick Look shows up to three files with the most extents. Review the coverage before
+applying the result to the whole folder.
+
+![Windows Quick Look reports three checked files, one fragmented file with two extents, the extent definition, and SSD guidance](images/windows-fragmentation-report.png)
+
+You can cancel a check or move to another
+entry while it runs. Saved scans, imported listings, images, and SSH or native
+WSL results do not support these live checks.
+
+On an HDD, fragmented files can slow sequential reads. On Windows, if you
+observe slow reads, review the drive in **Optimize Drives**. Windows manages
+SSD optimization. Extent counts alone are insufficient grounds to change that
+schedule. Kosha reads allocation metadata and offers no defragmentation action.
+
+### Deep scan the folder in view
+
+On a supported filesystem, open the command palette and choose **Deep scan folder
+fragmentation**. It checks up to 256 of the largest eligible files in the
+current live folder and its subfolders. **Background activity** in the
+bottom-right corner shows the running check and its **Cancel** button.
+Only one folder Deep Scan can run at a time. After completion, the
+**Fragmentation** column appears at the far right of the table in the folder
+where you started the check. The message above the table confirms it was added.
+Click the
+heading to sort measured folders by percentage and measured files by extents.
+Rows without a measurement appear after measured rows.
+
+![Windows Deep Scan table showing sample coverage and the Media folder at 33 percent fragmented with three of three files checked](images/windows-fragmentation-column.png)
+
+![macOS Deep Scan table showing the Fragmentation column after all four eligible files were checked](images/macos-fragmentation-column.png)
+
+A folder value such as **25% (4/20)** means one of four checked files was
+fragmented, with 20 files in the recorded subtree. Unmeasured rows show a
+dash. Hover over the column heading for an explanation of extents and
+coverage. **Hide fragmentation column** clears the temporary report from the
+table. The report is associated with the current live tree and folder.
 
 ### Treemap, volume bars, and scan status
 

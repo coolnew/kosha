@@ -1,8 +1,31 @@
 # Changelog
 
-## [Unreleased]
+## [0.16.0] — 2026-11-24
 
-Nothing yet.
+### Review file and folder fragmentation
+
+On supported Windows volumes, Linux ext4, and macOS APFS, check a live file
+or sample a folder's largest files from Quick Look or `kosha fragmentation PATH`.
+Reports show extent counts, sample coverage, and guidance for the detected drive type.
+
+**Deep scan folder fragmentation** adds a sortable column for the current
+live folder. File rows show extent counts. Folder rows show the percentage
+of checked files that are fragmented, alongside sample coverage. Use the
+bottom-right activity panel to track or cancel a running check. See issue #13.
+
+### Reopen the last WSL scan
+
+On Windows, completed whole-distribution scans are saved in the local scan
+cache. Select a distribution in the desktop sidebar to reopen its last scan,
+or use `--cache` from the CLI. **Scan again** refreshes the record. See issue #15.
+
+### Scan inside a WSL2 distribution
+
+Enable **Scan inside WSL2** in the desktop app or use `--wsl-native` in the
+Windows CLI with the matching Kosha Linux CLI installed on the distribution's
+`PATH`. The scan runs as the default Linux user, stays on the root filesystem,
+and skips `/mnt`. Open the resulting metadata for read-only browsing. See
+issue #14.
 
 ## [0.15.0] — 2026-11-24
 
@@ -1006,7 +1029,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.16.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -1053,3 +1076,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.14.0]: https://github.com/coolnew/kosha/releases/tag/v0.14.0
 
 [0.15.0]: https://github.com/coolnew/kosha/releases/tag/v0.15.0
+
+[0.16.0]: https://github.com/coolnew/kosha/releases/tag/v0.16.0

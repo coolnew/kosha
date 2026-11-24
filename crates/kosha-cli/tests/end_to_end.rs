@@ -1425,3 +1425,87 @@ mod remote_server {
         assert!(output.stdout.is_empty() && output.stderr.is_empty());
     }
 }
+
+#[test]
+fn fragmentation_help_and_sample_limits_are_validated_before_opening_a_path() {
+    let home = tempfile::tempdir().unwrap();
+    let help = run(&["fragmentation", "--help"], home.path());
+    assert!(help.status.success());
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("--max-files"));
+    assert!(help.contains("An extent is a contiguous run of allocated blocks."));
+    let invalid = run(
+        &["fragmentation", "absent", "--max-files", "0"],
+        home.path(),
+    );
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("1..=4096"));
+}
+
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+#[test]
+fn fragmentation_checks_a_file_and_samples_the_largest_file_in_a_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let large = source.path().join("large.bin");
+    std::fs::write(&large, vec![b'x'; 128 * 1024]).unwrap();
+    std::fs::write(source.path().join("small.bin"), vec![b'y'; 4096]).unwrap();
+    for path in [&large, &source.path().join("small.bin")] {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .sync_all()
+            .unwrap();
+    }
+    match kosha_core::fragmentation(&large) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::Unsupported => return,
+        Err(error) => panic!("extent query failed: {error}"),
+    }
+    let output = run(
+        &[
+            "fragmentation",
+            source.path().to_str().unwrap(),
+            "--max-files",
+            "1",
+            "--export",
+            "json",
+        ],
+        home.path(),
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["eligible"], 2);
+    assert_eq!(report["checked"], 1);
+    assert_eq!(report["unavailable"], 0);
+    assert_eq!(report["limited"], true);
+    assert!(
+        report["files"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("large.bin")
+    );
+
+    let output = run(
+        &["fragmentation", large.to_str().unwrap(), "--export", "json"],
+        home.path(),
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["checked"], 1);
+    assert!(report["files"][0]["extents"].as_u64().unwrap() > 0);
+    if cfg!(windows) {
+        assert!(report["files"][0]["clusters"].as_u64().unwrap() > 0);
+    } else {
+        assert_eq!(report["files"][0]["mapped_bytes"], 128 * 1024);
+    }
+}

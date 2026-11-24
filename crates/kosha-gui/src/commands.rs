@@ -117,6 +117,11 @@ pub enum Action {
     /// Tuesday" was a file the user had to know the name of.
     ShowAuditLog,
     FindDuplicates,
+    CheckFragmentation,
+    CancelFragmentation,
+    DeepScanFragmentation,
+    CancelDeepScan,
+    HideDeepLayout,
     StopDuplicates,
     /// Stop a hunt that is still reading file contents.
     StopHunt,

@@ -64,10 +64,16 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
 
 ## Operating rules
 
-- Scans are fresh and full-depth by default. GUI cache use requires explicit
-  `--cache`; `--cache-dir DIR` selects a custom cache. Cached reads are historical
+- Scans are fresh and full-depth by default. The CLI reads the shared cache
+  only with `--cache`; `--cache-dir DIR` selects a custom cache. Cached reads are historical
   and fail on a missing/invalid record without silently scanning. Age is on stderr.
-- `--caches --export json` inventories implicit drive records; add `--cache-dir`
+- A completed whole-distribution WSL scan on Windows refreshes the local
+  automatic cache. `kosha "\\wsl.localhost\Ubuntu" --cache` can reopen it while
+  the distribution is stopped.
+- On Windows, use `--wsl-native` with a whole WSL2 distribution to run the
+  matching Linux Kosha CLI installed inside it. Native scans stay on the root
+  filesystem, skip `/mnt` and return metadata for read-only browsing.
+- `--caches --export json` inventories implicit drive and WSL records; add `--cache-dir`
   for a custom store. It reads headers only: inspect each record's `status` and
   open with `--cache` to validate its tree. Explicit records use `--snapshots`.
 - Snapshot inputs, `--since`, and search `--load` accept paths or exact saved
@@ -80,6 +86,10 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
 - `kosha import --from rclone FILE|-` reads JSON from `rclone lsjson -R`.
   Use `--root` to label the source and `--observed-at` to record its observation time.
   Sizes are apparent, and totals are lower bounds when sizes are unknown.
+- On supported Windows volumes, Linux ext4 and macOS APFS,
+  `kosha fragmentation PATH --export json`
+  reports live file extents or samples the largest files in a folder. The JSON
+  schema is `kosha.fragmentation.v1`. Folder coverage and failed checks are explicit.
 - `kosha import --from qdirstat FILE|-` reads plain or gzip QDirStat 1.0 and 2.0 caches.
   Imported totals use apparent sizes. Use `--from auto` to detect any supported listing
   and `--out FILE` to write a new record at a chosen path.

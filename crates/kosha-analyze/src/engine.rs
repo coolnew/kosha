@@ -147,6 +147,16 @@ pub fn findings_with(
     ctx: &Context,
     user: &[crate::pack::PackRule],
 ) -> Vec<Insight> {
+    findings_for_source(tree, ctx, user, true)
+}
+
+/// Evaluate source-independent rules and optionally query live file layout.
+pub fn findings_for_source(
+    tree: &SizeTree,
+    ctx: &Context,
+    user: &[crate::pack::PackRule],
+    live: bool,
+) -> Vec<Insight> {
     let mut insights = analyze(tree, ctx);
 
     // User rules are evaluated by the same code as the built-ins and produce
@@ -169,8 +179,7 @@ pub fn findings_with(
         }
     }
 
-    let imported = tree.stats().strategy == kosha_core::Strategy::Imported;
-    if !imported
+    if live
         && let Some(found) = crate::fragmented::find(tree, &crate::fragmented::Options::default())
     {
         insights.push(found);

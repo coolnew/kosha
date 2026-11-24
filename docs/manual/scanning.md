@@ -3,9 +3,11 @@
 ## Choose a scope
 
 The sidebar offers personal folders, pinned folders, volumes, and, where
-available on Windows, WSL distributions. A drive click opens its last saved scan
-if one exists. Choose **Scan again** or **Ctrl+R** to refresh it. **Choose a
-folder** starts a fresh scan of any accessible folder.
+available on Windows, WSL distributions. A drive or WSL distribution click opens
+its last saved scan if one exists. Kosha saves completed whole-distribution scans
+on Windows so you can reopen them while the distribution is stopped. Use
+**Scan again** or **Ctrl+R** to refresh the record. **Choose a folder** starts
+a fresh scan of any accessible folder.
 
 On macOS, mounted volumes under `/Volumes` appear in the sidebar, including
 external USB drives. Switch back to the Kosha window after connecting a drive
@@ -16,6 +18,33 @@ to refresh the list. macOS may ask for permission when you start a scan.
 By default, directory walks do not descend into other mounted filesystems.
 Scan settings can change this. Symbolic links are measured without following
 their targets. A scan describes its chosen scope, not necessarily an entire disk.
+
+## Native WSL2 scans
+
+On Windows, open **Settings** and enable **Scan inside WSL2** under **Scanning**.
+Refresh the selected distribution with **Scan again**. The CLI equivalent is:
+
+```powershell
+kosha '\\wsl.localhost\Ubuntu' --wsl-native --stats
+```
+
+Install the matching Linux Kosha CLI from the
+[release downloads](https://github.com/coolnew/kosha/releases) in that WSL2
+distribution, using the Linux archive for its architecture. Put `kosha` on the
+distribution's executable PATH, for example in `/usr/local/bin`. From
+PowerShell, verify it with `wsl.exe --distribution Ubuntu --exec kosha --version`.
+
+This starts the chosen distribution and runs as its default Linux user. The
+scan stays on the Linux root filesystem and skips the root's `/mnt` branch. A
+`/home` directory on the root filesystem is scanned normally, subject to the
+Linux user's permissions. A separately mounted `/home` is shown as a filesystem
+boundary. Check `findmnt -T /home` inside the distribution to see where it lives.
+An unreadable entry or a filesystem boundary can have no measured contents.
+
+Native results are metadata for read-only browsing. A matching CLI is required
+for this mode. If it is unavailable, turn off the setting or omit
+`--wsl-native` to use the Windows redirector again. In the desktop app a disk
+image request, including Shift-click, takes precedence over native mode.
 
 ## Cloud-synced folders
 

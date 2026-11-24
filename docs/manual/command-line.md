@@ -52,6 +52,7 @@ incomplete results; some strategies return a cancellation result instead.
 | `--query-help` | Print the query-language fields, operators, and examples without scanning |
 | `--mft` | Request NTFS table reading on an elevated Windows process |
 | `--image` | Request a supported disk-image strategy |
+| `--wsl-native` | On Windows, use the installed Linux CLI to scan a [whole WSL2 distribution](scanning.md#native-wsl2-scans) |
 
 The report identifies the strategy used or why a requested strategy was unavailable.
 
@@ -162,7 +163,11 @@ On Linux, use the same mount path you scanned in the desktop app. For example,
 use `kosha /mnt/archive --cache --export json` after the GUI has saved a
 completed scan of `/mnt/archive`.
 
-`--caches` inventories automatic drive records without scanning the original
+Completed whole-distribution WSL scans on Windows also update the automatic
+cache. Use `kosha "\\wsl.localhost\Ubuntu" --cache` to browse the saved scan
+without starting Ubuntu.
+
+`--caches` inventories automatic drive and WSL records without scanning the original
 drives, creating a cache directory, or decompressing their trees. It shows the
 recorded root, original UTC timestamp, age, entry count, partial/incomplete
 indicators, record size and cache-file path. Damaged headers are listed as
@@ -356,6 +361,25 @@ versioned provenance header, an entry for each compared path, and a summary.
 Rows whose paths contain non-UTF-8 bytes also include `path_bytes_hex`.
 Exit status is 0 for matching metadata, 1 for known differences, and 2 for an
 error or an indeterminate comparison with no known differences.
+
+### Check fragmentation
+
+```powershell
+kosha fragmentation 'D:\Media\archive.bin'
+kosha fragmentation 'D:\Media' --max-files 100 --export json
+```
+
+The command works on supported Windows volumes, Linux ext4, and macOS APFS.
+Use a path local to the running CLI. A file check reports its allocated extents. Run `kosha fragmentation --help`
+for the meaning of extents, sparse holes, and lower bounds. A folder check starts with a live
+metadata scan and checks the largest eligible files, up to 256 by default.
+`--max-files` accepts 1 through 4096 for folders. The JSON report uses
+`kosha.fragmentation.v1` and includes coverage, measured files, and lower-bound
+flags. The per-file allocation amount is reported as `clusters` on Windows
+and `mapped_bytes` on Linux and macOS. Unsupported or indeterminate layouts
+are unavailable. Links and cloud placeholders are skipped. The command never rearranges
+files. See [Quick Look](results-and-search.md#check-file-or-folder-fragmentation)
+for how to interpret extent counts and when to check Windows Optimize Drives.
 
 ### Exported entry fields
 

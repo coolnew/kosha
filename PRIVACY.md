@@ -27,6 +27,8 @@ identifiers can identify people or reveal sensitive information about them.
 Features such as duplicate detection and disk-image inspection may also read
 file data locally. Search interpretation and analysis run locally without an
 ML model or a cloud search service. There is no Kosha account or sign-in.
+Fragmentation checks query local allocation metadata and skip
+links and cloud placeholders. They do not read file contents.
 
 Windows desktop capabilities support filesystem access, user-requested elevation
 for NTFS analysis, and application-data storage. Administrator access can expose
@@ -42,6 +44,12 @@ mode switch. See [safe cleanup](docs/manual/safety.md) and
 
 The cleanup guide matches known application locations in recorded metadata.
 It does not read browser history or conversations or infer your identity.
+On Windows, completed whole-distribution WSL scans save a local metadata
+record in the automatic drive cache. The optional native WSL2 mode starts the
+chosen distribution and invokes its installed Linux Kosha CLI as the default
+Linux user. It transfers scan metadata to the Windows app over local process
+output. The resulting record is available for read-only browsing.
+
 The optional desktop uv cache-prune action invokes your trusted installed uv
 offline with a specific cache path, after Read-write and exact-plan confirmation.
 An operation-owned temporary HOME/workspace isolates default profile lookups.

@@ -57,6 +57,7 @@ enum OptionId {
     Hardlinks,
     Mft,
     Image,
+    NativeWsl,
     Owners,
     SshAccess,
     DuplicateMin,
@@ -71,6 +72,7 @@ enum Availability {
     Cross,
     Exact,
     Hardlinks,
+    Windows,
 }
 impl Availability {
     fn available(self) -> bool {
@@ -78,6 +80,7 @@ impl Availability {
             Self::Always => true,
             Self::Cross => kosha_core::can_cross_filesystems(),
             Self::Exact => kosha_core::exact_size_costs_extra(),
+            Self::Windows => cfg!(windows),
             Self::Hardlinks => kosha_core::hardlinks_cost_extra(),
         }
     }
@@ -166,6 +169,14 @@ const OPTIONS: &[OptionSpec] = &[
         description: "Open a backup, exported Linux distribution, whole disk or partition image directly, with or without VHDX. No mount or administrator needed. Supports ext2, ext3, ext4, NTFS, XFS, FAT, exFAT, ISO 9660 and UDF.",
         keywords: "wsl linux distro distribution ext4 vhd vhdx backup image iso udf partition shift",
         availability: Availability::Always,
+    },
+    OptionSpec {
+        id: OptionId::NativeWsl,
+        group: Group::Scanning,
+        label: "Scan inside WSL2",
+        description: "Use the matching Linux Kosha CLI installed in the selected distribution. Stay on the Linux root filesystem, skip /mnt, and browse the result read-only. A disk image request takes precedence.",
+        keywords: "wsl linux distro distribution native performance home",
+        availability: Availability::Windows,
     },
     OptionSpec {
         id: OptionId::Owners,
@@ -538,6 +549,14 @@ fn render_option(
         OptionId::Image => toggle(palette, spec.label, settings.read_image, cx, |settings| {
             settings.read_image = !settings.read_image
         })
+        .into_any_element(),
+        OptionId::NativeWsl => toggle(
+            palette,
+            spec.label,
+            settings.read_wsl_native,
+            cx,
+            |settings| settings.read_wsl_native = !settings.read_wsl_native,
+        )
         .into_any_element(),
         OptionId::Owners => toggle(
             palette,

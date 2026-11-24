@@ -49,23 +49,25 @@ use crate::treemap::{self, Rect};
 #[cfg(feature = "remote-client")]
 mod remote_scan;
 
-/// How fragmented the selected entry is, once somebody has asked.
-///
-/// The one figure quick look cannot get from the arena: it costs an ioctl per
-/// file, so it is measured only for the entry being looked at, and only while
-/// the panel is open.
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// Window-level activity presentation. Job owners supply the status and action.
+struct ActivityRow {
+    id: SharedString,
+    title: &'static str,
+    scope: String,
+    status: &'static str,
+    cancel: Option<commands::Action>,
+}
+
+struct DeepScanJob {
+    generation: u64,
+    scope: NodeId,
+    label: String,
+    stop: Arc<AtomicBool>,
+}
+
 enum Fragments {
-    /// The query is in flight. Shown as such rather than as a blank row, so a
-    /// slow disk reads as slow rather than as broken.
-    Measuring,
-    /// Measured. The media type is what decides whether the number is worth
-    /// commenting on — `None` when the device would not say.
-    Known(kosha_core::Fragmentation, Option<kosha_core::MediaType>),
-    /// Asked and refused: a file the user cannot open, a filesystem with no
-    /// answer, or a platform that does not do this. The row is dropped rather
-    /// than showing a zero, which would read as "in one piece".
-    Unavailable,
+    Checking(Arc<AtomicBool>),
+    Checked(kosha_analyze::fragmented::Review),
 }
 
 /// A column edge held by the pointer.
@@ -172,20 +174,9 @@ pub struct KoshaApp {
     /// Whether quick look is showing. It follows the selection rather than
     /// pinning one entry, so there is nothing else to remember.
     details_open: bool,
-    /// How fragmented the entry quick look is describing is, and which entry
-    /// that answer belongs to.
-    ///
-    /// Kept on the view rather than inside `details::Details`, which is
-    /// deliberately pure arithmetic over the arena with no I/O in it — that is
-    /// what makes `Space` instant and the whole of it testable without a
-    /// window. This is the one figure on the panel that has to be *asked* for,
-    /// so it arrives separately and late, and the panel reads "measuring…"
-    /// until it does.
-    ///
-    /// The path is carried with the answer so a measurement that finishes after
-    /// the selection has moved on is discarded rather than shown against the
-    /// wrong file.
-    fragmentation: Option<(PathBuf, Fragments)>,
+    /// The current Quick Look check, keyed to the loaded tree and selected entry.
+    fragmentation: Option<(u64, NodeId, Fragments)>,
+    deep_scan: Option<DeepScanJob>,
     /// The column edge being dragged, if any.
     ///
     /// Held on the view rather than on the header element because a drag
@@ -463,6 +454,7 @@ impl KoshaApp {
             settings_open: false,
             details_open: false,
             fragmentation: None,
+            deep_scan: None,
             column_drag: None,
             pending_query: start.query,
             pending_duplicates: start.duplicates,
@@ -1443,6 +1435,74 @@ impl KoshaApp {
             &self.volumes,
             &self.settings.saved_queries,
         );
+        if let Some(ready) = ready
+            && !ready.source.is_past()
+            && ready
+                .selected
+                .is_some_and(|node| kosha_analyze::fragmented::supports_entry(&ready.tree, node))
+        {
+            let checking = matches!(self.fragmentation.as_ref(), Some((generation, node, Fragments::Checking(_)))
+                if *generation == self.load_generation && ready.selected == Some(*node));
+            commands.push(commands::Command {
+                label: if checking {
+                    "Cancel fragmentation check"
+                } else {
+                    "Check fragmentation"
+                }
+                .into(),
+                detail: "Review live file layout in Quick Look".into(),
+                binding: None,
+                keywords: &["fragmentation", "extents", "layout", "optimize"],
+                action: if checking {
+                    commands::Action::CancelFragmentation
+                } else {
+                    commands::Action::CheckFragmentation
+                },
+            });
+        }
+        if let Some(ready) = ready.filter(|ready| {
+            !ready.source.is_past()
+                && !ready.showing_results()
+                && kosha_analyze::fragmented::supports_entry(&ready.tree, ready.focus)
+        }) {
+            let running_here = self.deep_scan.as_ref().is_some_and(|job| {
+                !job.stop.load(Ordering::Relaxed)
+                    && job.generation == self.load_generation
+                    && job.scope == ready.focus
+            });
+            if self.deep_scan.is_none() || running_here {
+                commands.push(commands::Command {
+                    label: "Deep scan folder fragmentation".into(),
+                    detail: if running_here {
+                        "Already running in Background Activity"
+                    } else {
+                        "Measure the largest eligible files in this folder and its subfolders"
+                    }
+                    .into(),
+                    binding: None,
+                    keywords: &["deep scan", "fragmentation", "extents", "layout"],
+                    action: commands::Action::DeepScanFragmentation,
+                });
+            }
+            if running_here {
+                commands.push(commands::Command {
+                    label: "Cancel deep scan".into(),
+                    detail: "Stop checking folder fragmentation".into(),
+                    binding: None,
+                    keywords: &["cancel", "stop"],
+                    action: commands::Action::CancelDeepScan,
+                });
+            }
+            if ready.visible_deep_layout().is_some() {
+                commands.push(commands::Command {
+                    label: "Hide fragmentation column".into(),
+                    detail: "Return to the standard folder table".into(),
+                    binding: None,
+                    keywords: &["fragmentation", "column", "layout"],
+                    action: commands::Action::HideDeepLayout,
+                });
+            }
+        }
         if !self.changing_recipe_packs {
             commands.extend(
                 self.installed_recipe_packs
@@ -1807,6 +1867,29 @@ impl KoshaApp {
                 }
             }
             commands::Action::FindDuplicates => self.find_duplicates(cx),
+            commands::Action::CheckFragmentation => {
+                if !self.details_open {
+                    self.toggle_details(window, cx);
+                }
+                self.check_fragmentation(cx);
+            }
+            commands::Action::DeepScanFragmentation => self.deep_scan_fragmentation(cx),
+            commands::Action::CancelDeepScan => {
+                self.cancel_deep_scan();
+                cx.notify();
+            }
+            commands::Action::HideDeepLayout => {
+                self.cancel_deep_scan();
+                if let Some(ready) = self.state.ready_mut() {
+                    ready.deep_layout = None;
+                    ready.rebuild_rows();
+                }
+                cx.notify();
+            }
+            commands::Action::CancelFragmentation => {
+                self.cancel_fragmentation();
+                cx.notify();
+            }
             commands::Action::TakeSnapshot => self.take_snapshot(cx),
             commands::Action::CompareWithLatest(path) => self.compare_with_snapshot(path, cx),
             commands::Action::CloseComparison => self.close_comparison(cx),
@@ -2526,6 +2609,13 @@ impl KoshaApp {
         };
 
         let scan_path = path.clone();
+        #[cfg(windows)]
+        let native_wsl = self.settings.read_wsl_native
+            && !options.use_image
+            && path
+                .to_str()
+                .and_then(kosha_core::wsl::distribution_root_name)
+                .is_some();
         let completion_cancel = Arc::clone(&cancel);
         self.scan_timing = crate::scan_timing::ScanTiming::with_total(reference_entries);
         let (total_tx, total_rx) = crossbeam_channel::bounded(1);
@@ -2535,7 +2625,16 @@ impl KoshaApp {
                 && options.max_depth.is_none()
                 && let Some(dir) = kosha_core::snapshot::store::automatic_dir()
             {
-                let root = kosha_core::path::canonical(&scan_path);
+                let root = if scan_path
+                    .to_str()
+                    .and_then(kosha_core::wsl::distribution_root_name)
+                    .is_some()
+                    && cfg!(windows)
+                {
+                    scan_path.clone()
+                } else {
+                    kosha_core::path::canonical(&scan_path)
+                };
                 let record = kosha_core::snapshot::store::automatic_path_in(&dir, &root);
                 if let Ok(meta) = kosha_core::snapshot::store::read_meta_at(&record)
                     && kosha_core::snapshot::store::same_root(&meta.root, &root)
@@ -2545,6 +2644,10 @@ impl KoshaApp {
                 {
                     let _ = total_tx.try_send(meta.entries);
                 }
+            }
+            #[cfg(windows)]
+            if native_wsl {
+                return kosha_core::wsl::scan_native(&scan_path, options, &cancel);
             }
             Scanner::new(options)
                 .with_cancel(cancel)
@@ -3073,17 +3176,19 @@ impl KoshaApp {
     fn start_scan(&mut self, path: PathBuf, event: &ClickEvent, cx: &mut Context<Self>) {
         if event.modifiers().shift {
             self.scan_the_fast_way(path, cx);
-        } else if self.is_volume_root(&path) {
+        } else if self.is_automatic_scan_root(&path) {
             self.open_drive(path, cx);
         } else {
             self.scan(path, cx);
         }
     }
 
-    fn is_volume_root(&self, path: &std::path::Path) -> bool {
+    fn is_automatic_scan_root(&self, path: &std::path::Path) -> bool {
         self.volumes
             .iter()
-            .any(|volume| kosha_core::snapshot::store::same_root(&volume.place.path, path))
+            .map(|volume| &volume.place.path)
+            .chain(self.distributions.iter().map(|distro| &distro.place.path))
+            .any(|root| kosha_core::snapshot::store::same_root(root, path))
     }
 
     /// Browsing a drive prefers its last record. Explicit scan commands and
@@ -3142,72 +3247,240 @@ impl KoshaApp {
         .detach();
     }
 
-    /// Keep the fragmentation figure pointed at whatever quick look is showing.
-    ///
-    /// Called once per frame from `render`, which is the only place every route
-    /// to a new selection passes through — the selection moves from the table,
-    /// the treemap, a search result, an insight's "show me", a rescan and the
-    /// keyboard, and a hook on each of those is a hook somebody will forget.
-    /// The work here is one path comparison unless the answer is actually
-    /// stale.
-    fn track_fragmentation(&mut self, cx: &mut Context<Self>) {
-        if !self.details_open || !kosha_core::supports_fragmentation() {
-            self.fragmentation = None;
-            return;
+    fn background_activities(&self) -> Vec<ActivityRow> {
+        let mut rows = Vec::new();
+        if let Some(job) = &self.deep_scan {
+            let stopping = job.stop.load(Ordering::Relaxed);
+            rows.push(ActivityRow {
+                id: "folder-fragmentation".into(),
+                title: "Folder fragmentation",
+                scope: format::printable(&job.label).into_owned(),
+                status: if stopping { "Cancelling" } else { "Running" },
+                cancel: (!stopping).then_some(commands::Action::CancelDeepScan),
+            });
         }
-        let Some(ready) = self.state.ready() else {
-            self.fragmentation = None;
-            return;
-        };
-        let Some(selected) = ready.selected else {
-            self.fragmentation = None;
-            return;
-        };
-
-        let path = ready.tree.path_of(selected);
-        if self
-            .fragmentation
-            .as_ref()
-            .is_some_and(|(at, _)| *at == path)
+        if let (Some((generation, node, Fragments::Checking(_))), Some(ready)) =
+            (&self.fragmentation, self.state.ready())
+            && *generation == self.load_generation
         {
-            return; // Already measured, or already being measured.
+            rows.push(ActivityRow {
+                id: "quick-look-fragmentation".into(),
+                title: "Quick Look fragmentation",
+                scope: format::printable(&ready.tree.name_lossy(*node)).into_owned(),
+                status: "Running",
+                cancel: Some(commands::Action::CancelFragmentation),
+            });
         }
-        // Marked before the task starts, so the next frame sees a match and
-        // does not queue the same question again.
-        self.fragmentation = Some((path.clone(), Fragments::Measuring));
+        rows
+    }
 
-        let task = cx.background_executor().spawn(async move {
-            // One open and one ioctl each. Off the UI thread because a file on
-            // a sleeping disk can take a moment, and a frame must never wait
-            // for a spindle.
-            let found = kosha_core::fragmentation(&path);
-            let media = kosha_core::media_type(&path);
-            (path, found, media)
+    fn render_background_activity(
+        rows: Vec<ActivityRow>,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        (!rows.is_empty()).then(|| {
+            v_flex()
+                .id("background-activity")
+                .debug_selector(|| "background-activity".into())
+                .absolute()
+                .right(px(12.0))
+                .bottom(px(metrics::STATUS_BAR_HEIGHT + 10.0))
+                .w(px(310.0))
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(palette.hairline)
+                .bg(palette.surface)
+                .p(px(10.0))
+                .gap(px(8.0))
+                .child(crate::ui::section_label(palette, "BACKGROUND ACTIVITY"))
+                .children(rows.into_iter().map(|row| {
+                    h_flex()
+                        .gap(px(10.0))
+                        .items_center()
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .gap(px(3.0))
+                                .child(div().text_size(px(metrics::TEXT_SM)).child(row.title))
+                                .child(
+                                    div()
+                                        .text_size(px(metrics::TEXT_XS))
+                                        .text_color(palette.text_dim)
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .text_ellipsis_middle()
+                                        .child(format!("{} \u{00b7} {}", row.status, row.scope)),
+                                ),
+                        )
+                        .children(row.cancel.map(|action| {
+                            crate::ui::button(
+                                SharedString::from(format!("cancel-activity-{}", row.id)),
+                                palette,
+                            )
+                            .role(gpui_kit::Role::Button)
+                            .flex_none()
+                            .aria_label(SharedString::from(format!("Cancel {}", row.title)))
+                            .child("Cancel")
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.run_command(action.clone(), window, cx);
+                                },
+                            ))
+                        }))
+                }))
+                .into_any_element()
+        })
+    }
+
+    fn cancel_deep_scan(&mut self) {
+        if let Some(job) = &self.deep_scan {
+            job.stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn deep_scan_fragmentation(&mut self, cx: &mut Context<Self>) {
+        use kosha_analyze::fragmented;
+        // Keep the slot until the worker acknowledges cancellation. In-flight
+        // filesystem calls cannot be stopped by dropping their view.
+        if self.deep_scan.is_some() {
+            return;
+        }
+        let Some(ready) = self.state.ready().filter(|ready| {
+            !ready.source.is_past()
+                && !ready.showing_results()
+                && fragmented::supports_entry(&ready.tree, ready.focus)
+        }) else {
+            return;
+        };
+        let scope = ready.focus;
+        let tree = Arc::clone(&ready.tree);
+        let generation = self.load_generation;
+        let label = if scope == tree.root() {
+            tree.root_path().file_name().map_or_else(
+                || tree.root_path().to_string_lossy().into_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        } else {
+            tree.name_lossy(scope).into_owned()
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        self.deep_scan = Some(DeepScanJob {
+            generation,
+            scope,
+            label,
+            stop: Arc::clone(&stop),
         });
-
+        let worker_stop = Arc::clone(&stop);
+        let task = cx.background_executor().spawn(async move {
+            let mut report =
+                fragmented::review(&tree, scope, fragmented::DEFAULT_SAMPLE, &worker_stop);
+            if worker_stop.load(Ordering::Relaxed) {
+                report.cancelled = true;
+            }
+            crate::state::DeepLayout::new(&tree, scope, report)
+        });
         cx.spawn(async move |this, cx| {
-            let (path, found, media) = task.await;
+            let layout = task.await;
             this.update(cx, |this, cx| {
-                // The selection may have moved while the disk was thinking. An
-                // answer about a file nobody is looking at any more is dropped
-                // rather than shown against whatever is selected now.
-                if this
-                    .fragmentation
+                if !this
+                    .deep_scan
                     .as_ref()
-                    .is_none_or(|(at, _)| *at != path)
+                    .is_some_and(|job| Arc::ptr_eq(&stop, &job.stop))
                 {
                     return;
                 }
-                let state = match found {
-                    Ok(found) => Fragments::Known(found, media),
-                    Err(_) => Fragments::Unavailable,
-                };
-                this.fragmentation = Some((path, state));
+                this.deep_scan = None;
+                if !stop.load(Ordering::Relaxed)
+                    && !layout.report.cancelled
+                    && this.load_generation == generation
+                    && let Some(ready) = this
+                        .state
+                        .ready_mut()
+                        .filter(|ready| ready.focus == scope && !ready.source.is_past())
+                {
+                    ready.deep_layout = Some(layout);
+                    ready.rebuild_rows();
+                }
                 cx.notify();
             })
             .ok();
         })
         .detach();
+        cx.notify();
+    }
+
+    fn track_fragmentation(&mut self) {
+        if self.deep_scan.as_ref().is_some_and(|job| {
+            job.generation != self.load_generation
+                || self
+                    .state
+                    .ready()
+                    .is_none_or(|ready| ready.focus != job.scope)
+        }) {
+            self.cancel_deep_scan();
+        }
+        let selected = self.state.ready().and_then(|ready| ready.selected);
+        if self
+            .fragmentation
+            .as_ref()
+            .is_some_and(|(generation, node, _)| {
+                !self.details_open || *generation != self.load_generation || selected != Some(*node)
+            })
+        {
+            self.cancel_fragmentation();
+        }
+    }
+
+    fn cancel_fragmentation(&mut self) {
+        if let Some((_, _, Fragments::Checking(stop))) = self.fragmentation.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn check_fragmentation(&mut self, cx: &mut Context<Self>) {
+        use kosha_analyze::fragmented;
+        let Some(ready) = self.state.ready() else {
+            return;
+        };
+        let Some(node) = ready
+            .selected
+            .filter(|&node| fragmented::supports_entry(&ready.tree, node))
+        else {
+            return;
+        };
+        if ready.source.is_past() || !self.details_open {
+            return;
+        }
+        let tree = Arc::clone(&ready.tree);
+        let generation = self.load_generation;
+        self.cancel_fragmentation();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.fragmentation = Some((generation, node, Fragments::Checking(Arc::clone(&stop))));
+        let worker_stop = Arc::clone(&stop);
+        let task = cx.background_executor().spawn(async move {
+            fragmented::review(&tree, node, fragmented::DEFAULT_SAMPLE, &worker_stop)
+        });
+        cx.spawn(async move |this, cx| {
+            let report = task.await;
+            this.update(cx, |this, cx| {
+                if this.load_generation != generation
+                    || !this.details_open
+                    || this.state.ready().and_then(|ready| ready.selected) != Some(node)
+                    || !this.fragmentation.as_ref().is_some_and(|(_, _, state)| {
+                        matches!(state, Fragments::Checking(current) if Arc::ptr_eq(current, &stop))
+                    })
+                {
+                    return;
+                }
+                this.fragmentation = Some((generation, node, Fragments::Checked(report)));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     /// What the command line asked for, once there is a tree to do it to.
@@ -3249,7 +3522,20 @@ impl KoshaApp {
     }
 
     fn scan_finished(&mut self, tree: Arc<SizeTree>, cx: &mut Context<Self>) {
-        self.state.phase = Phase::Ready(Ready::new(Arc::clone(&tree)));
+        let taken = std::time::SystemTime::now();
+        let ready = if tree.stats().strategy == kosha_core::Strategy::WslNative {
+            let record_dir = kosha_core::snapshot::store::automatic_dir().unwrap_or_default();
+            let source = crate::state::Source::Snapshot(Box::new(crate::state::SnapshotSource {
+                path: kosha_core::snapshot::store::automatic_path_in(&record_dir, tree.root_path()),
+                meta: kosha_core::snapshot::Meta::of(&tree, taken, "Native WSL scan"),
+                automatic: true,
+            }));
+            self.state.notice = kosha_core::snapshot::replaced_names_note(&tree);
+            Ready::from_source(Arc::clone(&tree), source)
+        } else {
+            Ready::new(Arc::clone(&tree))
+        };
+        self.state.phase = Phase::Ready(ready);
         if tree.stats().cancelled {
             self.state.notice = Some("Scan stopped. Results are incomplete.".into());
         }
@@ -3259,9 +3545,11 @@ impl KoshaApp {
         // this covers deletions too without a second place to remember.
         self.refresh_places();
 
-        if self.is_volume_root(tree.root_path()) && !tree.is_incomplete() {
+        if self.is_automatic_scan_root(tree.root_path())
+            && !tree.is_incomplete()
+            && !tree.root_unreadable()
+        {
             let cached = Arc::clone(&tree);
-            let taken = std::time::SystemTime::now();
             self.last_drive_record =
                 crate::drive_history::DriveRecord::new(Arc::clone(&tree), taken);
             if let Some(record) = &self.last_drive_record {
@@ -3306,6 +3594,7 @@ impl KoshaApp {
         };
         let tree = Arc::clone(&ready.tree);
         let context = self.settings.analysis_context();
+        let live = !ready.source.is_past();
         self.analysis_generation += 1;
         let ticket = self.analysis_generation;
         let generation = self.load_generation;
@@ -3315,7 +3604,7 @@ impl KoshaApp {
                     let packs = kosha_marketplace::load_analysis_rules();
                     let problems = packs.summaries();
                     (
-                        kosha_analyze::findings_with(&tree, &context, &packs.rules),
+                        kosha_analyze::findings_for_source(&tree, &context, &packs.rules, live),
                         problems,
                     )
                 })
@@ -3845,7 +4134,14 @@ impl KoshaApp {
             return;
         }
         let root = self.state.session.root().to_path_buf();
-        if root.is_dir() {
+        let wsl = cfg!(windows)
+            && root
+                .to_str()
+                .and_then(kosha_core::wsl::distribution_root_name)
+                .is_some();
+        // Probing a WSL UNC path can start the distro on the UI thread, even
+        // when the selected scan strategy will never touch the redirector.
+        if wsl || root.is_dir() {
             self.scan(root, cx);
         }
     }
@@ -4042,7 +4338,7 @@ impl Render for KoshaApp {
 
         // Before anything is built, because quick look reads the answer below
         // and this is where a moved selection is noticed.
-        self.track_fragmentation(cx);
+        self.track_fragmentation();
 
         // The confirmation dialog is built first so the borrow of `self` it
         // needs is released before the main tree borrows `self` mutably.
@@ -4113,6 +4409,11 @@ impl Render for KoshaApp {
                     )
                     .child(self.render_status_bar(fits, &palette, cx)),
             )
+            .children(Self::render_background_activity(
+                self.background_activities(),
+                &palette,
+                cx,
+            ))
             .children(settings_panel)
             .children(help_panel)
             .children(owners_panel)
@@ -5863,49 +6164,115 @@ const TREEMAP_PAD: f32 = 8.0;
 // ------------------------------------------------------------- quick look
 
 impl KoshaApp {
-    /// `Space` — everything known about the selected entry.
-    ///
-    /// Rendered into the right rail rather than over the table, because the
-    /// panel follows the selection: a hand on the arrow keys walks the rows and
-    /// watches this change, so it must not be sitting on the rows. The first
-    /// version floated above them, and a screenshot showed it covering the name
-    /// of every row below the selected one.
-    ///
-    /// `None` when nothing is selected. A panel that appears only to say
-    /// "nothing selected" teaches people the key is broken.
-    /// How many pieces the selected entry is in, as a line of text.
-    ///
-    /// `None` where there is nothing worth saying, which is most of the time:
-    /// the panel earns its place by being short, and "1 piece" on a healthy
-    /// file is a row that pushes a useful one off the bottom.
-    ///
-    /// **Solid state says nothing at all.** Fragmentation there costs a
-    /// pointer dereference rather than a seek, so a number invites somebody to
-    /// go and defragment an SSD — which wears it out and buys nothing. The
-    /// media is asked about first and the row is dropped on anything without a
-    /// head that has to move. Where the device would not say, the count is
-    /// still shown without the judgement: the fact is true whatever the disk
-    /// is, and it is only the advice that depends on knowing.
-    fn fragmentation_row(&self) -> Option<String> {
-        use kosha_core::MediaType;
-
-        let (_, state) = self.fragmentation.as_ref()?;
-        match state {
-            Fragments::Measuring => Some("measuring…".into()),
-            Fragments::Unavailable => None,
-            Fragments::Known(found, media) => {
-                if *media == Some(MediaType::SolidState) || !found.is_fragmented() {
-                    return None;
-                }
-                let pieces = format::plural(found.extents as usize, "piece");
-                let more = if found.truncated { "over " } else { "" };
-                Some(match media {
-                    // Named only where it is the reason the number matters.
-                    Some(MediaType::Spinning) => format!("{more}{pieces}, on a spinning disk"),
-                    _ => format!("{more}{pieces}"),
-                })
+    fn render_fragmentation(
+        &self,
+        ready: &Ready,
+        node: NodeId,
+        palette: &Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use kosha_analyze::fragmented;
+        if ready.source.is_past() || !fragmented::supports_entry(&ready.tree, node) {
+            return None;
+        }
+        let state = self
+            .fragmentation
+            .as_ref()
+            .filter(|(generation, checked, _)| {
+                *generation == self.load_generation && *checked == node
+            })
+            .map(|(_, _, state)| state);
+        let note = |text: String| {
+            div()
+                .text_size(px(metrics::TEXT_XS))
+                .text_color(palette.text_dim)
+                .child(SharedString::from(text))
+        };
+        let checking = matches!(state, Some(Fragments::Checking(_)));
+        let mut section = v_flex().mt(px(8.0)).gap(px(4.0));
+        if let Some(Fragments::Checked(report)) = state {
+            let folder = ready.tree.node(node).is_dir();
+            let fragmented = report.fragmented_count();
+            let summary = if folder && report.eligible == 0 {
+                "No eligible files in this folder.".into()
+            } else if folder && report.checked.is_empty() {
+                "File layout is unavailable for this sample.".into()
+            } else if folder {
+                format!(
+                    "{} fragmented. Checked {} of {} eligible files.",
+                    fragmented,
+                    report.checked.len(),
+                    report.eligible
+                )
+            } else if let Some(file) = report.checked.first() {
+                fragmented::extent_label(file.layout.extents, file.layout.truncated)
+            } else {
+                "File layout is unavailable.".into()
+            };
+            section = section
+                .child(crate::ui::section_label(palette, "FRAGMENTATION"))
+                .child(note(summary))
+                .child(note(fragmented::EXTENT_HELP.into()));
+            if folder && report.unavailable > 0 {
+                section =
+                    section.child(note(format!("{} checks unavailable.", report.unavailable)));
+            }
+            if folder && ready.tree.is_partial() {
+                section = section.child(note("The scan was partial.".into()));
+            }
+            if folder {
+                let scope = ready.tree.path_of(node);
+                section = section.children(
+                    report
+                        .checked
+                        .iter()
+                        .filter(|file| file.layout.is_fragmented())
+                        .take(3)
+                        .map(|file| {
+                            let path = ready.tree.path_of(file.node);
+                            let display = path.strip_prefix(&scope).unwrap_or(&path);
+                            note(format!(
+                                "{} ({})",
+                                format::printable(&display.to_string_lossy()),
+                                fragmented::extent_label(
+                                    file.layout.extents,
+                                    file.layout.truncated
+                                ),
+                            ))
+                        }),
+                );
+            }
+            if fragmented > 0 {
+                section = section.child(note(fragmented::media_advice(report.media).into()));
             }
         }
+        if checking {
+            section = section.child(note("Checking file layout...".into()));
+        }
+        Some(
+            section
+                .child(
+                    crate::ui::button("quick-look-fragmentation", palette)
+                        .debug_selector(|| "quick-look-fragmentation".into())
+                        .role(gpui_kit::Role::Button)
+                        .child(if checking {
+                            "Cancel check"
+                        } else if state.is_some() {
+                            "Check again"
+                        } else {
+                            "Check fragmentation"
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if checking {
+                                this.cancel_fragmentation();
+                                cx.notify();
+                            } else {
+                                this.check_fragmentation(cx);
+                            }
+                        })),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_details(&self, palette: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -6008,8 +6375,7 @@ impl KoshaApp {
                     "largest inside",
                     format!("{name} · {}", format::bytes_in(*bytes, units)),
                 )
-            }))
-            .children(self.fragmentation_row().map(|text| row("in", text)));
+            }));
 
         // What is actually in there, which is the question a directory raises
         // and the table cannot answer without drilling into it.
@@ -6108,6 +6474,7 @@ impl KoshaApp {
                         ),
                 )
                 .child(body)
+                .children(self.render_fragmentation(ready, selected, palette, cx))
                 .children(breakdown)
                 .children(caveats)
                 .into_any_element(),
@@ -6115,10 +6482,153 @@ impl KoshaApp {
     }
 }
 
+#[cfg(all(
+    test,
+    any(windows, target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_fragmentation_quick_look_checks_and_cancels() {
+    use gpui_kit::{TestAppContext, VisualTestContext};
+
+    let fixture = tempfile::tempdir().unwrap();
+    std::fs::create_dir(fixture.path().join("media")).unwrap();
+    std::fs::write(fixture.path().join("media/archive.bin"), [b'x'; 8192]).unwrap();
+    let tree = Arc::new(
+        Scanner::new(kosha_core::ScanOptions::default())
+            .scan(fixture.path())
+            .unwrap(),
+    );
+    let folder = tree.children(tree.root()).next().unwrap();
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        let mut app = KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: None,
+            },
+            Start::default(),
+            None,
+            cx,
+        );
+        app.state.phase = Phase::Ready(Ready::new(Arc::clone(&tree)));
+        app.details_open = true;
+        app
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("quick-look-fragmentation").is_some());
+
+    window
+        .update(&mut cx, |app, _, cx| {
+            assert!(
+                app.commands(cx)
+                    .iter()
+                    .any(|command| command.action == commands::Action::CheckFragmentation)
+            );
+            app.check_fragmentation(cx);
+            let Some((_, _, Fragments::Checking(stop))) = &app.fragmentation else {
+                panic!("the check did not start");
+            };
+            let stop = Arc::clone(stop);
+            app.state.ready_mut().unwrap().selected = tree.children(folder).next();
+            app.track_fragmentation();
+            assert!(stop.load(Ordering::Relaxed));
+            assert!(app.fragmentation.is_none());
+            app.state.ready_mut().unwrap().selected = Some(folder);
+            app.check_fragmentation(cx);
+        })
+        .unwrap();
+
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, _, cx| {
+            let Some((_, checked, Fragments::Checked(report))) = &app.fragmentation else {
+                panic!("the check did not finish");
+            };
+            assert_eq!(*checked, folder);
+            assert_eq!(report.eligible, 1);
+            assert_eq!(report.checked.len() + report.unavailable, 1);
+            app.deep_scan_fragmentation(cx);
+            let first = Arc::clone(&app.deep_scan.as_ref().unwrap().stop);
+            app.deep_scan_fragmentation(cx);
+            assert!(Arc::ptr_eq(&first, &app.deep_scan.as_ref().unwrap().stop));
+            assert_eq!(app.background_activities()[0].status, "Running");
+            app.cancel_deep_scan();
+            assert!(first.load(Ordering::Relaxed));
+            let activities = app.background_activities();
+            assert_eq!(activities[0].status, "Cancelling");
+            assert!(activities[0].cancel.is_none());
+            app.deep_scan_fragmentation(cx);
+            assert!(Arc::ptr_eq(&first, &app.deep_scan.as_ref().unwrap().stop));
+        })
+        .unwrap();
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, _, cx| {
+            assert!(app.deep_scan.is_none());
+            assert!(app.state.ready().unwrap().visible_deep_layout().is_none());
+
+            // Hold a synthetic activity open so its presentation does not race
+            // the short NTFS fixture.
+            app.deep_scan = Some(DeepScanJob {
+                generation: app.load_generation,
+                scope: tree.root(),
+                label: "Fixture".into(),
+                stop: Arc::new(AtomicBool::new(false)),
+            });
+            cx.notify();
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("background-activity").is_some());
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.deep_scan = None;
+            app.deep_scan_fragmentation(cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("background-activity").is_none());
+    assert!(visual.debug_bounds("deep-fragmentation-column").is_some());
+    window
+        .update(&mut cx, |app, _, cx| {
+            let ready = app.state.ready_mut().unwrap();
+            let layout = ready.visible_deep_layout().unwrap();
+            assert_eq!(layout.scope, tree.root());
+            assert_eq!(layout.report.eligible, 1);
+            ready.source = crate::state::Source::Remote(Box::new(kosha_core::snapshot::Meta::of(
+                &tree,
+                std::time::UNIX_EPOCH,
+                "Synthetic report",
+            )));
+            assert!(
+                !app.commands(cx)
+                    .iter()
+                    .any(|command| command.action == commands::Action::CheckFragmentation)
+            );
+            cx.notify();
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("quick-look-fragmentation").is_none());
+    assert!(visual.debug_bounds("deep-fragmentation-column").is_none());
+}
+
 // --------------------------------------------------------------------- table
 
 impl KoshaApp {
     fn render_table(&mut self, palette: &Palette, cx: &mut Context<Self>) -> impl IntoElement {
+        let deep_status = self.state.ready().and_then(|ready| ready.visible_deep_layout()).map(|layout| {
+            let report = &layout.report;
+            format!("Fragmentation column added. {} of {} eligible files checked, {} unavailable. Folder rates use checked files.",
+                report.checked.len(), report.eligible, report.unavailable)
+        });
         let palette = *palette;
         let count = self.state.ready().map_or(0, |r| r.rows.len());
         let mono = cx.theme().mono_font_family.clone();
@@ -6148,6 +6658,14 @@ impl KoshaApp {
                     .child(self.render_query_bar(&palette, cx)),
             )
             .children(crate::query_help::suggestions(self, &palette, cx))
+            .children(deep_status.map(|status| {
+                div()
+                    .px(px(12.0))
+                    .py(px(4.0))
+                    .text_size(px(metrics::TEXT_XS))
+                    .text_color(palette.text_dim)
+                    .child(status)
+            }))
             .child(self.render_table_header(&palette, cx))
             .child(
                 div()
@@ -6203,6 +6721,12 @@ impl KoshaApp {
         let sort = self.state.ready().map(|r| r.sort).unwrap_or_default();
         let dragging = self.column_drag.map(|drag| drag.column);
 
+        let deep = self
+            .state
+            .ready()
+            .and_then(|ready| ready.visible_deep_layout())
+            .map(|layout| layout.descending);
+        let sort = deep.flatten().is_none().then_some(sort);
         h_flex()
             .flex_none()
             .h(px(metrics::ROW_HEIGHT))
@@ -6225,6 +6749,31 @@ impl KoshaApp {
                     // would need.
                     .collect::<Vec<_>>(),
             )
+            .children(deep.map(|descending| {
+                let label = match descending {
+                    Some(true) => "FRAGMENTATION \u{2193}",
+                    Some(false) => "FRAGMENTATION \u{2191}",
+                    None => "FRAGMENTATION",
+                };
+                div().id("deep-fragmentation-column")
+                    .debug_selector(|| "deep-fragmentation-column".into())
+                    .w(px(DEEP_LAYOUT_WIDTH)).flex_none()
+                    .text_right().text_color(palette.accent).cursor_pointer().child(label)
+                    .tooltip(|window,cx| tooltip(concat!(
+                        "Files show allocated extents. Folders show the percentage of checked files ",
+                        "that were fragmented, plus checked files over recorded files. ",
+                        "An extent is a contiguous run of allocated blocks."
+                    )).build(window,cx))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(ready) = this.state.ready_mut() {
+                            if let Some(layout) = &mut ready.deep_layout {
+                                layout.descending = Some(!layout.descending.unwrap_or(false));
+                            }
+                            ready.rebuild_rows();
+                        }
+                        cx.notify();
+                    }))
+            }))
     }
 
     /// Start, continue and finish a column resize.
@@ -6556,7 +7105,7 @@ impl KoshaApp {
 /// than the window.
 fn name_header(
     palette: &Palette,
-    sort: crate::state::Sort,
+    sort: Option<crate::state::Sort>,
     cx: &mut Context<KoshaApp>,
 ) -> impl IntoElement {
     heading(palette, sort, SortKey::Name, "NAME", cx).flex_1()
@@ -6566,7 +7115,7 @@ fn name_header(
 /// and a resize handle on its leading edge.
 fn column_header(
     palette: &Palette,
-    sort: crate::state::Sort,
+    sort: Option<crate::state::Sort>,
     column: Column,
     width: f32,
     dragging: bool,
@@ -6642,12 +7191,12 @@ fn column_resize_handle(
 /// The clickable label and sort arrow shared by every heading.
 fn heading(
     palette: &Palette,
-    sort: crate::state::Sort,
+    sort: Option<crate::state::Sort>,
     key: SortKey,
     label: &'static str,
     cx: &mut Context<KoshaApp>,
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let indicator = sort.indicator(key);
+    let indicator = sort.and_then(|sort| sort.indicator(key));
     let active = indicator.is_some();
 
     h_flex()
@@ -6681,6 +7230,8 @@ fn heading(
 ///
 /// A free function rather than a method: `uniform_list` hands back an `App`,
 /// not a `Context<Self>`, and this keeps the borrow of `ready` obvious.
+const DEEP_LAYOUT_WIDTH: f32 = 144.0;
+
 #[allow(clippy::too_many_arguments)]
 fn row(
     ready: &Ready,
@@ -6827,6 +7378,19 @@ fn row(
                 // captured by the `FnMut` an iterator adaptor would need.
                 .collect::<Vec<_>>(),
         )
+        .children(ready.visible_deep_layout().map(|layout| {
+            div()
+                .w(px(DEEP_LAYOUT_WIDTH))
+                .flex_none()
+                .text_right()
+                .font_family(mono.clone())
+                .text_color(palette.text_dim)
+                .child(
+                    layout
+                        .cell(&ready.tree, id)
+                        .unwrap_or_else(|| "\u{2014}".into()),
+                )
+        }))
         // One click selects, two open — the convention everywhere else, and
         // previously the rows had an id and no handler at all, so clicking a
         // row did nothing.

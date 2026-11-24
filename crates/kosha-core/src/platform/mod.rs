@@ -31,6 +31,9 @@ use unix as imp;
 #[cfg(target_os = "macos")]
 pub use unix::macos_mounts;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod unix_extents;
+
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
@@ -176,6 +179,8 @@ pub struct Fragmentation {
     pub extents: u64,
     /// Clusters those runs cover.
     pub clusters: u64,
+    /// Mapped bytes inside the logical file on Linux and macOS.
+    pub mapped_bytes: Option<u64>,
     /// Runs that are holes in a sparse file. Counted separately because they
     /// occupy nothing and cost no seek, so calling them fragmentation would
     /// report every sparse file as badly fragmented when it is not.
@@ -196,7 +201,8 @@ impl Fragmentation {
     /// has to look somewhere else. Higher is better; `None` when there is
     /// nothing placed to average over.
     pub fn clusters_per_extent(&self) -> Option<f64> {
-        (self.extents > 0).then(|| self.clusters as f64 / self.extents as f64)
+        (self.extents > 0 && self.mapped_bytes.is_none())
+            .then(|| self.clusters as f64 / self.extents as f64)
     }
 }
 
@@ -215,33 +221,31 @@ pub enum MediaType {
     SolidState,
 }
 
-/// Whether this platform can report how fragmented a file is.
-///
-/// Windows only, and honestly absent elsewhere rather than faked. Linux has
-/// `FIEMAP` and macOS has `F_LOG2PHYS`, so the question is answerable there —
-/// but the *advice* is not the same one: ext4 and APFS lay files out differently
-/// and neither ships a defragmenter a user would run, so a number with no action
-/// behind it would be trivia.
+/// Whether this build has an extent reader. The filesystem may still decline.
 pub const fn supports_fragmentation() -> bool {
-    cfg!(windows)
+    cfg!(any(windows, target_os = "linux", target_os = "macos"))
 }
 
-/// How many pieces `path`'s bytes are in.
-///
-/// Returns [`io::ErrorKind::Unsupported`] where the platform has no equivalent,
-/// so a caller that ignores [`supports_fragmentation`] cannot silently report
-/// zero and call it a measurement.
+/// Read the allocated runs of a live file without reading file contents.
 pub fn fragmentation(path: &Path) -> io::Result<Fragmentation> {
+    fragmentation_with_cancel(path, &std::sync::atomic::AtomicBool::new(false))
+}
+
+/// Read the file layout, checking cancellation between mapping requests.
+pub fn fragmentation_with_cancel(
+    path: &Path,
+    stop: &std::sync::atomic::AtomicBool,
+) -> io::Result<Fragmentation> {
     #[cfg(windows)]
+    return imp::fragmentation(path, stop);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    return unix_extents::fragmentation(path, stop);
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
-        imp::fragmentation(path)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = path;
+        let _ = (path, stop);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
-            "fragmentation is only reported on Windows",
+            "this build has no extent reader",
         ))
     }
 }
@@ -651,11 +655,19 @@ mod tests {
     /// measurement.
     #[test]
     fn fragmentation_is_reported_exactly_where_it_is_implemented() {
-        assert_eq!(supports_fragmentation(), cfg!(windows));
+        assert_eq!(
+            supports_fragmentation(),
+            cfg!(any(windows, target_os = "linux", target_os = "macos"))
+        );
 
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("a.bin");
-        fs::write(&file, vec![0u8; 256 * 1024]).unwrap();
+        {
+            use std::io::Write as _;
+            let mut output = fs::File::create(&file).unwrap();
+            output.write_all(&vec![0x5a; 256 * 1024]).unwrap();
+            output.sync_all().unwrap();
+        }
 
         match fragmentation(&file) {
             Ok(found) => {
@@ -665,10 +677,15 @@ mod tests {
                 // to assert on somebody else's disk. What must hold is that the
                 // clusters add up to something and the file is not reported as
                 // both placed and nowhere.
-                assert!(found.clusters > 0, "{found:?}");
+                if cfg!(windows) {
+                    assert!(found.clusters > 0, "{found:?}");
+                    assert!(found.clusters_per_extent().is_some());
+                } else {
+                    assert_eq!(found.mapped_bytes, Some(256 * 1024));
+                    assert!(found.clusters_per_extent().is_none());
+                }
                 assert!(found.extents > 0, "{found:?}");
                 assert!(!found.truncated, "{found:?}");
-                assert!(found.clusters_per_extent().is_some());
             }
             Err(error) => {
                 // Either the platform has no answer, or this volume has none:
@@ -754,7 +771,7 @@ mod tests {
             extents: 1,
             clusters: 40,
             holes: 6,
-            truncated: false,
+            ..Fragmentation::default()
         };
         assert!(!sparse.is_fragmented());
     }

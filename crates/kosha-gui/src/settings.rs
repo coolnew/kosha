@@ -191,6 +191,8 @@ pub struct Settings {
     /// scan runs and the window says which. So leaving it on costs nothing on
     /// the days it cannot apply.
     pub read_image: bool,
+    /// Use the installed Linux Kosha CLI for regular scans of WSL2 roots.
+    pub read_wsl_native: bool,
     /// Record who owns each entry, so the window can say who is using the disk.
     ///
     /// Off by default because on a machine one person uses it answers a
@@ -236,6 +238,7 @@ impl Default for Settings {
             dedup_hardlinks: scan.dedup_hardlinks.unwrap_or(false),
             read_mft: scan.use_mft,
             read_image: scan.use_image,
+            read_wsl_native: false,
             collect_owners: scan.collect_owners,
             ssh_access: false,
             min_reclaimable_mb: analysis.min_reclaimable / (1024 * 1024),

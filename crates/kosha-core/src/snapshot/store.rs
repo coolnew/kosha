@@ -50,6 +50,11 @@ pub fn automatic_dir() -> Option<PathBuf> {
 }
 
 fn root_key(root: &Path) -> Vec<u8> {
+    let wsl_root = cfg!(windows)
+        .then(|| root.to_str().and_then(crate::wsl::distribution_root_name))
+        .flatten()
+        .map(crate::wsl::path_of);
+    let root = wsl_root.as_deref().unwrap_or(root);
     let mut bytes = root.as_os_str().as_encoded_bytes().to_vec();
     if cfg!(windows) {
         bytes.make_ascii_lowercase();
@@ -90,7 +95,7 @@ pub fn open_automatic(root: &Path) -> Result<(PathBuf, Meta, SizeTree), ReadErro
 pub fn open_automatic_in(dir: &Path, root: &Path) -> Result<(PathBuf, Meta, SizeTree), ReadError> {
     let path = automatic_path_in(dir, root);
     let (meta, tree) = open(&path)?;
-    if !same_root(&meta.root, root) || tree.is_incomplete() {
+    if !same_root(&meta.root, root) || tree.is_incomplete() || tree.root_unreadable() {
         return Err(io::Error::other("cached drive does not match this completed scan").into());
     }
     Ok((path, meta, tree))
@@ -101,34 +106,38 @@ pub fn save_automatic(tree: &SizeTree, taken: SystemTime) -> io::Result<PathBuf>
     save_automatic_in(&dir, tree, taken)
 }
 
-/// The caller selects volume roots only. A cancelled or depth-limited scan
+/// The caller selects volume or WSL distribution roots. A cancelled or depth-limited scan
 /// must not replace the last usable record. Read errors remain recorded in
 /// the tree, just as in an explicit snapshot, and are visible when browsing.
 pub fn save_automatic_in(dir: &Path, tree: &SizeTree, taken: SystemTime) -> io::Result<PathBuf> {
-    if tree.is_incomplete() {
+    if tree.is_incomplete() || tree.root_unreadable() {
         return Err(io::Error::other(
-            "unfinished scans cannot replace the drive cache",
+            "unfinished or unreadable scans cannot replace the drive cache",
         ));
     }
-    // Background compression tasks can finish out of order. Keep the newest
-    // completed record when this process has more than one writer.
-    static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _writing = WRITING
-        .lock()
-        .map_err(|_| io::Error::other("drive cache writer unavailable"))?;
     let destination = automatic_path_in(dir, tree.root_path());
-    if read_meta_at(&destination).is_ok_and(|meta| meta.at_ms() > Meta::of(tree, taken, "").at_ms())
-    {
-        return Ok(destination);
-    }
-    // Reuse the checked, flushed, create-new writer, then atomically replace
-    // the single drive slot. A write/rename failure preserves the old slot.
-    let staged = save_in(dir, tree, "Automatic drive scan", taken)?;
-    if let Err(error) = fs::rename(&staged, &destination) {
+    let meta = Meta::of(tree, taken, "Automatic drive scan");
+    // The desktop and CLI can complete or compress scans out of order.
+    // Stage the completed record first, then serialize the timestamp check
+    // and replacement across processes for the shared cache directory.
+    let staged = save_with_meta_in(dir, tree, &meta, taken)?;
+    let replaced = (|| {
+        let lock = fs::File::options()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(".write.lock"))?;
+        lock.lock()?;
+        if read_meta_at(&destination).is_ok_and(|previous| previous.at_ms() > meta.at_ms()) {
+            return Ok(false);
+        }
+        fs::rename(&staged, &destination)?;
+        Ok(true)
+    })();
+    if !matches!(replaced, Ok(true)) {
         let _ = fs::remove_file(&staged);
-        return Err(error);
     }
-    Ok(destination)
+    replaced.map(|_| destination)
 }
 
 /// How many names to try before giving up.

@@ -40,6 +40,7 @@ USAGE:
     kosha <PATH> [OPTIONS]
     kosha <SNAPSHOT.kosha> [OPTIONS]   full/relative path, or exact saved filename
     kosha --snapshots
+    kosha fragmentation PATH [--max-files N] [--export json]
     kosha --caches [--cache-dir DIR] [--export json|jsonl]
     kosha search --describe \"files larger than ten megabytes\"
     kosha search --load SAVED.kosha \"folders created last week\"
@@ -75,7 +76,7 @@ OPTIONS:
     --label TEXT     Name the snapshot (optional; the date and path already
                      describe it)
     --snapshots      List the snapshots kept, and what they occupy
-    --caches         List cached drives (implicit snapshots), age and record paths;
+    --caches         List cached drives and WSL distributions, age and record paths;
                      reads headers only; no scan, refresh or tree decompression
     --since FILE     Compare against a snapshot or a CSV export and report
                      what changed
@@ -89,6 +90,7 @@ OPTIONS:
     --mft            Read NTFS' Master File Table instead of walking directories
                      (Windows, NTFS, and an elevated process; falls back and
                      says so where any of those is missing)
+    --wsl-native     Scan a whole WSL2 distribution using its installed Linux CLI
     --image          Read a WSL distribution's ext4.vhdx instead of going
                      through the wsl.localhost redirector, or read a disk
                      image named as the path: with or without a VHDX around
@@ -108,7 +110,8 @@ OPTIONS:
 AUTOMATION / LLM USE:
     A directory PATH always gets a fresh, full-depth scan by default. Only
     --depth limits depth; filesystem boundaries and links are not followed
-    unless described above. No automatic cache is read or updated by a scan.
+    unless described above. Fresh scans ignore the cache. On Windows, a
+    completed scan of a whole WSL distribution updates its local cache.
     --cache explicitly opts into historical data, shared with the GUI by
     default. Its original timestamp and age are printed to stderr. It does not
     rescan, refresh, or silently fall back on a cache miss. Use an absolute
@@ -180,6 +183,7 @@ struct Args {
     label: String,
     compare: compare::Options,
     scan: ScanOptions,
+    wsl_native: bool,
     units: format::Units,
     cache: cache::Cache,
     absolute_paths: bool,
@@ -198,6 +202,9 @@ impl Args {
     /// can answer. Neither is `--query` or `--insights`, for the same reason —
     /// they work on a tree and do not care where it came from.
     fn scan_only_flag(&self) -> Option<&'static str> {
+        if self.wsl_native {
+            return Some("--wsl-native");
+        }
         if self.scan.max_depth.is_some() {
             return Some("--depth");
         }
@@ -225,7 +232,48 @@ impl Args {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn wsl_snapshot(mut args: impl Iterator<Item = String>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut options = ScanOptions::default();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--depth" => options.max_depth = Some(args.next().ok_or("missing depth")?.parse()?),
+            "--hardlinks" => options.dedup_hardlinks = Some(true),
+            "--no-hardlinks" => options.dedup_hardlinks = Some(false),
+            "--owners" => options.collect_owners = true,
+            "--exact" => options.exact_allocated = true,
+            _ => return Err("unknown native WSL scan option".into()),
+        }
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    let disconnected = Arc::clone(&cancel);
+    std::thread::Builder::new()
+        .name("wsl-control".into())
+        .spawn(move || {
+            use std::io::Read;
+            let _ = std::io::stdin().read(&mut [0]);
+            disconnected.store(true, Ordering::Relaxed);
+        })?;
+    kosha_core::wsl::write_native_snapshot(options, std::io::stdout().lock(), cancel)
+}
+
 fn main() -> ExitCode {
+    #[cfg(target_os = "linux")]
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args
+            .next()
+            .is_some_and(|arg| arg == "wsl-native-snapshot-v1")
+        {
+            return match wsl_snapshot(args.map(|arg| arg.to_string_lossy().into_owned())) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("native WSL scan: {error}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+    }
     #[cfg(feature = "remote-client")]
     {
         let mut args = std::env::args_os().skip(1);
@@ -248,6 +296,7 @@ fn main() -> ExitCode {
         Ok(Parsed::Run(args)) => run(*args),
         Ok(Parsed::View(args)) => return views::run(&args),
         Ok(Parsed::Caches(args)) => cache::list(&args),
+        Ok(Parsed::Fragmentation(args)) => fragmentation_report(&args),
         Ok(Parsed::Search(args)) => search::run(&args),
         Ok(Parsed::Marketplace(args)) => marketplace::run(&args).map_err(Into::into),
         Ok(Parsed::Import(args)) => import::run(&args),
@@ -410,7 +459,7 @@ fn refuse_before_scanning(args: &Args) -> Result<(), Box<dyn std::error::Error>>
 }
 
 fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    if !args.cache.enabled {
+    if !args.cache.enabled && !args.wsl_native {
         args.path = snapshots::resolve(&args.path)?;
     }
     if let Some(path) = &args.since {
@@ -437,7 +486,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_snapshot_header(&meta);
         }
         tree
-    } else if snapshot::is_snapshot(&args.path) {
+    } else if !args.wsl_native && snapshot::is_snapshot(&args.path) {
         // **How to scan a disk says nothing about a record of one.** Six flags
         // were accepted here and did nothing at all: `--depth`, `--cross-fs`,
         // `--exact`, `--mft`, `--image`, and either of the hardlink flags. The
@@ -509,9 +558,21 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
         record = Some(meta);
         tree
     } else {
-        let tree = Scanner::new(args.scan)
-            .with_cancel(Arc::clone(&cancel))
-            .scan(&args.path)?;
+        let tree = if args.wsl_native {
+            #[cfg(windows)]
+            {
+                kosha_core::wsl::scan_native(&args.path, args.scan, &cancel)?
+            }
+            #[cfg(not(windows))]
+            return Err("--wsl-native is supported only by the Windows CLI".into());
+        } else {
+            Scanner::new(args.scan)
+                .with_cancel(Arc::clone(&cancel))
+                .scan(&args.path)?
+        };
+        if args.wsl_native {
+            snapshots::report_replaced_names(&tree);
+        }
         // **A folder nothing could be read from is not a folder with nothing
         // in it.** Measured on `C:\System Volume Information`, which an
         // ordinary account cannot open: the scan reported `~0 B on disk`, one
@@ -532,6 +593,17 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
+        if cfg!(windows)
+            && args
+                .path
+                .to_str()
+                .and_then(kosha_core::wsl::distribution_root_name)
+                .is_some()
+            && !tree.is_incomplete()
+            && let Err(error) = snapshot::store::save_automatic(&tree, std::time::SystemTime::now())
+        {
+            eprintln!("could not save the WSL scan cache: {error}");
+        }
         tree
     };
 
@@ -548,7 +620,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             print_stats(&tree);
         }
         if args.insights {
-            print_insights(&tree, args);
+            print_insights(&tree, args, record.is_none() && !args.cache.enabled);
         }
         if args.cleanup_guide {
             sayln!("\nCLEANUP GUIDE — recorded data, not guaranteed savings");
@@ -1485,7 +1557,169 @@ fn print_owners(tree: &SizeTree, args: &Args) {
     }
 }
 
-fn print_insights(tree: &SizeTree, args: &Args) {
+fn fragmentation_report(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use kosha_analyze::fragmented;
+    use serde_json::json;
+
+    if matches!(args, [help] if help == "--help" || help == "-h") {
+        sayln!("Usage: kosha fragmentation PATH [--max-files N] [--export json]");
+        sayln!(
+            "Check file layout on supported filesystems. Folders sample up to 256 largest eligible files by default."
+        );
+        sayln!("{}", fragmented::EXTENT_HELP);
+        sayln!("Sparse holes are counted separately. A lower bound means more extents may exist.");
+        return Ok(());
+    }
+    let [path, rest @ ..] = args else {
+        return Err("fragmentation requires a live file or folder path".into());
+    };
+    let mut options = rest.iter();
+    let mut limit = None;
+    let mut machine = false;
+    while let Some(flag) = options.next() {
+        match flag.as_str() {
+            "--max-files" if limit.is_none() => {
+                let value: usize = options
+                    .next()
+                    .ok_or("--max-files requires a count")?
+                    .parse()?;
+                if !(1..=fragmented::MAX_SAMPLE).contains(&value) {
+                    return Err(
+                        format!("--max-files must be in 1..={}", fragmented::MAX_SAMPLE).into(),
+                    );
+                }
+                limit = Some(value);
+            }
+            "--export" if !machine && options.next().is_some_and(|format| format == "json") => {
+                machine = true;
+            }
+            _ => return Err(format!("unexpected fragmentation option: {flag}").into()),
+        }
+    }
+    if !kosha_core::supports_fragmentation() {
+        return Err("this build does not support fragmentation checks".into());
+    }
+    let path = std::path::absolute(path)?;
+    let meta = std::fs::symlink_metadata(&path)?;
+    if meta.is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+        return Err("fragmentation requires a regular file or directory".into());
+    }
+    #[derive(serde::Serialize)]
+    struct LayoutRow {
+        path: String,
+        extents: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        clusters: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mapped_bytes: Option<u64>,
+        sparse_holes: u64,
+        lower_bound: bool,
+        fragmented: bool,
+    }
+    let row = |path: &std::path::Path, layout: kosha_core::Fragmentation| LayoutRow {
+        path: path.to_string_lossy().into_owned(),
+        extents: layout.extents,
+        clusters: layout.mapped_bytes.is_none().then_some(layout.clusters),
+        mapped_bytes: layout.mapped_bytes,
+        sparse_holes: layout.holes,
+        lower_bound: layout.truncated,
+        fragmented: layout.is_fragmented(),
+    };
+    let (eligible, unavailable, rows, media, partial) = if meta.is_dir() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let _ = ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed));
+        let tree = Scanner::new(ScanOptions::default())
+            .with_cancel(Arc::clone(&stop))
+            .scan(&path)?;
+        if tree.root_unreadable() {
+            return Err("the folder could not be read".into());
+        }
+        let report = fragmented::review(
+            &tree,
+            tree.root(),
+            limit.unwrap_or(fragmented::DEFAULT_SAMPLE),
+            &stop,
+        );
+        if stop.load(Ordering::Relaxed) || report.cancelled {
+            return Err("fragmentation check cancelled".into());
+        }
+        let rows = report
+            .checked
+            .iter()
+            .map(|file| row(&tree.path_of(file.node), file.layout))
+            .collect();
+        (
+            report.eligible,
+            report.unavailable,
+            rows,
+            report.media,
+            tree.is_partial(),
+        )
+    } else {
+        if limit.is_some() {
+            return Err("--max-files applies to folders".into());
+        }
+        let layout = kosha_core::fragmentation(&path)?;
+        (
+            1,
+            0,
+            vec![row(&path, layout)],
+            kosha_core::media_type(&path),
+            false,
+        )
+    };
+    let fragmented = rows.iter().filter(|file| file.fragmented).count();
+    let advice = (fragmented > 0).then(|| fragmented::media_advice(media));
+    if machine {
+        sayln!(
+            "{}",
+            serde_json::to_string(&json!({
+                "schema":"kosha.fragmentation.v1", "path":path.to_string_lossy(), "eligible":eligible,
+                "checked":rows.len(), "unavailable":unavailable, "fragmented":fragmented,
+                "limited":rows.len() + unavailable < eligible, "partial_scan":partial,
+                "media":media.map(|kind| match kind {
+                    kosha_core::MediaType::SolidState => "solid-state",
+                    kosha_core::MediaType::Spinning => "spinning",
+                }),
+                "files":rows, "advice":advice,
+            }))?
+        );
+    } else {
+        sayln!(
+            "Fragmentation for {}",
+            format::printable(&path.to_string_lossy())
+        );
+        if meta.is_dir() {
+            sayln!(
+                "Checked {} of {eligible} eligible files, {fragmented} fragmented, {unavailable} unavailable.",
+                rows.len()
+            );
+            if partial {
+                sayln!("The directory scan was partial.");
+            }
+            for file in rows.iter().filter(|file| file.fragmented).take(10) {
+                sayln!(
+                    "  {}  {}",
+                    fragmented::extent_label(file.extents, file.lower_bound),
+                    format::printable(&file.path)
+                );
+            }
+        } else {
+            let file = &rows[0];
+            sayln!(
+                "{}",
+                fragmented::extent_label(file.extents, file.lower_bound)
+            );
+        }
+        if let Some(advice) = advice {
+            sayln!("{advice}");
+        }
+    }
+    Ok(())
+}
+
+fn print_insights(tree: &SizeTree, args: &Args, live: bool) {
     let context = Context {
         units: args.units,
         ..Context::detect()
@@ -1501,7 +1735,7 @@ fn print_insights(tree: &SizeTree, args: &Args) {
     // Not `analyze`: that is the pure rule engine, and some findings have to
     // read the disk or come from the user's own rules. The window shows the
     // same set.
-    let insights = kosha_analyze::findings_with(tree, &context, &packs.rules);
+    let insights = kosha_analyze::findings_for_source(tree, &context, &packs.rules, live);
     sayln!("\nINSIGHTS");
     if insights.is_empty() {
         sayln!("  nothing worth reporting");
@@ -1772,6 +2006,7 @@ enum Parsed {
     /// rather than a flag on `Args`.
     Snapshots,
     Caches(cache::ListArgs),
+    Fragmentation(Vec<String>),
 }
 
 /// Read the process's own arguments.
@@ -1794,6 +2029,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "view") {
         argv.next();
         return Ok(Parsed::View(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "fragmentation") {
+        argv.next();
+        return Ok(Parsed::Fragmentation(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "marketplace") {
         argv.next();
@@ -1841,6 +2080,7 @@ where
         label: String::new(),
         compare: compare::Options::default(),
         scan: ScanOptions::default(),
+        wsl_native: false,
         units: format::Units::Binary,
         cache: cache::Cache::default(),
         absolute_paths: false,
@@ -1913,6 +2153,7 @@ where
             "--cross-fs" => args.scan.cross_filesystems = true,
             "--exact" => args.scan.exact_allocated = true,
             "--mft" => args.scan.use_mft = true,
+            "--wsl-native" => args.wsl_native = true,
             "--image" => args.scan.use_image = true,
             "--hardlinks" => args.scan.dedup_hardlinks = Some(true),
             "--no-hardlinks" => args.scan.dedup_hardlinks = Some(false),
@@ -1996,6 +2237,17 @@ where
             .as_mut()
             .ok_or("--absolute-paths requires --export")?
             .absolute_paths = true;
+    }
+    if args.wsl_native
+        && (args.scan.cross_filesystems
+            || args.scan.use_image
+            || args.scan.use_mft
+            || args.duplicates)
+    {
+        return Err(
+            "--wsl-native cannot be combined with --cross-fs, --image, --mft, or duplicate hunts"
+                .into(),
+        );
     }
     if args.cache.enabled {
         if let Some(flag) = args.scan_only_flag() {

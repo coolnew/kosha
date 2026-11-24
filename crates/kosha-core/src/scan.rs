@@ -174,6 +174,7 @@ pub struct Scanner {
     options: ScanOptions,
     cancel: Option<Arc<AtomicBool>>,
     progress: Option<Sender<Progress>>,
+    omit_wsl_mnt: bool,
 }
 
 impl Scanner {
@@ -182,6 +183,7 @@ impl Scanner {
             options,
             cancel: None,
             progress: None,
+            omit_wsl_mnt: false,
         }
     }
 
@@ -197,6 +199,13 @@ impl Scanner {
     /// throttle the scan.
     pub fn with_progress(mut self, tx: Sender<Progress>) -> Self {
         self.progress = Some(tx);
+        self
+    }
+
+    #[cfg(target_os = "linux")]
+    /// Leave the WSL root's /mnt branch untraversed, even when it is an ordinary directory.
+    pub(crate) fn without_wsl_mnt(mut self) -> Self {
+        self.omit_wsl_mnt = true;
         self
     }
 
@@ -243,7 +252,7 @@ impl Scanner {
         {
             let outcome = match attempt {
                 Strategy::MasterFileTable => self.scan_by_mft(&root_path),
-                Strategy::DiskImage | Strategy::DirectoryWalk | Strategy::Imported => continue,
+                _ => continue,
             };
             match outcome {
                 Ok(tree) => return Ok(tree),
@@ -433,7 +442,13 @@ impl Scanner {
             let batches: Vec<DirBatch> = frontier
                 .par_iter()
                 .map(|(_, path)| {
-                    let batch = read_directory(path, &ctx, &opts, &|| self.is_cancelled());
+                    let batch = read_directory(
+                        path,
+                        &ctx,
+                        &opts,
+                        self.omit_wsl_mnt && path == Path::new("/"),
+                        &|| self.is_cancelled(),
+                    );
                     if self.progress.is_some() && !self.is_cancelled() {
                         entries.fetch_add(batch.entries.len() as u64, Ordering::Relaxed);
                         pending.fetch_add(
@@ -945,6 +960,7 @@ fn read_directory(
     path: &Path,
     ctx: &PlatformCtx,
     opts: &ScanOptions,
+    omit_mnt: bool,
     cancelled: &(impl Fn() -> bool + Sync),
 ) -> DirBatch {
     let mut batch = DirBatch {
@@ -974,13 +990,13 @@ fn read_directory(
         // Release Unix directory entries and their metadata between chunks.
         #[cfg(unix)]
         if raw.len() == STAT_CHUNK_ENTRIES {
-            append_entries(&raw, path, ctx, opts, cancelled, &mut batch);
+            append_entries(&raw, path, ctx, opts, omit_mnt, cancelled, &mut batch);
             raw.clear();
         }
     }
 
     if !raw.is_empty() {
-        append_entries(&raw, path, ctx, opts, cancelled, &mut batch);
+        append_entries(&raw, path, ctx, opts, omit_mnt, cancelled, &mut batch);
     }
     if cancelled() {
         return batch;
@@ -1004,6 +1020,7 @@ fn append_entries(
     path: &Path,
     ctx: &PlatformCtx,
     opts: &ScanOptions,
+    omit_mnt: bool,
     cancelled: &(impl Fn() -> bool + Sync),
     batch: &mut DirBatch,
 ) {
@@ -1052,7 +1069,8 @@ fn append_entries(
                     // `platform::opaque_boundary`.
                     let crosses = meta.device != ctx.root_device
                         || meta.mounted_volume.is_some()
-                        || platform::opaque_boundary(path, &name);
+                        || platform::opaque_boundary(path, &name)
+                        || (omit_mnt && name == "mnt");
                     if !opts.cross_filesystems && crosses {
                         flags.insert(Flags::OTHER_DEVICE);
                     } else {
@@ -1155,7 +1173,7 @@ mod cancellation_tests {
         }
         let ctx = PlatformCtx::for_root(dir.path(), false, false, false).unwrap();
         let checks = AtomicUsize::new(0);
-        let batch = read_directory(dir.path(), &ctx, &ScanOptions::default(), &|| {
+        let batch = read_directory(dir.path(), &ctx, &ScanOptions::default(), false, &|| {
             checks.fetch_add(1, Ordering::Relaxed) >= 10
         });
         assert_eq!(checks.load(Ordering::Relaxed), 11);
@@ -1164,6 +1182,19 @@ mod cancellation_tests {
             "an interrupted batch is discarded"
         );
         assert!(!batch.unreadable, "cancellation is not a read error");
+    }
+
+    #[test]
+    fn wsl_root_scan_omits_mnt_but_walks_home() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("home")).unwrap();
+        fs::create_dir(dir.path().join("mnt")).unwrap();
+        let ctx = PlatformCtx::for_root(dir.path(), false, false, false).unwrap();
+        let batch = read_directory(dir.path(), &ctx, &ScanOptions::default(), true, &|| false);
+        assert_eq!(batch.entries.len(), 2);
+        assert!(batch.entries[0].descend, "home must be scanned");
+        assert!(!batch.entries[1].descend, "mnt must be skipped");
+        assert!(batch.entries[1].flags.contains(Flags::OTHER_DEVICE));
     }
 
     #[cfg(unix)]

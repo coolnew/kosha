@@ -82,6 +82,11 @@ pub fn is_boundary(dir: &str, name: &str) -> bool {
 /// `\\?\UNC\wsl.localhost\archlinux` and not every path reaching the scanner
 /// has been through `path::simplify`.
 fn is_distribution_root(dir: &str) -> bool {
+    distribution_root_name(dir).is_some()
+}
+
+/// Extract the distribution name without accessing the redirector.
+pub fn distribution_root_name(dir: &str) -> Option<&str> {
     let rest = dir
         .strip_prefix(r"\\?\UNC\")
         .or_else(|| dir.strip_prefix(r"\\"))
@@ -89,23 +94,19 @@ fn is_distribution_root(dir: &str) -> bool {
         // pasted one should get the same scan as one who did not.
         .or_else(|| dir.strip_prefix("//?/UNC/"))
         .or_else(|| dir.strip_prefix("//"));
-    let Some(rest) = rest else {
-        return false;
-    };
+    let rest = rest?;
 
     let mut parts = rest
         .split(['\\', '/'])
         // A trailing separator is a spelling, not a level.
         .filter(|part| !part.is_empty());
 
-    let Some(host) = parts.next() else {
-        return false;
-    };
+    let host = parts.next()?;
     if !HOSTS.iter().any(|known| host.eq_ignore_ascii_case(known)) {
-        return false;
+        return None;
     }
-    // Exactly one component after the host: the distribution name.
-    parts.next().is_some() && parts.next().is_none()
+    let name = parts.next()?;
+    (name != "." && name != ".." && parts.next().is_none()).then_some(name)
 }
 
 // ------------------------------------------------- which distributions exist
@@ -140,6 +141,7 @@ pub fn distributions() -> Vec<Distribution> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Distribution {
     pub name: String,
+    pub version: Option<u32>,
     /// The virtual disk holding its filesystem, when the registry says where
     /// to look and the file is really there.
     ///
@@ -172,6 +174,196 @@ pub const IMAGE: &str = "ext4.vhdx";
 /// otherwise silently name a different place.
 pub fn path_of(name: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(format!(r"\\wsl.localhost\{name}"))
+}
+
+/// Scan the Linux root for the Windows WSL client and write one snapshot to stdout.
+#[cfg(target_os = "linux")]
+pub fn write_native_snapshot(
+    options: crate::ScanOptions,
+    mut output: impl std::io::Write,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if options.cross_filesystems || options.use_image || options.use_mft {
+        return Err(std::io::Error::other(
+            "native WSL only supports a single-filesystem directory walk",
+        )
+        .into());
+    }
+    let mut tree = crate::Scanner::new(options)
+        .with_cancel(cancel)
+        .without_wsl_mnt()
+        .scan(std::path::Path::new("/"))?;
+    if tree.stats().cancelled {
+        return Err(crate::ScanError::Cancelled.into());
+    }
+    if tree.root_unreadable() {
+        return Err(std::io::Error::other("the Linux root could not be read").into());
+    }
+    tree.stats.strategy = crate::Strategy::WslNative;
+    let meta = crate::snapshot::Meta::of(&tree, std::time::SystemTime::now(), "Native WSL scan");
+    crate::snapshot::write(&tree, &meta, &mut output)?;
+    output.flush()?;
+    Ok(())
+}
+
+/// Run the selected distribution's installed CLI without invoking a shell.
+/// The returned tree is a measurement for browsing and must not authorize file operations.
+#[cfg(windows)]
+pub fn scan_native(
+    path: &std::path::Path,
+    options: crate::ScanOptions,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<crate::SizeTree, crate::ScanError> {
+    use std::io;
+    let failed = |source| crate::ScanError::Root {
+        path: path.to_path_buf(),
+        source,
+    };
+    let name = path
+        .to_str()
+        .and_then(distribution_root_name)
+        .ok_or_else(|| failed(io::Error::other("select a whole WSL2 distribution")))?;
+    if options.cross_filesystems {
+        return Err(failed(io::Error::other(
+            "native WSL scans stay on the Linux root filesystem; turn off crossing filesystems",
+        )));
+    }
+    let distro = distributions()
+        .into_iter()
+        .find(|distro| distro.name.eq_ignore_ascii_case(name) && distro.version == Some(2))
+        .ok_or_else(|| failed(io::Error::other("select a registered WSL2 distribution")))?;
+    let root = path_of(&distro.name);
+    let mut tree = native_walk(&distro.name, options, cancel).map_err(|error| {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::ScanError::Cancelled
+        } else {
+            failed(error)
+        }
+    })?;
+    tree.root_path = root;
+    Ok(tree)
+}
+
+#[cfg(windows)]
+fn native_walk(
+    distro: &str,
+    options: crate::ScanOptions,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> std::io::Result<crate::SizeTree> {
+    use std::io;
+    use std::os::windows::process::CommandExt;
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::sync::{atomic::Ordering, mpsc};
+    use std::time::{Duration, Instant};
+
+    let windows = std::env::var_os("SystemRoot")
+        .ok_or_else(|| io::Error::other("SystemRoot is unavailable"))?;
+    let mut command = Command::new(PathBuf::from(windows).join("System32/wsl.exe"));
+    command.args([
+        "--distribution",
+        distro,
+        "--cd",
+        "/",
+        "--exec",
+        "kosha",
+        "wsl-native-snapshot-v1",
+    ]);
+    if let Some(depth) = options.max_depth {
+        command.arg("--depth").arg(depth.to_string());
+    }
+    if let Some(dedup) = options.dedup_hardlinks {
+        command.arg(if dedup {
+            "--hardlinks"
+        } else {
+            "--no-hardlinks"
+        });
+    }
+    if options.collect_owners {
+        command.arg("--owners");
+    }
+    if options.exact_allocated {
+        command.arg("--exact");
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(io::Error::other("native WSL scan cancelled"));
+    }
+    let mut child = command
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    // Closing the control pipe also asks the Linux worker to stop. Killing
+    // the Windows launcher alone need not stop its Linux process.
+    let control = child.stdin.take().expect("stdin was piped");
+    let output = child.stdout.take().expect("stdout was piped");
+    let (send, receive) = mpsc::sync_channel(1);
+    let reader = std::thread::Builder::new()
+        .name("wsl-snapshot".into())
+        .spawn(move || {
+            let limits = crate::snapshot::ReadLimits {
+                max_wire_bytes: 256 << 20,
+                max_body_bytes: 768 << 20,
+                max_nodes: 8_000_000,
+                max_name_bytes: 256 << 20,
+            };
+            let _ = send.send(crate::snapshot::read_limited(output, limits));
+        });
+    let deadline = Instant::now() + Duration::from_secs(900);
+    let result = (|| {
+        reader?;
+        let checkpoint = || {
+            if cancel.load(Ordering::Relaxed) {
+                Err(io::Error::other("native WSL scan cancelled"))
+            } else if Instant::now() >= deadline {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "native WSL scan timed out",
+                ))
+            } else {
+                Ok(())
+            }
+        };
+        let poll = Duration::from_millis(50);
+        let decoded = loop {
+            checkpoint()?;
+            match receive.recv_timeout(poll) {
+                Ok(decoded) => break decoded,
+                Err(mpsc::RecvTimeoutError::Timeout) => (),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::other("native WSL snapshot reader stopped"));
+                }
+            }
+        };
+        let (meta, tree) = decoded.map_err(|error| io::Error::other(format!(
+            "could not read the native WSL scan: {error}. Install a matching Linux Kosha CLI on the distribution's PATH (https://coolnew.github.io/kosha/manual/scanning/#native-wsl2-scans)"
+        )))?;
+        let status = loop {
+            checkpoint()?;
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            std::thread::sleep(poll);
+        };
+        if !status.success()
+            || meta.root.as_os_str() != "/"
+            || tree.stats().strategy != crate::Strategy::WslNative
+            || tree.stats().cross_filesystems
+            || tree.root_unreadable()
+        {
+            return Err(io::Error::other(
+                "the Linux Kosha CLI did not return a valid root scan",
+            ));
+        }
+        Ok(tree)
+    })();
+    drop(control);
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 #[cfg(windows)]
@@ -244,7 +436,12 @@ mod platform {
             let image = string(lxss, &subkey, "BasePath")
                 .map(|base| std::path::PathBuf::from(base).join(super::IMAGE))
                 .filter(|path| path.is_file());
-            found.push(super::Distribution { name, image });
+            let version = dword(lxss, &subkey, "Version");
+            found.push(super::Distribution {
+                name,
+                version,
+                image,
+            });
         }
 
         // SAFETY: `lxss` came from a successful `RegOpenKeyExW` and is not

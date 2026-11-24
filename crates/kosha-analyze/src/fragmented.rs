@@ -77,9 +77,8 @@ pub fn is_candidate(node: &Node, options: &Options) -> bool {
         // first. A cloud placeholder has no pieces on this disk at all — and
         // opening one fetches it, which is the outcome that flag exists to
         // prevent.
-        && !node.flags.contains(Flags::SYMLINK)
+        && node.flags.bits() & UNAVAILABLE == 0
         && !node.flags.contains(Flags::HARDLINK_DUP)
-        && !node.flags.contains(Flags::OFFLINE)
 }
 
 /// One file and how many pieces it is in.
@@ -119,6 +118,151 @@ pub fn candidates(tree: &SizeTree, options: &Options) -> Vec<NodeId> {
     found
 }
 
+/// Strategies that can refer to live extent maps. The caller must also
+/// exclude saved scans, whose original strategy is preserved in the record.
+pub fn supports_tree(tree: &SizeTree) -> bool {
+    kosha_core::supports_fragmentation()
+        && matches!(
+            tree.stats().strategy,
+            kosha_core::Strategy::DirectoryWalk | kosha_core::Strategy::MasterFileTable
+        )
+}
+
+const UNAVAILABLE: u8 = Flags::SYMLINK.bits()
+    | Flags::OFFLINE.bits()
+    | Flags::UNREADABLE.bits()
+    | Flags::OTHER_DEVICE.bits();
+
+pub fn supports_entry(tree: &SizeTree, node: NodeId) -> bool {
+    supports_tree(tree)
+        && tree.node(node).flags.bits() & UNAVAILABLE == 0
+        && !tree.name_replaced(node)
+}
+
+pub const DEFAULT_SAMPLE: usize = 256;
+pub const MAX_SAMPLE: usize = 4096;
+
+#[derive(Debug)]
+pub struct CheckedFile {
+    pub node: NodeId,
+    pub layout: kosha_core::Fragmentation,
+}
+
+#[derive(Debug, Default)]
+pub struct Review {
+    pub eligible: usize,
+    pub unavailable: usize,
+    pub checked: Vec<CheckedFile>,
+    pub media: Option<MediaType>,
+    pub cancelled: bool,
+}
+
+impl Review {
+    pub fn fragmented_count(&self) -> usize {
+        self.checked
+            .iter()
+            .filter(|file| file.layout.is_fragmented())
+            .count()
+    }
+}
+
+pub const EXTENT_HELP: &str = "An extent is a contiguous run of allocated blocks. One extent is contiguous. Two or more means the file is split into pieces.";
+
+pub fn extent_label(extents: u64, lower_bound: bool) -> String {
+    let count = kosha_core::format::plural(extents as usize, "extent");
+    if lower_bound {
+        format!("At least {count}")
+    } else if extents == 1 {
+        format!("{count} (contiguous)")
+    } else {
+        count
+    }
+}
+
+pub fn media_advice(media: Option<MediaType>) -> &'static str {
+    match media {
+        Some(MediaType::Spinning) => {
+            "If sequential reads are slow, check the drive in Windows Optimize Drives."
+        }
+        Some(MediaType::SolidState) => {
+            "Windows manages SSD optimization. Extent counts alone do not call for action."
+        }
+        None => "The drive type is unknown. Extent counts alone do not call for action.",
+    }
+}
+
+/// Check a scope without growing the sample or collecting a second tree.
+/// Entry IDs break ties deterministically. The deepest folder controls stack size.
+pub fn review(
+    tree: &SizeTree,
+    scope: NodeId,
+    max_files: usize,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Review {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    use std::sync::atomic::Ordering::Relaxed;
+
+    let limit = max_files.clamp(1, MAX_SAMPLE);
+    let mut result = Review::default();
+    if !supports_entry(tree, scope) {
+        return result;
+    }
+    let mut largest = BinaryHeap::with_capacity(limit + 1);
+    let mut parents = vec![tree.children(scope)];
+    let mut next = Some(scope);
+    while let Some(id) = next.take().or_else(|| {
+        while let Some(children) = parents.last_mut() {
+            if let Some(child) = children.next() {
+                return Some(child);
+            }
+            parents.pop();
+        }
+        None
+    }) {
+        if stop.load(Relaxed) {
+            result.cancelled = true;
+            return result;
+        }
+        let node = tree.node(id);
+        if node.flags.bits() & UNAVAILABLE != 0 || tree.name_replaced(id) {
+            continue;
+        }
+        if node.is_dir() {
+            if id != scope {
+                parents.push(tree.children(id));
+            }
+        } else if id == scope || !node.flags.contains(Flags::HARDLINK_DUP) {
+            result.eligible += 1;
+            largest.push(Reverse((node.allocated, Reverse(id))));
+            if largest.len() > limit {
+                largest.pop();
+            }
+        }
+    }
+
+    if largest.is_empty() {
+        return result;
+    }
+    if !tree.stats().cross_filesystems || !tree.node(scope).is_dir() {
+        result.media = kosha_core::media_type(&tree.path_of(scope));
+    }
+    for Reverse((_, Reverse(node))) in largest.into_sorted_vec() {
+        if stop.load(Relaxed) {
+            result.cancelled = true;
+            break;
+        }
+        match kosha_core::fragmentation_with_cancel(&tree.path_of(node), stop) {
+            Ok(layout) => result.checked.push(CheckedFile { node, layout }),
+            Err(_) => result.unavailable += 1,
+        }
+    }
+    result
+        .checked
+        .sort_unstable_by_key(|file| (Reverse(file.layout.extents), file.node));
+    result
+}
+
 /// Measure the candidates and report the ones in too many pieces.
 ///
 /// Returns `None` when there is nothing to say, which is the common case and
@@ -128,7 +272,7 @@ pub fn find(tree: &SizeTree, options: &Options) -> Option<Insight> {
     // An imported listing's root names a place on another machine. Asking this
     // machine about that path — its media type, then its files' extents —
     // would read a local path that only shares the name.
-    if tree.stats().strategy == kosha_core::Strategy::Imported {
+    if !supports_tree(tree) {
         return None;
     }
     // Asked once for the whole scan, before anything is opened. On solid state

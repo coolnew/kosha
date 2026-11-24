@@ -62,6 +62,7 @@ const NOT_RESIDENT: u32 =
 const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
 /// Open the link itself rather than whatever it points at.
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+const FILE_FLAG_OPEN_NO_RECALL: u32 = 0x0010_0000;
 
 /// Round a logical size up to a whole number of allocation units.
 ///
@@ -853,9 +854,13 @@ pub fn enable_backup_privilege() -> bool {
 /// Needs `GENERIC_READ`, which for a file the user owns needs nothing else —
 /// this is not an elevated operation. A system-protected file refuses the open,
 /// and that is reported as the error it is rather than as "not fragmented".
-pub fn fragmentation(path: &Path) -> io::Result<Fragmentation> {
+pub fn fragmentation(
+    path: &Path,
+    stop: &std::sync::atomic::AtomicBool,
+) -> io::Result<Fragmentation> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
+    use std::sync::atomic::Ordering::Relaxed;
     use windows_sys::Win32::Foundation::{ERROR_HANDLE_EOF, ERROR_MORE_DATA, GetLastError};
     use windows_sys::Win32::System::Ioctl::FSCTL_GET_RETRIEVAL_POINTERS;
 
@@ -866,19 +871,39 @@ pub fn fragmentation(path: &Path) -> io::Result<Fragmentation> {
 
     use super::extents::UNPLACED;
 
+    if stop.load(Relaxed) {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "extent check cancelled",
+        ));
+    }
     let file = fs::OpenOptions::new()
         .access_mode(GENERIC_READ)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
         // Lets the same call work on a directory, whose index is also a stream
         // with an extent map.
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .custom_flags(
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL,
+        )
         .open(path)?;
+    if file.metadata()?.file_attributes() & (FILE_ATTRIBUTE_REPARSE_POINT | NOT_RESIDENT) != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "layout is unavailable for links and placeholders",
+        ));
+    }
 
     let mut found = Fragmentation::default();
     let mut buffer = vec![0u8; BUFFER];
     let mut start_vcn: i64 = 0;
 
     loop {
+        if stop.load(Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "extent check cancelled",
+            ));
+        }
         let mut returned: u32 = 0;
         // SAFETY: the handle is valid and kept alive by `file`; the input is a
         // live `i64` of exactly the length passed — a `STARTING_VCN_INPUT_BUFFER`

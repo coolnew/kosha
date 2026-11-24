@@ -36,6 +36,8 @@ pub enum Strategy {
     /// on some other machine, never a path to open here, and every front end
     /// says that the numbers came from the other tool.
     Imported,
+    /// A native Linux directory walk run inside WSL.
+    WslNative,
 }
 
 impl Strategy {
@@ -46,6 +48,7 @@ impl Strategy {
             Strategy::MasterFileTable => "Master File Table",
             Strategy::DiskImage => "Disk image",
             Strategy::Imported => "Imported",
+            Strategy::WslNative => "Native WSL walk",
         }
     }
 
@@ -64,6 +67,7 @@ impl Strategy {
             Strategy::MasterFileTable => "Master File Table",
             Strategy::DiskImage => "disk image",
             Strategy::Imported => "imported",
+            Strategy::WslNative => "native WSL walk",
         }
     }
 
@@ -78,6 +82,7 @@ impl Strategy {
             "Master File Table" => Strategy::MasterFileTable,
             "Disk image" => Strategy::DiskImage,
             "Imported" => Strategy::Imported,
+            "Native WSL walk" => Strategy::WslNative,
             _ => Strategy::DirectoryWalk,
         }
     }
