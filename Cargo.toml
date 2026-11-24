@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.16.0"
+version = "0.17.0"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
@@ -25,18 +25,18 @@ repository = "https://github.com/coolnew/kosha"
 authors = ["Neeraj Sharma <neerajsharma.9@outlook.com>"]
 
 [workspace.dependencies]
-kosha-core = { path = "crates/kosha-core", version = "0.16.0" }
-kosha-view = { path = "crates/kosha-view", version = "0.16.0" }
-kosha-analyze = { path = "crates/kosha-analyze", version = "0.16.0" }
-kosha-fsops = { path = "crates/kosha-fsops", version = "0.16.0" }
-kosha-query = { path = "crates/kosha-query", version = "0.16.0" }
-kosha-search = { path = "crates/kosha-search", version = "0.16.0" }
-kosha-import = { path = "crates/kosha-import", version = "0.16.0" }
-kosha-scan-wire = { path = "crates/kosha-scan-wire", version = "0.16.0" }
-kosha-remote = { path = "crates/kosha-remote", version = "0.16.0", features = ["ssh"] }
+kosha-core = { path = "crates/kosha-core", version = "0.17.0" }
+kosha-view = { path = "crates/kosha-view", version = "0.17.0" }
+kosha-analyze = { path = "crates/kosha-analyze", version = "0.17.0" }
+kosha-fsops = { path = "crates/kosha-fsops", version = "0.17.0" }
+kosha-query = { path = "crates/kosha-query", version = "0.17.0" }
+kosha-search = { path = "crates/kosha-search", version = "0.17.0" }
+kosha-import = { path = "crates/kosha-import", version = "0.17.0" }
+kosha-scan-wire = { path = "crates/kosha-scan-wire", version = "0.17.0" }
+kosha-remote = { path = "crates/kosha-remote", version = "0.17.0", features = ["ssh"] }
 
-kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.16.0" }
-kosha-update = { path = "crates/kosha-update", version = "0.16.0" }
+kosha-marketplace = { path = "crates/kosha-marketplace", version = "0.17.0" }
+kosha-update = { path = "crates/kosha-update", version = "0.17.0" }
 
 rayon = "1.10"
 rustc-hash = "2"
