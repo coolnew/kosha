@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+Nothing yet.
+
 ## [0.16.0] — 2026-11-24
 
 ### Review file and folder fragmentation
