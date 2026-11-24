@@ -4,6 +4,35 @@
 
 Nothing yet.
 
+## [0.17.1] — 2026-11-24
+
+### Check for and install Kosha updates
+
+Check for a new stable release in Settings → **Software updates** or with
+`kosha update check`. Optional daily notifications are shared by the desktop
+and terminal. The manual explains each installation channel.
+
+- **Linux:** Install a newer attested release from Settings or with
+  `kosha update install`. The managed CLI and GUI launchers switch together.
+  Use `kosha update rollback` to restore the previous retained release.
+- **Windows:** Setup installs can verify and open the newer installer for the
+  registered installation. Store installs open Microsoft Store updates.
+  Portable ZIP users can extract a new copy to a fresh folder.
+- **macOS:** Verify and open the newer GitHub disk image from Settings or the
+  CLI, then replace the app in Finder. macOS may ask for approval when opening
+  builds distributed without Apple notarization.
+
+### Adjust desktop text size
+
+Change text size live in Settings → **Display**, with the keyboard, or by
+holding Ctrl (Command on macOS) while scrolling. Kosha saves the setting and
+can restore the system default.
+
+### Read folder fragmentation more easily
+
+The Deep Scan Fragmentation column shows folder percentages. Hover over a
+percentage to see how many files were fragmented and how many were checked.
+
 ## 0.17.0 ? packaging stopped
 
 The release workflow stopped before publishing binaries. Version 0.17.1
@@ -1038,7 +1067,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.17.1...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -1087,3 +1116,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.15.0]: https://github.com/coolnew/kosha/releases/tag/v0.15.0
 
 [0.16.0]: https://github.com/coolnew/kosha/releases/tag/v0.16.0
+
+[0.17.1]: https://github.com/coolnew/kosha/releases/tag/v0.17.1
