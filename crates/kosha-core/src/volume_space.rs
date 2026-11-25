@@ -280,8 +280,9 @@ fn single_pool(root: &Path) -> bool {
     };
     // SAFETY: path is NUL-terminated and stat points to writable storage.
     let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
-    (unsafe { libc::statfs(path.as_ptr(), &raw mut stat) }) == 0
-        && stat.f_type == libc::EXT4_SUPER_MAGIC
+    // Linux assigns 0xef53 to ext2/3/4. Compare a literal so its type follows
+    // the signed glibc or unsigned musl statfs field.
+    (unsafe { libc::statfs(path.as_ptr(), &raw mut stat) }) == 0 && stat.f_type == 0xef53
 }
 
 #[cfg(not(target_os = "linux"))]

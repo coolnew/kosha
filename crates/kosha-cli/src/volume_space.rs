@@ -99,17 +99,11 @@ fn execute(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         if let Some(usage) = summary.usage {
-            sayln!(
-                "Free  {}    Available to you  {}",
-                format::bytes(usage.free),
-                format::bytes(usage.available)
-            );
+            sayln!("Free  {}", format::bytes(usage.free));
+            sayln!("Available to you  {}", format::bytes(usage.available));
         }
-        sayln!(
-            "Unreadable entries  {}    Other mounts skipped  {}",
-            summary.unreadable,
-            summary.skipped_mounts
-        );
+        sayln!("Unreadable entries  {}", summary.unreadable);
+        sayln!("Other mounts skipped  {}", summary.skipped_mounts);
         if let Some(count) = summary.filesystem_snapshot_count {
             sayln!("Filesystem snapshots  {count} (space unavailable)");
         }
