@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
 
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -10,12 +11,13 @@ use std::time::SystemTime;
 
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
+    AnyElement, AppContext, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, px, uniform_list,
 };
 use kosha_core::snapshot::{self, Meta};
 use kosha_core::snapshot_compare::{Comparison, Status, Summary};
 use kosha_core::{ScanOptions, Scanner, SizeTree, format};
+use serde_json::json;
 
 use crate::app::KoshaApp;
 use crate::theme::{Palette, metrics};
@@ -29,6 +31,7 @@ struct Source {
 
 struct Finding {
     path: String,
+    path_bytes_hex: Option<String>,
     status: Status,
     reasons: [Option<&'static str>; 2],
 }
@@ -47,13 +50,186 @@ const FINDING_STATUSES: [Status; 4] = [
     Status::RightOnly,
     Status::Indeterminate,
 ];
+const MTIME_TOLERANCE: u32 = 2;
+
+#[derive(Clone, Copy)]
+enum ExportFormat {
+    Text,
+    Markdown,
+    Jsonl,
+}
+
+impl ExportFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Text => "txt",
+            Self::Markdown => "md",
+            Self::Jsonl => "jsonl",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Text => "Plain text",
+            Self::Markdown => "Markdown",
+            Self::Jsonl => "JSONL",
+        }
+    }
+}
+
+fn write_report(
+    report: &Report,
+    sources: [&Source; 2],
+    filter: Option<usize>,
+    style: ExportFormat,
+    mut out: impl Write,
+) -> io::Result<usize> {
+    let filter = filter.map(|index| FINDING_STATUSES[index]);
+    let filter_label = filter.map_or("all", Status::label);
+    let summary = &report.summary;
+    let rows = report
+        .findings
+        .iter()
+        .filter(|row| filter.is_none_or(|status| status == row.status));
+    let counts = [
+        ("changed", summary.changed),
+        ("left-only", summary.left_only),
+        ("right-only", summary.right_only),
+        ("indeterminate", summary.indeterminate),
+        ("metadata-match", summary.matched),
+        ("content-match", summary.content_matched),
+    ];
+    let markdown = matches!(style, ExportFormat::Markdown);
+    let human = |value: &str| {
+        if markdown {
+            crate::comparison_export::text(value)
+        } else {
+            format::printable(value).into_owned()
+        }
+    };
+    let mut written = 0;
+    if matches!(style, ExportFormat::Jsonl) {
+        let source = |index: usize| {
+            let source = sources[index];
+            let meta = &report.sources[index];
+            json!({
+                "kind": if source.snapshot { "snapshot" } else { "live-folder" },
+                "path": source.path.to_string_lossy(),
+                "root": meta.root.to_string_lossy(),
+                "taken_unix": meta.taken,
+                "taken_ms": meta.taken_ms,
+                "incomplete": summary.incomplete[index],
+            })
+        };
+        let mut line = |record| -> io::Result<()> {
+            serde_json::to_writer(&mut out, &record).map_err(io::Error::other)?;
+            writeln!(out)
+        };
+        line(json!({
+            "type": "header", "schema": "kosha.folder-comparison-report.v1",
+            "scope": "filtered-findings", "filter": filter_label,
+            "mtime_tolerance_seconds": MTIME_TOLERANCE, "verify_contents": report.verified,
+            "left": source(0), "right": source(1),
+        }))?;
+        for row in rows {
+            let mut record = json!({
+                "type": "entry", "path": row.path, "status": row.status.label(),
+                "reasons": row.reasons.into_iter().flatten().collect::<Vec<_>>(),
+            });
+            if let Some(raw) = &row.path_bytes_hex {
+                record["path_bytes_hex"] = json!(raw);
+            }
+            line(record)?;
+            written += 1;
+        }
+        line(json!({
+            "type": "summary", "exported_findings": written,
+            "counts": counts.into_iter().map(|(label, count)| (label.to_owned(), json!(count)))
+                .collect::<serde_json::Map<_, _>>(),
+        }))?;
+    } else {
+        writeln!(
+            out,
+            "{}Folder comparison\n",
+            if markdown { "# " } else { "" }
+        )?;
+        for (index, side) in ["Left", "Right"].into_iter().enumerate() {
+            let source = sources[index];
+            let meta = &report.sources[index];
+            let kind = if source.snapshot {
+                "snapshot"
+            } else {
+                "live folder"
+            };
+            writeln!(
+                out,
+                "{side} ({kind}): {}  ",
+                human(&source.path.to_string_lossy())
+            )?;
+            if source.snapshot {
+                writeln!(
+                    out,
+                    "Recorded root: {}  ",
+                    human(&meta.root.to_string_lossy())
+                )?;
+            }
+            writeln!(
+                out,
+                "Observation (Unix seconds): {}.{:03}  ",
+                meta.taken, meta.taken_ms
+            )?;
+            if summary.incomplete[index] {
+                writeln!(out, "Warning: {side} source has incomplete coverage.  ")?;
+            }
+            writeln!(out)?;
+        }
+        writeln!(
+            out,
+            "Modification-time tolerance: {MTIME_TOLERANCE} seconds  "
+        )?;
+        writeln!(
+            out,
+            "Content verification: {}  ",
+            if report.verified { "enabled" } else { "off" }
+        )?;
+        writeln!(out, "Findings filter: {filter_label}\n")?;
+        for (label, count) in counts {
+            writeln!(out, "- {label}: {count}")?;
+        }
+        writeln!(out)?;
+        if markdown {
+            writeln!(out, "| Status | Path | Reason |\n| --- | --- | --- |")?;
+        }
+        for row in rows {
+            let label = row.status.label();
+            let path = human(&row.path);
+            let reasons = row
+                .reasons
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+            if markdown {
+                writeln!(out, "| {label} | {path} | {reasons} |")?;
+            } else {
+                writeln!(out, "{label}\t{path}\t{reasons}")?;
+            }
+            written += 1;
+        }
+        if written == 0 {
+            writeln!(out, "\nNo findings in this report.")?;
+        }
+    }
+    Ok(written)
+}
 
 #[derive(Default)]
 pub(crate) struct View {
     sources: [Option<Source>; 2],
     picking: Option<Arc<()>>,
     stop: Option<Arc<AtomicBool>>,
-    report: Option<Report>,
+    report: Option<Arc<Report>>,
+    exporting: Option<Arc<()>>,
     filter: Option<usize>,
     verify: bool,
     message: Option<String>,
@@ -91,6 +267,73 @@ impl View {
 }
 
 impl KoshaApp {
+    fn export_folder_comparison(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
+        let Some(view) = self
+            .folder_comparison
+            .as_mut()
+            .filter(|view| view.exporting.is_none() && view.picking.is_none())
+        else {
+            return;
+        };
+        let (Some(report), [Some(left), Some(right)]) = (view.report.clone(), view.sources.clone())
+        else {
+            return;
+        };
+        let filter = view.filter;
+        let ticket = Arc::new(());
+        view.exporting = Some(Arc::clone(&ticket));
+        let directory = crate::places::home().unwrap_or_else(|| PathBuf::from("."));
+        let suggested = format!("kosha-folder-comparison.{}", format.extension());
+        let prompt = cx.prompt_for_new_path(&directory, Some(&suggested));
+        cx.spawn(async move |this, cx| {
+            let selection = prompt.await;
+            let Ok(path) = this.update(cx, |app, cx| app.file_picker_selection(selection, cx))
+            else {
+                return;
+            };
+            let message = if let Some(path) = path {
+                let target = path.clone();
+                let written = cx
+                    .background_spawn(async move {
+                        kosha_core::export::atomic_write(&target, |out| {
+                            write_report(&report, [&left, &right], filter, format, out)
+                        })
+                    })
+                    .await;
+                Some(match written {
+                    Ok(rows) => format!(
+                        "Exported {} to {}",
+                        format::plural(rows, "finding"),
+                        path.display()
+                    ),
+                    Err(error) => {
+                        format!("Could not export comparison to {}: {error}", path.display())
+                    }
+                })
+            } else {
+                None
+            };
+            this.update(cx, |app, cx| {
+                if let Some(view) = app.folder_comparison.as_mut().filter(|view| {
+                    view.exporting
+                        .as_ref()
+                        .is_some_and(|active| Arc::ptr_eq(active, &ticket))
+                }) {
+                    view.exporting = None;
+                    if let Some(message) = message {
+                        view.message = Some(message);
+                    }
+                } else if let Some(message) = message {
+                    app.set_notice(message);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
     pub(crate) fn close_folder_comparison(&mut self, cx: &mut Context<Self>) {
         if self
             .folder_comparison
@@ -201,7 +444,7 @@ impl KoshaApp {
                     view.message = Some("Comparison cancelled.".into());
                 } else {
                     match outcome {
-                        Ok(report) => view.report = Some(report),
+                        Ok(report) => view.report = Some(Arc::new(report)),
                         Err(error) => view.message = Some(error),
                     }
                 }
@@ -247,7 +490,7 @@ fn compare(sources: [Source; 2], verify: bool, stop: &Arc<AtomicBool>) -> Result
     if stop.load(Ordering::Relaxed) {
         return Err("Comparison cancelled.".into());
     }
-    let comparison = Comparison::new((&left, &a), (&right, &b), 2)?;
+    let comparison = Comparison::new((&left, &a), (&right, &b), MTIME_TOLERANCE)?;
     #[cfg(any(unix, windows))]
     let comparison = if verify {
         comparison
@@ -269,8 +512,18 @@ fn compare(sources: [Source; 2], verify: bool, stop: &Arc<AtomicBool>) -> Result
             .position(|status| *status == row.status)
         {
             by_status[index].push(findings.len());
+            let path = String::from_utf8_lossy(row.path);
+            let path_bytes_hex = matches!(path, std::borrow::Cow::Owned(_)).then(|| {
+                use std::fmt::Write as _;
+                let mut hex = String::with_capacity(row.path.len() * 2);
+                for byte in row.path {
+                    let _ = write!(hex, "{byte:02x}");
+                }
+                hex
+            });
             findings.push(Finding {
-                path: format::printable(&String::from_utf8_lossy(row.path)).into_owned(),
+                path: path.into_owned(),
+                path_bytes_hex,
                 status: row.status,
                 reasons: row.reasons,
             });
@@ -287,7 +540,7 @@ fn compare(sources: [Source; 2], verify: bool, stop: &Arc<AtomicBool>) -> Result
 }
 
 pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>) -> AnyElement {
-    let editable = view.stop.is_none() && view.picking.is_none();
+    let editable = view.stop.is_none() && view.picking.is_none() && view.exporting.is_none();
     let selected = view.sources.iter().all(Option::is_some);
     let next_step = match view.sources.each_ref().map(Option::is_some) {
         [false, false] => Some("Choose a source on each side to start a comparison."),
@@ -365,13 +618,14 @@ pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
             }))))))
         .children(next_step.map(|step| div().text_color(palette.text_dim).child(step)))
         .children(view.message.clone().map(|message| div().text_color(palette.caution).child(message)))
-        .children(view.report.as_ref().map(|report| render_report(report, view.filter, palette, cx)))
+        .children(view.report.as_ref().map(|report| render_report(report, view.filter, view.exporting.is_some(), palette, cx)))
         .into_any_element()
 }
 
 fn render_report(
     report: &Report,
     filter: Option<usize>,
+    exporting: bool,
     palette: &Palette,
     cx: &mut Context<KoshaApp>,
 ) -> AnyElement {
@@ -422,6 +676,37 @@ fn render_report(
                         } else {
                             format!("{metadata_matches} · Contents unchecked")
                         }),
+                ),
+        )
+        .child(
+            h_flex()
+                .items_center()
+                .flex_wrap()
+                .gap(px(4.))
+                .text_color(dim)
+                .child(if exporting {
+                    "Exporting findings…"
+                } else {
+                    "Export findings"
+                })
+                .children(
+                    (!exporting)
+                        .then(|| {
+                            [
+                                ExportFormat::Text,
+                                ExportFormat::Markdown,
+                                ExportFormat::Jsonl,
+                            ]
+                            .map(|format| {
+                                ui::button(("export-folder-comparison", format as usize), &palette)
+                                    .child(format.label())
+                                    .on_click(cx.listener(move |app, _, _, cx| {
+                                        app.export_folder_comparison(format, cx)
+                                    }))
+                            })
+                        })
+                        .into_iter()
+                        .flatten(),
                 ),
         )
         .children(
@@ -526,7 +811,7 @@ fn render_report(
                                             div()
                                                 .truncate()
                                                 .text_color(text)
-                                                .child(row.path.clone()),
+                                                .child(format::printable(&row.path).into_owned()),
                                         )
                                         .children((!reasons.is_empty()).then(|| {
                                             div()
@@ -572,6 +857,35 @@ mod tests {
         assert_eq!(report.findings[0].path, "only-left");
         assert_eq!(report.by_status[1].as_slice(), &[0]);
         assert!(report.by_status[3].is_empty());
+        for style in [
+            ExportFormat::Text,
+            ExportFormat::Markdown,
+            ExportFormat::Jsonl,
+        ] {
+            let mut output = Vec::new();
+            let inputs = [&sources[0], &sources[1]];
+            assert_eq!(
+                write_report(&report, inputs, Some(1), style, &mut output).unwrap(),
+                1
+            );
+            let output = String::from_utf8(output).unwrap();
+            assert!(output.contains("only-left"));
+            assert!(!output.contains("matching-directory"));
+            if matches!(style, ExportFormat::Jsonl) {
+                let records = output
+                    .lines()
+                    .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(records[0]["filter"], "left-only");
+                assert_eq!(records[1]["path"], "only-left");
+                assert_eq!(records[2]["exported_findings"], 1);
+                assert_eq!(records[2]["counts"]["metadata-match"], 1);
+            }
+            assert_eq!(
+                write_report(&report, inputs, Some(2), style, Vec::new()).unwrap(),
+                0
+            );
+        }
         stop.store(true, Ordering::Relaxed);
         assert!(
             matches!(compare(sources, false, &stop), Err(error) if error == "Comparison cancelled.")

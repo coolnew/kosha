@@ -2766,6 +2766,10 @@ impl KoshaApp {
         .detach();
     }
 
+    pub(crate) fn set_notice(&mut self, message: String) {
+        self.state.notice = Some(message);
+    }
+
     pub(crate) fn file_picker_selection<T>(
         &mut self,
         selection: Result<anyhow::Result<Option<T>>, impl Into<anyhow::Error>>,

@@ -196,7 +196,14 @@ page or the background actions panel.
 The report lists differences and indeterminate paths, with a reason for each
 finding. Select a status above the list to focus on that category. The report
 also counts matching metadata and warns when either source has
-incomplete coverage. Relative paths are matched byte for byte. The comparison
+incomplete coverage. Under **Export findings**, choose **Plain text** (.txt)
+for quick reading, **Markdown** (.md) for sharing, or **JSONL** (.jsonl) for
+scripts. The saved report includes the selected findings filter, source
+details, coverage warnings, and totals for the complete comparison. Exporting
+uses the displayed results and does not rerun the comparison.
+[View the export controls on macOS.](images/gui-macos-folder-export.png)
+
+Relative paths are matched byte for byte. The comparison
 uses entry type, apparent size, and modification time with a two-second
 tolerance. On Windows, macOS, and Linux, turn on **Verify file contents** before running
 the comparison to check equal-size regular files at matching paths. This reads

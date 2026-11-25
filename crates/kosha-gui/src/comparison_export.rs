@@ -37,7 +37,7 @@ pub fn kind(kind: Kind) -> &'static str {
     }
 }
 
-fn text(value: &str) -> String {
+pub(crate) fn text(value: &str) -> String {
     kosha_core::format::printable(value)
         .chars()
         .map(|ch| match ch {
