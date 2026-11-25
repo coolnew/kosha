@@ -52,6 +52,7 @@ rust-embed = { version = "8.7.2", features = ["debug-embed"] }
 tempfile = "3"
 
 [features]
+fast-ntfs-worker = ["kosha-core/fast-ntfs-worker"]
 remote-client = ["dep:kosha-remote", "dep:kosha-scan-wire"]
 headless-ui-tests = ["gpui-kit/test-support"]
 

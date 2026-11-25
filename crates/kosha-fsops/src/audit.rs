@@ -12,7 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::cloud::ItemCloudRisk;
-use crate::plan::{Action, Outcome};
+use crate::plan::{Action, Outcome, VolumeChange};
 
 pub struct AuditLog {
     path: PathBuf,
@@ -89,6 +89,25 @@ impl AuditLog {
 
     pub fn record(&mut self, path: &Path, action: Action, bytes: u64, outcome: &Outcome) {
         self.record_item(path, action, bytes, outcome, None);
+    }
+
+    pub(crate) fn record_volume_change(&mut self, change: &VolumeChange) {
+        let Some(file) = self.file.as_mut() else {
+            return;
+        };
+        let number =
+            |value: Option<u64>| value.map_or_else(|| "null".to_owned(), |bytes| bytes.to_string());
+        let line = format!(
+            "{{\"kind\":\"volume-free-space\",\"path\":{},\"before_time\":{},\"after_time\":{},\"before_free_bytes\":{},\"after_free_bytes\":{}}}\n",
+            json_string(&change.root.to_string_lossy()),
+            json_string(&change.sampled_before),
+            json_string(&change.sampled_after),
+            number(change.before_free),
+            number(change.after_free),
+        );
+        if file.write_all(line.as_bytes()).is_err() {
+            self.file = None;
+        }
     }
 
     /// One record, with what was known about cloud-only files in it.

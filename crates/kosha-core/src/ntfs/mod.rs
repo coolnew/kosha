@@ -77,7 +77,7 @@ pub mod volume;
 mod strategy;
 
 #[cfg(windows)]
-pub use strategy::scan;
+pub use strategy::{scan, scan_selected_volume};
 
 #[cfg(test)]
 mod tests;

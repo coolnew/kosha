@@ -73,10 +73,9 @@ impl Volume {
     /// That answer comes from the boot sector, reading the boot sector is the
     /// first thing [`Mft::open`](super::mft::Mft::open) does, and asking twice
     /// would mean two places that have to agree about what NTFS looks like.
-    pub fn open(drive: &OsStr) -> io::Result<Volume> {
-        let mut device = OsString::from(r"\\.\");
-        device.push(drive);
-        let wide = to_wide(&device);
+    // The caller constructs the device name from a drive letter or mount-manager identity.
+    pub(super) fn open_device(device: &OsStr) -> io::Result<Volume> {
+        let wide = to_wide(device);
 
         // SAFETY: `wide` is a NUL-terminated UTF-16 buffer that outlives the
         // call; the security-attributes and template arguments are null, which

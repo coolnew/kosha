@@ -37,6 +37,7 @@ sha2 = "0.10"
 tempfile = "3"
 
 [features]
+fast-ntfs-worker = ["kosha-core/fast-ntfs-worker"]
 remote-serve = ["dep:kosha-scan-wire", "dep:crossbeam-channel"]
 remote-client = ["dep:kosha-remote", "dep:kosha-scan-wire"]
 

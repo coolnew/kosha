@@ -101,6 +101,67 @@ fn a_dry_run_needs_no_grant() {
 }
 
 #[test]
+fn overlapping_targets_are_counted_once_in_either_order() {
+    let dir = fixture();
+    let tree = scan(dir.path());
+    let session = Session::new(dir.path());
+    let folder = node(&tree, "cache");
+    let nested = node(&tree, "cache/nested");
+    let file = node(&tree, "cache/nested/c.bin");
+    let unrelated = node(&tree, "junk.bin");
+
+    for targets in [
+        [folder, nested, file, unrelated, folder],
+        [file, unrelated, nested, folder, folder],
+    ] {
+        let plan = ActionPlan::build(&tree, &targets, Action::DeletePermanently, &session);
+        assert_eq!(plan.items().len(), 2);
+        assert_eq!(plan.rejected().len(), 3);
+        assert_eq!(
+            plan.total_bytes(),
+            tree.node(folder).allocated + tree.node(unrelated).allocated
+        );
+        assert_eq!(plan.dry_run().succeeded, 2);
+        assert!(dir.path().join("cache/nested/c.bin").exists());
+    }
+}
+
+#[test]
+fn measured_cleanup_audits_each_observed_volume_once() {
+    let dir = fixture();
+    let tree = scan(dir.path());
+    let session = writable(dir.path());
+    let plan = ActionPlan::build(
+        &tree,
+        &[node(&tree, "junk.bin"), node(&tree, "cache/a.bin")],
+        Action::DeletePermanently,
+        &session,
+    );
+    let log = dir.path().join("receipt.jsonl");
+    let mut audit = AuditLog::at(log.clone());
+    let report = plan.execute_measured(&session.grant().unwrap(), None, &mut audit);
+    assert_eq!(report.succeeded, 2);
+    assert!(
+        report
+            .measured_summary()
+            .contains("estimated released allocation")
+    );
+    assert!(dir.path().join("keep.txt").exists());
+    let records = fs::read_to_string(log).unwrap();
+    let receipts = records.matches("\"kind\":\"volume-free-space\"").count();
+    assert_eq!(receipts, report.volume_changes.len());
+    if kosha_core::volume_history::VolumeId::containing(dir.path()).is_some() {
+        assert_eq!(receipts, 1);
+        assert_eq!(report.unobserved_volume_targets, 0);
+        assert!(records.contains("\"before_free_bytes\":"));
+        assert!(records.contains("\"after_free_bytes\":"));
+    } else {
+        assert_eq!(receipts, 0);
+        assert_eq!(report.unobserved_volume_targets, 2);
+    }
+}
+
+#[test]
 fn the_dry_run_and_the_execution_agree() {
     // The whole point of the dry run: the numbers a user approves come out of
     // the same validation path that will run.

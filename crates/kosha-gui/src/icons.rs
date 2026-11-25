@@ -12,8 +12,8 @@
 //! The gear does not. The set's gear is the familiar eight-lobed cog, which is
 //! what every settings button in the world already is; kosha's is a plain ring
 //! with six short spokes, which reads as the same thing from a metre away
-//! while being recognisably *this* application's. It is the only icon here,
-//! and it lives in `assets/icons/` beside the others.
+//! while being recognisably *this* application's. It lives with the folder
+//! comparison icon in `assets/icons/`.
 //!
 //! An asset source is a lookup from path to bytes, and GPUI takes exactly one
 //! per application. So this one answers for kosha's files and hands everything
@@ -28,9 +28,16 @@ use gpui_kit::{AssetSource, Result, SharedString};
 /// string is a path into this source and a typo in it is a silently invisible
 /// button, not a compile error.
 pub const GEAR: &str = "icons/kosha-gear.svg";
+pub const COMPARE_FOLDERS: &str = "icons/kosha-compare-folders.svg";
 
 /// Every icon kosha brings of its own, embedded so the binary is self-contained.
-const OWN: [(&str, &str); 1] = [(GEAR, include_str!("../assets/icons/gear.svg"))];
+const OWN: [(&str, &str); 2] = [
+    (GEAR, include_str!("../assets/icons/gear.svg")),
+    (
+        COMPARE_FOLDERS,
+        include_str!("../assets/icons/compare-folders.svg"),
+    ),
+];
 
 /// kosha's icons, then the component library's.
 pub struct Assets;
@@ -60,11 +67,10 @@ mod tests {
 
     #[test]
     fn koshas_own_icons_are_served() {
-        let bytes = Assets
-            .load(GEAR)
-            .expect("the gear is embedded")
-            .expect("the gear is embedded");
-        assert!(bytes.starts_with(b"<svg"));
+        for path in [GEAR, COMPARE_FOLDERS] {
+            let bytes = Assets.load(path).unwrap().expect("the icon is embedded");
+            assert!(bytes.starts_with(b"<svg"));
+        }
     }
 
     /// The reason this source exists at all: adding kosha's icons must not

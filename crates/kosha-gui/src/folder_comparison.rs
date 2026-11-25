@@ -27,7 +27,7 @@ use crate::ui;
 struct Source {
     path: PathBuf,
     snapshot: bool,
-    history: bool,
+    observation: Option<&'static str>,
 }
 
 struct Finding {
@@ -237,13 +237,13 @@ pub(crate) struct View {
 }
 
 impl View {
-    pub(crate) fn from_snapshots(paths: [PathBuf; 2]) -> Self {
+    pub(crate) fn from_snapshots(paths: [PathBuf; 2], observation: &'static str) -> Self {
         Self {
             sources: paths.map(|path| {
                 Some(Source {
                     path,
                     snapshot: true,
-                    history: true,
+                    observation: Some(observation),
                 })
             }),
             ..Self::default()
@@ -255,7 +255,7 @@ impl View {
             crate::state::Source::Snapshot(record) => Some(Source {
                 path: record.path.clone(),
                 snapshot: true,
-                history: false,
+                observation: None,
             }),
             crate::state::Source::Disk
                 if matches!(
@@ -266,7 +266,7 @@ impl View {
                 Some(Source {
                     path: ready.tree.root_path().to_path_buf(),
                     snapshot: false,
-                    history: false,
+                    observation: None,
                 })
             }
             _ => None,
@@ -412,7 +412,7 @@ impl KoshaApp {
                     view.sources[side] = Some(Source {
                         path,
                         snapshot,
-                        history: false,
+                        observation: None,
                     });
                     if snapshot {
                         view.verify = false;
@@ -583,7 +583,7 @@ pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
             }))
         .child(h_flex().items_stretch().gap(px(8.)).children(["Left source", "Right source"].into_iter().enumerate().map(|(side, label)| {
             let observation = view.sources[side].as_ref().map(|source| {
-                let kind = if source.history { "History" } else if source.snapshot { "Snapshot" } else { "Live folder" };
+                let kind = if source.observation.is_some() { "History" } else if source.snapshot { "Snapshot" } else { "Live folder" };
                 view.report.as_ref().map_or_else(|| kind.to_owned(), |report| {
                     let stamp = format::stamp(report.sources[side].taken, u64::from(format::now_unix()));
                     format!("{kind} · {stamp}")
@@ -594,14 +594,14 @@ pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
                     .text_color(palette.text_dim).child(label).children(observation.map(|value| div().child(value))));
             if let Some(source) = &view.sources[side] {
                 let path = source.path.to_string_lossy();
-                let name = if source.history {
-                    std::borrow::Cow::Borrowed("Drive observation")
+                let name = if let Some(observation) = source.observation {
+                    std::borrow::Cow::Borrowed(observation)
                 } else {
                     source.path.file_name().map_or_else(|| path.clone(), |name| name.to_string_lossy())
                 };
                 card = card
                     .child(div().id(("comparison-source-name", side)).debug_selector(move || if side == 0 { "comparison-left-selected".into() } else { "comparison-right-selected".into() }).truncate().text_color(palette.text).child(format::printable(&name).into_owned()))
-                    .children((!source.history).then(|| div().truncate().text_size(metrics::scaled(metrics::TEXT_SM)).text_color(palette.text_dim).child(format::printable(&path).into_owned())));
+                    .children(source.observation.is_none().then(|| div().truncate().text_size(metrics::scaled(metrics::TEXT_SM)).text_color(palette.text_dim).child(format::printable(&path).into_owned())));
             } else {
                 card = card.child(div().text_color(palette.text_dim).child("Choose a folder or saved snapshot"));
             }
@@ -872,7 +872,7 @@ mod tests {
         let sources = [left, right].map(|path| Source {
             path,
             snapshot: false,
-            history: false,
+            observation: None,
         });
         let stop = Arc::new(AtomicBool::new(false));
         let report = compare(sources.clone(), false, &stop).unwrap();

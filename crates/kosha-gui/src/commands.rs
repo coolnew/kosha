@@ -106,6 +106,7 @@ pub enum Action {
     PinScope(PathBuf),
     UnpinScope(PathBuf),
     OpenHelp,
+    Monitoring,
     CleanupGuide,
     AskAi,
     /// Show the log of everything this application has changed.
@@ -123,6 +124,7 @@ pub enum Action {
     CancelDeepScan,
     CompareFolders,
     CancelFolderComparison,
+    CancelScheduledMonitoring,
     HideDeepLayout,
     StopDuplicates,
     /// Stop a hunt that is still reading file contents.
@@ -658,6 +660,14 @@ pub fn all(
             action: Action::ScanAgainForReal(std::path::PathBuf::from(&situation.root)),
         });
     }
+
+    commands.push(Command {
+        label: "Monitoring".into(),
+        detail: "Review local storage checks and alerts".into(),
+        binding: None,
+        keywords: &["storage", "schedule", "growth", "alerts"],
+        action: Action::Monitoring,
+    });
 
     commands.push(Command {
         label: "Query help".into(),

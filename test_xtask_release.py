@@ -630,7 +630,7 @@ class ReleaseAssetTests(unittest.TestCase):
             self.seed(root)
             release.verify_release_assets(root, self.commit)
 
-    def seed_msix(self, root):
+    def seed_msix(self, root, worker=False):
         self.seed(root)
         version = "0.10.2"
         prefix = "kosha-v" + version
@@ -648,15 +648,22 @@ class ReleaseAssetTests(unittest.TestCase):
         name = prefix + "-x64-store-upload.msix"
         msix_module = load("xtask-msix")
         with zipfile.ZipFile(root / name, "w") as archive:
-            archive.writestr("AppxManifest.xml", msix_module.manifest("Example.Kosha", "CN=Example", "Example Publisher", version, True, False, True, True))
+            archive.writestr("AppxManifest.xml", msix_module.manifest("Example.Kosha", "CN=Example", "Example Publisher", version, True, False, not worker, True))
             archive.writestr("CONTACT.txt", "KoshaApp\nAuthor: Example Author\nPublisher: Example Publisher\nSupport: support@example.com\nWebsite: https://example.com/\n")
             for binary, data in binaries.items():
                 archive.writestr(binary, data)
+            if worker:
+                worker_bytes = image() + b"worker"
+                archive.writestr("kosha-ntfs-worker.exe", worker_bytes)
         metadata = {"schema": "kosha.msix-store-upload.v1", "package": name, "commit": self.commit,
                     "version": version, "target": "x86_64-pc-windows-msvc", "publication_candidate": True,
                     "signed": False, "diagnostic_probe": False, "runtime": "win32App",
                     "identity": "Example.Kosha", "publisher": "CN=Example", "publisher_display_name": "Example Publisher",
                     "author_name": "Example Author", "support_email": "support@example.com", "website": "https://example.com/"}
+        if worker:
+            stamp = f"kosha {version} ({self.commit[:7]}, x86_64-pc-windows-msvc)"
+            metadata.update(runtime="packagedClassicApp", unvirtualized_resources=False, binary_stamp=stamp,
+                            fast_ntfs_worker_stamp=stamp, fast_ntfs_worker_sha256=hashlib.sha256(worker_bytes).hexdigest())
         self.refresh_msix(root, metadata)
         return metadata
 
@@ -671,8 +678,26 @@ class ReleaseAssetTests(unittest.TestCase):
             root = Path(d)
             self.seed_msix(root)
             release.verify_release_assets(root, self.commit, expect_msix=True)
+            with self.assertRaisesRegex(ValueError, "missing the required Fast NTFS worker"):
+                release.verify_release_assets(root, self.commit, expect_msix=True, require_msix_worker=True)
             with self.assertRaisesRegex(ValueError, "Unexpected"):
                 release.verify_release_assets(root, self.commit)
+
+    def test_fast_ntfs_msix_verifies_worker_and_keeps_shared_windows_binaries(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            metadata = self.seed_msix(root, worker=True)
+            release.verify_release_assets(root, self.commit, expect_msix=True, require_msix_worker=True)
+            original_stamp = metadata["binary_stamp"]
+            metadata["binary_stamp"] = metadata["fast_ntfs_worker_stamp"] = "kosha 0.10.2 (ffff, x86_64-pc-windows-msvc)"
+            self.refresh_msix(root, metadata)
+            with self.assertRaisesRegex(ValueError, "worker stamp"):
+                release.verify_release_assets(root, self.commit, expect_msix=True)
+            metadata["binary_stamp"] = metadata["fast_ntfs_worker_stamp"] = original_stamp
+            metadata["fast_ntfs_worker_sha256"] = "0" * 64
+            self.refresh_msix(root, metadata)
+            with self.assertRaisesRegex(ValueError, "worker digest mismatch"):
+                release.verify_release_assets(root, self.commit, expect_msix=True)
 
     def test_msix_integrity_private_provenance_and_development_artifacts_are_rejected(self):
         for problem in ["private", "identity", "publisher", "runtime", "signature", "probe", "binary", "contact", "headless", "device", "alias", "hash", "sidecar", "missing"]:

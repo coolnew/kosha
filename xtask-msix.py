@@ -14,6 +14,7 @@ Store upload output is unsigned, not a directly installable consumer download.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -53,7 +54,10 @@ def numeric_version(version):
     return ".".join(map(str, parts))
 
 
-def manifest(identity, publisher, display, version, elevation, probe=False, unvirtualized=False, store=False):
+def manifest(identity, publisher, display, version, elevation, probe=False, unvirtualized=False, store=False, *, test_win32=False):
+    if store and test_win32:
+        raise ValueError("The experimental Win32 runtime switch is development only")
+    runtime = "win32App" if unvirtualized or test_win32 else "packagedClassicApp"
     limit = 50 if store else 38
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{2," + str(limit - 1) + "}", identity):
         raise ValueError(f"Identity name must be 3–{limit} ASCII letters/digits/dots/hyphens")
@@ -93,7 +97,7 @@ def manifest(identity, publisher, display, version, elevation, probe=False, unvi
     if probe:
         entries.append(("Probe", "kosha-msix-probe.exe"))
     for app_id, executable in entries:
-        attrs = {"Id": app_id, "Executable": executable, f"{{{NS['uap10']}}}RuntimeBehavior": "win32App" if unvirtualized else "packagedClassicApp",
+        attrs = {"Id": app_id, "Executable": executable, f"{{{NS['uap10']}}}RuntimeBehavior": runtime,
                  f"{{{NS['uap10']}}}TrustLevel": "mediumIL"}
         attrs[f"{{{NS['desktop4']}}}SupportsMultipleInstances"] = "true"
         app = child(applications, "Application", attrs)
@@ -108,7 +112,7 @@ def manifest(identity, publisher, display, version, elevation, probe=False, unvi
         targets = [("Cli", "kosha.exe", "console")] if app_id == "Kosha" else [("Probe", "kosha-msix-probe.exe", "console")]
         for target_id, executable, subsystem in targets:
             extension = child(extensions, "uap5:Extension", {"Category": "windows.appExecutionAlias", "Executable": executable,
-                f"{{{NS['uap10']}}}RuntimeBehavior": "win32App" if unvirtualized else "packagedClassicApp",
+                f"{{{NS['uap10']}}}RuntimeBehavior": runtime,
                 f"{{{NS['uap10']}}}TrustLevel": "mediumIL"})
             alias = child(extension, "uap5:AppExecutionAlias", {f"{{{NS['desktop4']}}}Subsystem": subsystem})
             child(alias, "uap5:ExecutionAlias", {"Alias": aliases[target_id]})
@@ -176,10 +180,16 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path("dist/msix-development"))
     parser.add_argument("--allow-elevation", action="store_true", help="Include restricted capability for UAC/MFT tests, not Store approval")
     parser.add_argument("--probe-binary", type=Path, help="Optional explicit local diagnostic exe; development only")
+    parser.add_argument("--fast-ntfs-worker", type=Path, help="Include the dedicated Fast NTFS worker in the classic package")
     parser.add_argument("--unvirtualized", action="store_true", help="Experimental win32App runtime with restricted unvirtualizedResources; needs separate Store review")
+    parser.add_argument("--test-win32-runtime", action="store_true", help="Development-only win32App runtime; does not add unvirtualizedResources")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     try:
+        if args.fast_ntfs_worker and (not args.allow_elevation or args.unvirtualized or args.test_win32_runtime):
+            raise ValueError("Fast NTFS worker requires a classic package with allowElevation and default virtualization")
+        if args.store_upload and not args.fast_ntfs_worker:
+            raise ValueError("Store upload requires the dedicated Fast NTFS worker")
         if args.identity_file:
             config = json.loads(args.identity_file.read_text(encoding="utf-8"))
             if config.get("schema") != "kosha.windows-store-config.v1":
@@ -197,12 +207,14 @@ def main():
                                   or not re.fullmatch(r"https://[^\s?#]+", args.website)):
             raise ValueError("Supply a valid support email and HTTPS website without query parameters")
         version = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["version"]
-        xml = manifest(args.identity_name, args.publisher, args.publisher_display_name, version, args.allow_elevation, bool(args.probe_binary), args.unvirtualized, args.store_upload)
+        xml = manifest(args.identity_name, args.publisher, args.publisher_display_name, version, args.allow_elevation, bool(args.probe_binary), args.unvirtualized, args.store_upload, test_win32=args.test_win32_runtime)
+        runtime = "win32App" if args.unvirtualized or args.test_win32_runtime else "packagedClassicApp"
         out = fresh_output(ROOT, args.output_dir)
         print(json.dumps({"mode": "msix-store-upload" if args.store_upload else "development-msix", "execute": args.execute, "output": str(out),
                           "identity": args.identity_name if args.store_upload else args.identity_name + ".Development", "package_version": numeric_version(version),
                           "cli_alias": "kosha.exe" if args.store_upload else "kosha-msix-dev.exe", "allow_elevation": args.allow_elevation,
-                          "runtime": "win32App" if args.unvirtualized else "packagedClassicApp", "diagnostic_probe": bool(args.probe_binary),
+                          "runtime": runtime, "unvirtualized_resources": args.unvirtualized, "diagnostic_probe": bool(args.probe_binary),
+                          "fast_ntfs_worker": bool(args.fast_ntfs_worker),
                           "signed": False, "store_upload": args.store_upload, "store_submission": False}, indent=2), flush=True)
         if not args.execute:
             return 0
@@ -230,6 +242,18 @@ def main():
         # use the same verified static-CRT executables.
         module = runpy.run_path(str(ROOT / "xtask-windows.py"))
         module["verify_folder"](args.binary_dir)
+        worker_stamp = None
+        worker_digest = None
+        if args.fast_ntfs_worker:
+            worker = args.fast_ntfs_worker.resolve()
+            worker_bytes = worker.read_bytes()
+            module["verify_bytes"](worker_bytes)
+            worker_stamp = subprocess.check_output([str(worker), "--version"], text=True).strip()
+            parsed = packer.parse_stamp(worker_stamp)
+            if parsed["version"] != version or parsed["target"] != "x86_64-pc-windows-msvc":
+                raise ValueError("Rebuild the current-version x64 Fast NTFS worker")
+            if args.store_upload and worker_stamp != stamps[0]:
+                raise ValueError("Store worker stamp must match the clean CLI and GUI stamps")
         payload.mkdir(parents=True)
         for name, data in packer.documentation_payloads().items():
             dest = payload / name
@@ -239,6 +263,9 @@ def main():
             shutil.copy2(args.binary_dir / name, payload / name)
         if args.probe_binary:
             shutil.copy2(args.probe_binary, payload / "kosha-msix-probe.exe")
+        if args.fast_ntfs_worker:
+            (payload / "kosha-ntfs-worker.exe").write_bytes(worker_bytes)
+            worker_digest = hashlib.sha256(worker_bytes).hexdigest()
         if args.store_upload:
             (payload / "CONTACT.txt").write_text(f"KoshaApp\nAuthor: {args.author_name}\nPublisher: {args.publisher_display_name}\nSupport: {args.support_email}\nWebsite: {args.website}\n", encoding="utf-8", newline="\n")
         (payload / "AppxManifest.xml").write_bytes(xml)
@@ -257,7 +284,8 @@ def main():
             "author_name": args.author_name, "support_email": args.support_email, "website": args.website,
             "version": version, "commit": commit, "target": "x86_64-pc-windows-msvc",
             "publication_candidate": not (ROOT / "publication/files.jsonl").exists(), "bytes": package.stat().st_size,
-            "runtime": "win32App" if args.unvirtualized else "packagedClassicApp", "diagnostic_probe": bool(args.probe_binary),
+            "runtime": runtime, "unvirtualized_resources": args.unvirtualized, "diagnostic_probe": bool(args.probe_binary),
+            **({"fast_ntfs_worker_stamp": worker_stamp, "fast_ntfs_worker_sha256": worker_digest} if worker_stamp else {}),
             "package_version": numeric_version(version), "signed": False, "store_submission": False}, indent=2) + "\n",
             encoding="utf-8", newline="\n")
         return 0

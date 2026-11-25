@@ -199,6 +199,312 @@ fn lock_history_series(series: &Path) -> io::Result<fs::File> {
     Ok(lock)
 }
 
+/// One scan at a time across the CLI and desktop processes. Keep this
+/// handle alive from before scanning through the final observation write.
+pub struct MonitoringLease {
+    dir: PathBuf,
+    _lock: fs::File,
+}
+
+/// A committed observation ID and its snapshot, in commit order even if the
+/// system clock changed between observations.
+pub struct MonitoringRecord {
+    pub id: u64,
+    pub snapshot: Kept,
+}
+
+pub fn monitoring_dir() -> Option<PathBuf> {
+    Some(crate::dirs::data_dir()?.join("monitoring"))
+}
+
+impl MonitoringLease {
+    pub(crate) fn directory(&self) -> &Path {
+        &self.dir
+    }
+    pub fn try_acquire(dir: &Path) -> io::Result<Self> {
+        fs::create_dir_all(dir)?;
+        let lock = fs::File::options()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(".scan.lock"))?;
+        lock.try_lock().map_err(io::Error::from)?;
+        Ok(Self {
+            dir: dir.to_path_buf(),
+            _lock: lock,
+        })
+    }
+
+    pub(crate) fn records(&self, profile: u64) -> io::Result<Vec<MonitoringRecord>> {
+        list_monitoring_in(&self.dir, profile)
+    }
+
+    pub(crate) fn last_attempt(
+        &self,
+        profile: u64,
+    ) -> io::Result<Option<crate::monitoring::LastAttempt>> {
+        last_monitoring_attempt_in(&self.dir, profile)
+    }
+
+    pub(crate) fn write_attempt(
+        &self,
+        profile: u64,
+        attempt: crate::monitoring::LastAttempt,
+    ) -> io::Result<()> {
+        use crate::monitoring::Attempt;
+        use std::io::Write as _;
+
+        let dir = monitoring_series(&self.dir, profile);
+        fs::create_dir_all(&dir)?;
+        let timestamp = attempt
+            .time
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_secs();
+        let status = match attempt.status {
+            Attempt::Scanning => "scanning",
+            Attempt::Unavailable => "unavailable",
+            Attempt::Incomplete => "incomplete",
+            Attempt::Cancelled => "cancelled",
+            Attempt::Completed => "completed",
+        };
+        crate::export::atomic_write(&dir.join("attempt"), |out| {
+            writeln!(out, "v1 {timestamp} {status}")
+        })
+    }
+
+    /// Save a verified sample to this profile's history. The newest two
+    /// points always fit together or the new point is declined. Keep any
+    /// referenced alert pair within the same budget.
+    pub fn record(
+        &mut self,
+        profile: u64,
+        sample: &crate::monitoring::Sample<'_>,
+        taken: SystemTime,
+        protected: &[u64],
+    ) -> io::Result<MonitoringRecord> {
+        self.record_tree(profile, sample.tree, taken, protected)
+    }
+
+    fn record_tree(
+        &mut self,
+        profile: u64,
+        tree: &SizeTree,
+        taken: SystemTime,
+        protected: &[u64],
+    ) -> io::Result<MonitoringRecord> {
+        use std::io::Write as _;
+
+        let series = monitoring_series(&self.dir, profile);
+        let entries = list_monitoring_in(&self.dir, profile)?;
+        let latest = entries.last();
+        if latest.is_some_and(|entry| !same_root(&entry.snapshot.meta.root, tree.root_path())) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "monitoring root changed",
+            ));
+        }
+        let id = latest
+            .map_or(Some(1), |entry| entry.id.checked_add(1))
+            .ok_or_else(|| io::Error::other("monitoring observation IDs exhausted"))?;
+        let pinned = |entry: &MonitoringRecord| {
+            latest.is_some_and(|latest| latest.id == entry.id) || protected.contains(&entry.id)
+        };
+        let mut count = 1 + entries.iter().filter(|entry| pinned(entry)).count();
+        let mut bytes = entries
+            .iter()
+            .filter(|entry| pinned(entry))
+            .fold(0u64, |total, entry| {
+                total.saturating_add(entry.snapshot.bytes)
+            });
+        fs::create_dir_all(&series)?;
+        let meta = Meta::of(tree, taken, "Storage monitoring");
+        let staged = series.join(".pending");
+        let destination = series.join(format!("{id:020}.kosha"));
+        match fs::remove_file(&staged) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let write = (|| {
+            let mut out = BufWriter::new(fs::File::create_new(&staged)?);
+            super::write(tree, &meta, &mut out)?;
+            out.flush()?;
+            let file = out.into_inner()?;
+            file.sync_all()?;
+            let size = file.metadata()?.len();
+            bytes = bytes.saturating_add(size);
+            if count > HISTORY_POINTS || bytes > HISTORY_BYTES {
+                return Err(io::Error::other(
+                    "monitoring comparison exceeds the local history budget",
+                ));
+            }
+            drop(file);
+            for entry in entries.iter().rev().filter(|entry| !pinned(entry)) {
+                if count < HISTORY_POINTS && entry.snapshot.bytes <= HISTORY_BYTES - bytes {
+                    count += 1;
+                    bytes += entry.snapshot.bytes;
+                } else {
+                    match fs::remove_file(&entry.snapshot.path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+            fs::rename(&staged, &destination)?;
+            Ok(size)
+        })();
+        if write.is_err() {
+            let _ = fs::remove_file(&staged);
+        }
+        let size = write?;
+
+        Ok(MonitoringRecord {
+            id,
+            snapshot: Kept {
+                path: destination,
+                meta,
+                bytes: size,
+            },
+        })
+    }
+}
+
+fn monitoring_series(dir: &Path, profile: u64) -> PathBuf {
+    dir.join(format!("profile-{profile}"))
+}
+
+pub fn last_monitoring_attempt_in(
+    dir: &Path,
+    profile: u64,
+) -> io::Result<Option<crate::monitoring::LastAttempt>> {
+    use crate::monitoring::{Attempt, LastAttempt};
+    use std::io::Read as _;
+    use std::time::{Duration, UNIX_EPOCH};
+    let file = match fs::File::open(monitoring_series(dir, profile).join("attempt")) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut text = String::new();
+    file.take(128).read_to_string(&mut text)?;
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "invalid monitoring attempt");
+    let mut fields = text.split_ascii_whitespace();
+    if fields.next() != Some("v1") {
+        return Err(invalid());
+    }
+    let seconds = fields
+        .next()
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(invalid)?;
+    let time = UNIX_EPOCH
+        .checked_add(Duration::from_secs(seconds))
+        .ok_or_else(invalid)?;
+    let status = match fields.next() {
+        Some("scanning") => Attempt::Scanning,
+        Some("unavailable") => Attempt::Unavailable,
+        Some("incomplete") => Attempt::Incomplete,
+        Some("cancelled") => Attempt::Cancelled,
+        Some("completed") => Attempt::Completed,
+        _ => return Err(invalid()),
+    };
+    if fields.next().is_some() || !text.ends_with('\n') {
+        return Err(invalid());
+    }
+    Ok(Some(LastAttempt { time, status }))
+}
+
+pub fn list_monitoring_in(dir: &Path, profile: u64) -> io::Result<Vec<MonitoringRecord>> {
+    let listing = match fs::read_dir(monitoring_series(dir, profile)) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut records = Vec::new();
+    for entry in listing {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let Some(stem) = filename
+            .to_str()
+            .and_then(|name| name.strip_suffix(".kosha"))
+        else {
+            continue;
+        };
+        let Ok(id) = stem.parse::<u64>() else {
+            continue;
+        };
+        if id == 0 || stem != format!("{id:020}") || !entry.file_type()?.is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let bytes = entry.metadata()?.len();
+        let meta = read_meta_at(&path).map_err(io::Error::other)?;
+        records.push(MonitoringRecord {
+            id,
+            snapshot: Kept { path, meta, bytes },
+        });
+    }
+    records.sort_unstable_by_key(|record| record.id);
+    Ok(records)
+}
+
+#[cfg(test)]
+mod monitoring_tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn one_monitoring_lease_covers_all_profiles_until_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let lease = MonitoringLease::try_acquire(dir.path()).unwrap();
+        assert!(MonitoringLease::try_acquire(dir.path()).is_err());
+        drop(lease);
+        assert!(MonitoringLease::try_acquire(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn monitoring_retention_preserves_alert_pair_and_ignores_clock_rollback() {
+        let storage = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        let tree = crate::scan(source.path()).unwrap();
+        let series = monitoring_series(storage.path(), 1);
+        let mut lease = MonitoringLease::try_acquire(storage.path()).unwrap();
+        for id in 1..=12 {
+            let taken = UNIX_EPOCH + Duration::from_secs(100 - id);
+            let result = lease.record_tree(1, &tree, taken, &[1, 2]).unwrap();
+            assert_eq!(result.id, id);
+        }
+        fs::write(series.join("unrelated.kosha"), b"leave this alone").unwrap();
+        fs::write(series.join(".pending"), b"interrupted publication").unwrap();
+        drop(lease);
+        let records = list_monitoring_in(storage.path(), 1).unwrap();
+        assert_eq!(
+            records.iter().map(|record| record.id).collect::<Vec<_>>(),
+            vec![1, 2, 7, 8, 9, 10, 11, 12]
+        );
+        assert_eq!(records.last().unwrap().snapshot.meta.taken, 88);
+        let (_, restored) = open(&records[0].snapshot.path).unwrap();
+        assert!(same_root(restored.root_path(), tree.root_path()));
+        assert!(list_monitoring_in(storage.path(), 2).unwrap().is_empty());
+
+        let mut lease = MonitoringLease::try_acquire(storage.path()).unwrap();
+        let all_retained: Vec<_> = records.iter().map(|record| record.id).collect();
+        assert!(
+            lease
+                .record_tree(1, &tree, UNIX_EPOCH, &all_retained)
+                .is_err()
+        );
+        assert_eq!(list_monitoring_in(storage.path(), 1).unwrap().len(), 8);
+        assert!(!series.join(".pending").exists());
+        assert!(series.join("unrelated.kosha").is_file());
+
+        let other = tempfile::tempdir().unwrap();
+        let replacement = crate::scan(other.path()).unwrap();
+        assert!(lease.record_tree(1, &replacement, UNIX_EPOCH, &[]).is_err());
+    }
+}
+
 fn write_tracking_generation(series: &Path) -> io::Result<()> {
     use std::io::Write as _;
     let tick = SystemTime::now()

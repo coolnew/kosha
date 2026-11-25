@@ -46,4 +46,6 @@ pub use audit::AuditLog;
 pub use cloud::{CloudConfirmed, CloudEvidence, CloudRisk, CloudWarning, ItemCloudRisk};
 pub use guard::Refusal;
 pub use mode::{Mode, ModeError, ReadWriteGrant, Session, UserConfirmed};
-pub use plan::{Action, ActionPlan, ExecutionReport, Fingerprint, Outcome, PlanItem, SkipReason};
+pub use plan::{
+    Action, ActionPlan, ExecutionReport, Fingerprint, Outcome, PlanItem, SkipReason, VolumeChange,
+};

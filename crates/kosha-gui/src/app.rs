@@ -46,7 +46,10 @@ use crate::state::{Duplicates, KeyIntent, PendingAction, Phase, Ready, Search, S
 use crate::theme::{Category, Palette, metrics};
 use crate::treemap::{self, Rect};
 
+mod cleanup_plan;
+mod cleanup_receipt;
 mod history;
+mod monitoring;
 #[cfg(feature = "remote-client")]
 mod remote_scan;
 mod volume_space;
@@ -188,11 +191,17 @@ pub struct KoshaApp {
     deep_scan: Option<DeepScanJob>,
     pub(crate) folder_comparison: Option<crate::folder_comparison::View>,
     volume_history: Option<history::View>,
+    monitoring: Option<monitoring::View>,
+    scheduled_monitoring: Option<Arc<monitoring::ScheduledCheck>>,
     volume_space: Option<(
         std::sync::Weak<SizeTree>,
         kosha_core::volume_space::SpaceSummary,
     )>,
     volume_space_open: bool,
+    last_cleanup: Option<kosha_fsops::ExecutionReport>,
+    cleanup_draft: Option<cleanup_plan::Draft>,
+    cleanup_plan_open: bool,
+    cleanup_receipt_open: bool,
     /// The column edge being dragged, if any.
     ///
     /// Held on the view rather than on the header element because a drag
@@ -480,8 +489,14 @@ impl KoshaApp {
             deep_scan: None,
             folder_comparison: None,
             volume_history: None,
+            monitoring: None,
+            scheduled_monitoring: None,
             volume_space: None,
             volume_space_open: false,
+            last_cleanup: None,
+            cleanup_draft: None,
+            cleanup_plan_open: false,
+            cleanup_receipt_open: false,
             column_drag: None,
             pending_query: start.query,
             pending_duplicates: start.duplicates,
@@ -1893,6 +1908,11 @@ impl KoshaApp {
             commands::Action::SaveQuery(query) => self.save_query(&query, window, cx),
             commands::Action::ForgetQuery(query) => self.forget_query(&query, window, cx),
             commands::Action::OpenHelp => self.open_help(window, cx),
+            commands::Action::Monitoring => self.open_monitoring(cx),
+            commands::Action::CancelScheduledMonitoring => {
+                self.cancel_scheduled_monitoring();
+                cx.notify();
+            }
             commands::Action::CleanupGuide => self.open_handoff(None, cx),
             commands::Action::AskAi => {
                 if let Some(ready) = self.state.ready() {
@@ -2397,6 +2417,9 @@ impl KoshaApp {
     pub(crate) fn open_snapshot(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.volume_history = None;
         self.volume_space_open = false;
+        self.cleanup_draft = None;
+        self.cleanup_plan_open = false;
+        self.cleanup_receipt_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2599,8 +2622,25 @@ impl KoshaApp {
         options: kosha_core::ScanOptions,
         cx: &mut Context<Self>,
     ) {
+        self.scan_with_method(path, options, false, cx);
+    }
+
+    fn scan_with_method(
+        &mut self,
+        path: PathBuf,
+        options: kosha_core::ScanOptions,
+        fast_ntfs: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_scheduled_monitoring();
+        if self.monitoring.is_some() {
+            self.close_monitoring(cx);
+        }
         self.volume_history = None;
         self.volume_space_open = false;
+        self.cleanup_draft = None;
+        self.cleanup_plan_open = false;
+        self.cleanup_receipt_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2655,6 +2695,7 @@ impl KoshaApp {
             path: path.clone(),
             progress: None,
             cancel: Arc::clone(&cancel),
+            fast_ntfs,
         };
 
         let scan_path = path.clone();
@@ -2701,6 +2742,7 @@ impl KoshaApp {
                     kosha_core::wsl::scan_native(&scan_path, options, &cancel),
                     None,
                     None,
+                    None,
                 );
             }
             let history = track_history
@@ -2709,12 +2751,40 @@ impl KoshaApp {
             let space = track_history
                 .then(|| kosha_core::volume_space::SpaceCapture::start(&scan_path))
                 .flatten();
-            let scanned = Scanner::new(options)
-                .with_cancel(cancel)
-                .with_progress(tx)
-                .scan(&scan_path);
+            let walk = || {
+                Scanner::new(options)
+                    .with_cancel(Arc::clone(&cancel))
+                    .with_progress(tx)
+                    .scan(&scan_path)
+            };
+            #[cfg(all(windows, feature = "fast-ntfs-worker"))]
+            let (scanned, fast_notice) = if fast_ntfs {
+                let outcome = kosha_core::ntfs_worker::request_for_root(&scan_path)
+                    .ok_or_else(|| std::io::Error::other("the selected drive is unavailable"))
+                    .and_then(|request| {
+                        kosha_core::ntfs_worker::scan_with_worker(&request, &|| {
+                            cancel.load(std::sync::atomic::Ordering::Relaxed)
+                        })
+                    });
+                match outcome {
+                    Ok(tree) => (Ok(tree), None),
+                    Err(_) if cancel.load(std::sync::atomic::Ordering::Relaxed) => {
+                        (Err(kosha_core::ScanError::Cancelled), None)
+                    }
+                    Err(error) => (
+                        walk(),
+                        Some(format!(
+                            "Fast NTFS unavailable ({error}). Used a standard scan."
+                        )),
+                    ),
+                }
+            } else {
+                (walk(), None)
+            };
+            #[cfg(not(all(windows, feature = "fast-ntfs-worker")))]
+            let (scanned, fast_notice) = (walk(), None);
             let summary = space.and_then(|capture| capture.finish(scanned.as_ref().ok()?));
-            (scanned, history, summary)
+            (scanned, history, summary, fast_notice)
         });
 
         // Poll progress on a timer rather than waking the UI per directory.
@@ -2756,7 +2826,7 @@ impl KoshaApp {
         .detach();
 
         cx.spawn(async move |this, cx| {
-            let (outcome, history, summary) = task.await;
+            let (outcome, history, summary, fast_notice) = task.await;
             this.update(cx, |this, cx| {
                 if this.load_generation != generation {
                     return;
@@ -2774,6 +2844,11 @@ impl KoshaApp {
                             this.save_tracked_history(history, Arc::clone(&tree), generation, cx);
                         }
                         this.scan_finished(tree, cx);
+                        if !completion_cancel.load(std::sync::atomic::Ordering::Relaxed)
+                            && let Some(notice) = fast_notice
+                        {
+                            this.state.notice = Some(notice);
+                        }
                     }
                     // Cancelling is something the user did, not something that went
                     // wrong, and a failure screen saying "the scan was cancelled"
@@ -3388,8 +3463,15 @@ impl KoshaApp {
     /// Browsing a drive prefers its last record. Explicit scan commands and
     /// Shift-click bypass this path, and an unreadable cache is never a wall.
     fn open_drive(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+        self.cancel_scheduled_monitoring();
+        if self.monitoring.is_some() {
+            self.close_monitoring(cx);
+        }
         self.volume_history = None;
         self.volume_space_open = false;
+        self.cleanup_draft = None;
+        self.cleanup_plan_open = false;
+        self.cleanup_receipt_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -3445,8 +3527,13 @@ impl KoshaApp {
     }
 
     fn open_folder_comparison(&mut self, cx: &mut Context<Self>) {
+        if self.monitoring.is_some() {
+            self.close_monitoring(cx);
+        }
         self.volume_history = None;
         self.volume_space_open = false;
+        self.cleanup_plan_open = false;
+        self.cleanup_receipt_open = false;
         if self.folder_comparison.is_none() {
             self.folder_comparison = Some(crate::folder_comparison::View::new(self.state.ready()));
         }
@@ -3455,6 +3542,7 @@ impl KoshaApp {
 
     fn background_activities(&self) -> Vec<ActivityRow> {
         let mut rows = Vec::new();
+        rows.extend(self.monitoring_activity());
         if let Some(stopping) = self
             .folder_comparison
             .as_ref()
@@ -4150,6 +4238,29 @@ impl KoshaApp {
             return;
         }
 
+        if self.cleanup_plan_open {
+            if key == "escape" {
+                self.cleanup_plan_open = false;
+                cx.notify();
+            }
+            return;
+        }
+
+        if self.cleanup_receipt_open {
+            if key == "escape" {
+                self.cleanup_receipt_open = false;
+                cx.notify();
+            }
+            return;
+        }
+
+        if self.monitoring.is_some() {
+            if key == "escape" {
+                self.close_monitoring(cx);
+            }
+            return;
+        }
+
         if self.volume_history.is_some() {
             if key == "escape" {
                 self.volume_history = None;
@@ -4264,50 +4375,63 @@ impl KoshaApp {
         } else if !self.state.mode().is_read_write() {
             self.state.notice = Some("Read-only. Switch modes in the title bar to act.".into());
         } else {
-            let tree = Arc::clone(tree);
-            let root = self.state.session.root().to_path_buf();
             let title = format!("Move {} to Trash", format::printable(&tree.name_lossy(id)));
-            self.state.notice = Some("Preparing cleanup preview… Escape cancels.".into());
-            self.planning_action = Some(cx.spawn(async move |this, cx| {
-                let checked = Arc::clone(&tree);
-                let pending = cx
-                    .background_executor()
-                    .spawn(async move {
-                        // Planning grants no write permission. Execution uses only
-                        // the real session's grant after the user confirms.
-                        let session = kosha_fsops::Session::new(root);
-                        let plan = ActionPlan::build(&checked, &[id], Action::Trash, &session);
-                        let preview = plan.dry_run();
-                        PendingAction {
-                            title,
-                            plan,
-                            preview,
-                            tree: checked,
-                        }
-                    })
-                    .await;
-                this.update(cx, |app, cx| {
-                    app.planning_action = None;
-                    app.state.notice = None;
-                    if app.state.mode().is_read_write()
-                        && app.state.pending.is_none()
-                        && !app.settings_open
-                        && !app.help_open
-                        && !app.owners_open
-                        && !app.command_open
-                        && !app.state.asking_to_unlock
-                        && app.state.ready().is_some_and(|ready| {
-                            Arc::ptr_eq(&ready.tree, &tree) && !ready.source.is_past()
-                        })
-                    {
-                        app.state.pending = Some(pending);
-                    }
-                    cx.notify();
-                })
-                .ok();
-            }));
+            self.prepare_cleanup(Arc::clone(tree), vec![id], Action::Trash, title, cx);
         }
         cx.notify();
+    }
+
+    fn prepare_cleanup(
+        &mut self,
+        tree: Arc<SizeTree>,
+        nodes: Vec<NodeId>,
+        action: Action,
+        title: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.planning_action.is_some() || self.state.pending.is_some() {
+            return;
+        }
+        let root = self.state.session.root().to_path_buf();
+        self.state.notice = Some("Preparing cleanup preview… Escape cancels.".into());
+        self.planning_action = Some(cx.spawn(async move |this, cx| {
+            let checked = Arc::clone(&tree);
+            let pending = cx
+                .background_executor()
+                .spawn(async move {
+                    // Planning grants no write permission. Execution uses only
+                    // the real session's grant after the user confirms.
+                    let session = kosha_fsops::Session::new(root);
+                    let plan = ActionPlan::build(&checked, &nodes, action, &session);
+                    let preview = plan.dry_run();
+                    PendingAction {
+                        title,
+                        plan,
+                        preview,
+                        tree: checked,
+                    }
+                })
+                .await;
+            this.update(cx, |app, cx| {
+                app.planning_action = None;
+                app.state.notice = None;
+                if app.state.mode().is_read_write()
+                    && app.state.pending.is_none()
+                    && !app.settings_open
+                    && !app.help_open
+                    && !app.owners_open
+                    && !app.command_open
+                    && !app.state.asking_to_unlock
+                    && app.state.ready().is_some_and(|ready| {
+                        Arc::ptr_eq(&ready.tree, &tree) && !ready.source.is_past()
+                    })
+                {
+                    app.state.pending = Some(pending);
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     fn begin_action(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -4527,32 +4651,42 @@ impl KoshaApp {
         let Some(pending) = self.state.pending.take() else {
             return;
         };
+        if !self
+            .state
+            .ready()
+            .is_some_and(|ready| Arc::ptr_eq(&ready.tree, &pending.tree) && !ready.source.is_past())
+        {
+            self.state.notice = Some("The scan changed. Review the targets again.".into());
+            cx.notify();
+            return;
+        }
 
         let mut audit = AuditLog::open_default();
         let warning = pending.plan.cloud_warning();
         let report = match self.state.session.grant() {
-            Ok(grant) => match (including_cloud, warning) {
-                (true, Some(warning)) => {
-                    let confirmed = CloudConfirmed::from_dialog_acceptance(&warning);
-                    pending
-                        .plan
-                        .execute_including_cloud(&grant, &confirmed, &mut audit)
-                }
-                _ => pending.plan.execute(&grant, &mut audit),
-            },
+            Ok(grant) => {
+                let confirmed = warning
+                    .as_ref()
+                    .filter(|_| including_cloud)
+                    .map(CloudConfirmed::from_dialog_acceptance);
+                pending
+                    .plan
+                    .execute_measured(&grant, confirmed.as_ref(), &mut audit)
+            }
             Err(error) => {
                 self.state.notice = Some(error.to_string());
                 cx.notify();
                 return;
             }
         };
-        self.state.notice = Some(report.summary());
+        self.last_cleanup = Some(report);
 
         // Rescanning the whole root rather than patching the tree in place:
         // a rescan is seconds at worst and cannot disagree with the disk, which
         // is not true of any incremental update we could write.
         let root = self.state.session.root().to_path_buf();
         self.scan(root, cx);
+        self.state.notice = Some("Cleanup finished. Review the receipt for the outcome.".into());
     }
 
     pub(crate) fn cancel_action(&mut self, cx: &mut Context<Self>) {
@@ -4703,7 +4837,9 @@ impl Render for KoshaApp {
         // rail that width took away.
         let separate_view = self.folder_comparison.is_some()
             || self.volume_history.is_some()
-            || (self.volume_space_open && self.current_volume_space().is_some());
+            || (self.volume_space_open && self.current_volume_space().is_some())
+            || self.cleanup_receipt_open
+            || self.cleanup_plan_open;
         let rails = fits.opened(
             self.settings.show_places && !separate_view,
             self.settings.show_insights && !separate_view,
@@ -4916,9 +5052,17 @@ impl KoshaApp {
                                 && !self.volume_space_open
                                 && !matches!(self.state.phase, Phase::Idle))
                             .then(|| {
-                                crate::ui::button("compare-folders-toolbar", palette)
+                                title_button("compare-folders-toolbar", palette)
                                     .debug_selector(|| "compare-folders-toolbar".into())
-                                    .child("Compare folders…")
+                                    .aria_label("Compare folders")
+                                    .tooltip(|window, cx| {
+                                        tooltip("Compare folders…").build(window, cx)
+                                    })
+                                    .child(
+                                        Icon::empty()
+                                            .path(crate::icons::COMPARE_FOLDERS)
+                                            .size(px(metrics::TITLE_ICON)),
+                                    )
                                     .on_click(
                                         cx.listener(|app, _, _, cx| app.open_folder_comparison(cx)),
                                     )
@@ -5403,11 +5547,14 @@ fn scanning(
     path: &std::path::Path,
     progress: Option<Progress>,
     reduce_motion: bool,
-    stopping: bool,
-    estimate: Option<crate::scan_timing::Estimate>,
-    reference_total: Option<u64>,
+    fast_ntfs: bool,
+    cancel: &AtomicBool,
+    timing: &crate::scan_timing::ScanTiming,
     cx: &mut Context<KoshaApp>,
 ) -> impl IntoElement {
+    let stopping = cancel.load(std::sync::atomic::Ordering::Relaxed);
+    let estimate = timing.estimate();
+    let reference_total = timing.reference_total();
     v_flex()
         .size_full()
         .items_center()
@@ -5424,6 +5571,8 @@ fn scanning(
                         .text_color(palette.text)
                         .child(if stopping {
                             "Stopping scan…"
+                        } else if fast_ntfs && progress.is_none() {
+                            "Starting Fast NTFS…"
                         } else {
                             "Scanning"
                         }),
@@ -5449,6 +5598,7 @@ fn scanning(
                         format::plural(p.entries as usize, "entry"),
                         format::plural(p.dirs_pending as usize, "directory"),
                     )),
+                    None if fast_ntfs => SharedString::from("Windows may ask for administrator consent."),
                     None => SharedString::from("Reading the first level…"),
                 }),
         )
@@ -5463,7 +5613,7 @@ fn scanning(
                     "Esc to cancel"
                 }),
         )
-        .when(!stopping, |view| {
+        .when(!stopping && (!fast_ntfs || progress.is_some()), |view| {
             view.child(
                 v_flex()
                     .items_center()
@@ -5841,6 +5991,8 @@ impl KoshaApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let path = volume.place.path.clone();
+        #[cfg(all(windows, feature = "fast-ntfs-worker"))]
+        let fast_root = path.clone();
         let active = self
             .state
             .ready()
@@ -5866,7 +6018,7 @@ impl KoshaApp {
             .usage
             .map(|usage| SharedString::from(format!("{:.0}%", usage.fraction_used() * 100.0)));
 
-        v_flex()
+        let row = v_flex()
             .id(("volume", index))
             .cursor_pointer()
             .px(px(8.0))
@@ -5933,7 +6085,41 @@ impl KoshaApp {
             })
             .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
                 this.start_scan(path.clone(), event, cx);
-            }))
+            }));
+        #[cfg(all(windows, feature = "fast-ntfs-worker"))]
+        {
+            static PACKAGED_WORKER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *PACKAGED_WORKER.get_or_init(kosha_core::ntfs_worker::worker_available) {
+                let app = cx.entity().downgrade();
+                return row
+                    .context_menu(move |menu, _, cx| {
+                        let Some(app) = app.upgrade() else {
+                            return menu;
+                        };
+                        let allowed = !app.read(cx).is_scanning()
+                            && kosha_core::ntfs_worker::request_for_root(&fast_root).is_some();
+                        let path = fast_root.clone();
+                        menu.item(
+                            PopupMenuItem::new("Fast NTFS scan…")
+                                .disabled(!allowed)
+                                .on_click(move |_, _, cx| {
+                                    app.update(cx, |app, cx| {
+                                        if !app.is_scanning() {
+                                            app.scan_with_method(
+                                                path.clone(),
+                                                kosha_core::ScanOptions::default(),
+                                                true,
+                                                cx,
+                                            );
+                                        }
+                                    });
+                                }),
+                        )
+                    })
+                    .into_any_element();
+            }
+        }
+        row.into_any_element()
     }
 }
 
@@ -5968,7 +6154,20 @@ impl KoshaApp {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let body = if let Some(view) = &self.folder_comparison {
+        let body = if let Some(view) = &self.monitoring {
+            monitoring::render(view, palette, cx)
+        } else if let Some(draft) = self
+            .current_cleanup_draft()
+            .filter(|_| self.cleanup_plan_open)
+        {
+            cleanup_plan::render(draft, self.state.mode().is_read_write(), palette, cx)
+        } else if let Some(receipt) = self
+            .last_cleanup
+            .as_ref()
+            .filter(|_| self.cleanup_receipt_open)
+        {
+            cleanup_receipt::render(receipt, palette, cx)
+        } else if let Some(view) = &self.folder_comparison {
             crate::folder_comparison::render(view, palette, cx)
         } else if let Some(view) = &self.volume_history {
             history::render(view, palette, cx)
@@ -6028,14 +6227,15 @@ impl KoshaApp {
                     path,
                     progress,
                     cancel,
+                    fast_ntfs,
                 } => scanning(
                     palette,
                     path,
                     *progress,
                     cx.reduce_motion(),
-                    cancel.load(std::sync::atomic::Ordering::Relaxed),
-                    self.scan_timing.estimate(),
-                    self.scan_timing.reference_total(),
+                    *fast_ntfs,
+                    cancel,
+                    &self.scan_timing,
                     cx,
                 )
                 .into_any_element(),
@@ -8776,6 +8976,28 @@ impl KoshaApp {
                         )
                     }),
             )
+            .when(
+                actionable
+                    && self.can_draft_cleanup()
+                    && (insight.action != Suggested::Compress
+                        || kosha_core::supports_compression()),
+                |card| {
+                    let queued = self
+                        .current_cleanup_draft()
+                        .is_some_and(|draft| draft.contains(insight));
+                    card.child(
+                        crate::ui::button(("queue-cleanup", index), palette)
+                            .child(if queued {
+                                "Remove from plan"
+                            } else {
+                                "Add to cleanup plan"
+                            })
+                            .on_click(cx.listener(move |app, _, _, cx| {
+                                app.toggle_cleanup_finding(index, cx)
+                            })),
+                    )
+                },
+            )
     }
 }
 
@@ -8975,6 +9197,49 @@ impl KoshaApp {
             .border_color(palette.hairline)
             .text_size(metrics::scaled(metrics::TEXT_XS))
             .text_color(palette.text_faint)
+            .when(
+                !self.cleanup_plan_open
+                    && !self.cleanup_receipt_open
+                    && self.folder_comparison.is_none()
+                    && self.volume_history.is_none()
+                    && !self.volume_space_open
+                    && self.current_cleanup_draft().is_some(),
+                |bar| {
+                    bar.child(
+                        crate::ui::button("cleanup-plan-open", palette)
+                            .child(format!(
+                                "Cleanup plan ({})",
+                                self.current_cleanup_draft().map_or(0, |draft| draft.len())
+                            ))
+                            .on_click(cx.listener(|app, _, _, cx| {
+                                app.cleanup_plan_open = true;
+                                app.state.notice = None;
+                                cx.notify();
+                            })),
+                    )
+                },
+            )
+            .children(
+                self.last_cleanup
+                    .as_ref()
+                    .filter(|_| {
+                        !self.cleanup_receipt_open
+                            && !self.cleanup_plan_open
+                            && !self.is_scanning()
+                            && self.folder_comparison.is_none()
+                            && self.volume_history.is_none()
+                            && !self.volume_space_open
+                    })
+                    .map(|_| {
+                        crate::ui::button("cleanup-receipt-open", palette)
+                            .child("Cleanup receipt")
+                            .on_click(cx.listener(|app, _, _, cx| {
+                                app.cleanup_receipt_open = true;
+                                app.state.notice = None;
+                                cx.notify();
+                            }))
+                    }),
+            )
             // The one part of this bar that may shrink. The legend is a key
             // and a half-drawn key is useless; the narrow-window hint is an
             // explanation and half an explanation reads as a rendering fault.
@@ -9373,6 +9638,7 @@ pub fn open(
         let view: Entity<KoshaApp> = cx.new(|cx| {
             let path = start.path.clone();
             let mut app = KoshaApp::new(window, loaded, start, theme, cx);
+            app.start_monitoring_schedule(cx);
             app.check_updates(false, cx);
             #[cfg(target_os = "macos")]
             cx.observe_window_activation(window, |app, window, cx| {

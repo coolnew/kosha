@@ -33,9 +33,14 @@ windows-sys = { version = "0.60", features = [
     # The token, for "is this process elevated" and for asking it to enable
     # SeBackupPrivilege before a raw volume read.
     "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    "Win32_System_Pipes",
+    "Win32_System_RemoteDesktop",
     # Where WSL records which distributions exist and where their disk images
     # are. Read rather than asked of `wsl.exe`, which would start the service.
     "Win32_System_Registry",
@@ -45,9 +50,20 @@ windows-sys = { version = "0.60", features = [
     "Win32_System_Time",
 ] }
 
+[dependencies.serde]
+workspace = true
+
+[dependencies.serde_json]
+workspace = true
+
 [dev-dependencies]
 tempfile = "3"
-serde_json.workspace = true
 
 [features]
 default = []
+fast-ntfs-worker = ["windows-sys/Win32_System_Com", "windows-sys/Win32_UI_Shell"]
+
+[[bin]]
+name = "kosha-ntfs-worker"
+path = "src/bin/ntfs_worker.rs"
+required-features = ["fast-ntfs-worker"]

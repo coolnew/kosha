@@ -11,13 +11,16 @@
 //! why it was slow. The caller puts the reason on the tree and the interface
 //! reads it off there — what actually happened, rather than what might.
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::error::ScanError;
 use crate::platform;
 use crate::scan::{Progress, ScanOptions};
 use crate::tree::{SizeTree, Unavailable};
+use crate::volume_history::VolumeId;
 
 use super::{build, mft, security, volume};
 
@@ -32,15 +35,75 @@ pub fn scan(
     publish: &dyn Fn(Progress),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<SizeTree, ScanError> {
-    let started = Instant::now();
-
     let drive = volume::drive_of(root).ok_or(ScanError::Strategy(Unavailable::NoDriveLetter))?;
+    let device = format!(r"\\.\{}", drive.to_string_lossy());
+    scan_device(root, OsStr::new(&device), options, publish, cancelled)
+}
+
+/// Scan a single drive root approved by the initiating user. The expected
+/// identity comes from the drive selection before the privilege transition.
+/// Open the verified volume by GUID so a drive-letter reassignment cannot
+/// redirect the privileged raw read.
+pub fn scan_selected_volume(
+    root: &Path,
+    expected_identity: &str,
+    publish: &dyn Fn(Progress),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SizeTree, ScanError> {
+    let root_text = root.as_os_str().as_encoded_bytes();
+    let [letter, b':', b'\\'] = root_text else {
+        return Err(ScanError::Strategy(Unavailable::NoDriveLetter));
+    };
+    if !letter.is_ascii_alphabetic() {
+        return Err(ScanError::Strategy(Unavailable::NoDriveLetter));
+    }
+    let root = PathBuf::from(format!("{}:\\", letter.to_ascii_uppercase() as char));
+    if cancelled() {
+        return Err(ScanError::Cancelled);
+    }
+    let unavailable = || ScanError::Root {
+        path: root.clone(),
+        source: io::Error::other("selected volume is unavailable or has changed"),
+    };
+    let identity = VolumeId::at_root(&root).ok_or_else(unavailable)?;
+    if identity.as_str() != expected_identity {
+        return Err(unavailable());
+    }
+    let guid = identity
+        .as_str()
+        .strip_prefix("windows:")
+        .ok_or_else(unavailable)?;
+    let device = format!(r"\\?\Volume{{{guid}}}");
+    let tree = scan_device(
+        &root,
+        OsStr::new(&device),
+        &ScanOptions::default(),
+        publish,
+        cancelled,
+    )?;
+    if cancelled() || tree.stats().cancelled {
+        return Err(ScanError::Cancelled);
+    }
+    if VolumeId::at_root(&root).as_ref() != Some(&identity) {
+        return Err(unavailable());
+    }
+    Ok(tree)
+}
+
+fn scan_device(
+    root: &Path,
+    device: &OsStr,
+    options: &ScanOptions,
+    publish: &dyn Fn(Progress),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<SizeTree, ScanError> {
+    let started = Instant::now();
     if !platform::elevated() {
         return Err(ScanError::Strategy(Unavailable::NotElevated));
     }
     platform::enable_backup_privilege();
 
-    let device = volume::Volume::open(&drive).map_err(|error| match error.kind() {
+    let device = volume::Volume::open_device(device).map_err(|error| match error.kind() {
         std::io::ErrorKind::PermissionDenied => ScanError::Strategy(Unavailable::NotElevated),
         _ => ScanError::Strategy(Unavailable::Unreadable),
     })?;
@@ -81,6 +144,9 @@ pub fn scan(
             _ => ScanError::Strategy(Unavailable::Unreadable),
         })?;
 
+    if cancelled() {
+        return Err(ScanError::Cancelled);
+    }
     build::consolidate(&mut table);
 
     // One read of `$Secure`, only when somebody asked who owns what. Failing to

@@ -37,6 +37,7 @@ pub enum Phase {
         path: PathBuf,
         progress: Option<Progress>,
         cancel: Arc<AtomicBool>,
+        fast_ntfs: bool,
     },
     /// A tree is loaded and browsable.
     Ready(Ready),

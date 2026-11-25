@@ -256,7 +256,7 @@ jobs:
           python3 - <<'PY'
           import os, runpy
           from pathlib import Path
-          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("target/release-artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true")
+          runpy.run_path("xtask-release.py")["verify_release_assets"](Path("target/release-artifacts"), os.environ["GITHUB_SHA"], expect_msix=os.environ.get("KOSHA_MSIX_STORE_UPLOAD") == "true", require_msix_worker=True)
           PY
       - name: Attest the final update packages
         id: update-provenance

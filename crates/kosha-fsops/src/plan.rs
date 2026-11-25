@@ -9,10 +9,12 @@
 //! user has read what it says. "Delete 91,204 files" should be a sentence you
 //! get to read before it happens.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use kosha_core::{NodeId, SizeTree};
+use kosha_core::volume_history::VolumeId;
+use kosha_core::{DiskUsage, NodeId, SizeTree};
 
 use crate::audit::AuditLog;
 use crate::cloud::{self, CloudConfirmed, CloudRisk, CloudWarning, ItemCloudRisk};
@@ -177,8 +179,9 @@ impl ActionPlan {
     /// without a [`CloudConfirmed`].
     pub fn build(tree: &SizeTree, nodes: &[NodeId], action: Action, session: &Session) -> Self {
         let root = session.root().to_path_buf();
-        let mut items = Vec::with_capacity(nodes.len());
+        let mut candidates = Vec::with_capacity(nodes.len());
         let mut rejected = Vec::new();
+        let mut selected = HashSet::new();
 
         // One stack for the whole plan, and a list that grows only with
         // cloud-only files: nothing is allocated per node walked.
@@ -191,19 +194,42 @@ impl ActionPlan {
             match guard::check_for(&path, &root, Some(action)) {
                 Ok(resolved) => match Fingerprint::of(&resolved) {
                     Ok(expected) => {
-                        accepted.push(id);
-                        items.push(PlanItem {
-                            path: resolved,
-                            action,
-                            bytes: tree.node(id).allocated,
-                            expected,
-                            cloud: cloud::item_risk(tree, id, action, &mut stack, &mut offline),
-                        });
+                        if !selected.insert(resolved.clone()) {
+                            rejected.push((resolved, "already selected".into()));
+                            continue;
+                        }
+                        candidates.push((
+                            id,
+                            PlanItem {
+                                path: resolved,
+                                action,
+                                bytes: tree.node(id).allocated,
+                                expected,
+                                cloud: None,
+                            },
+                        ));
                     }
                     Err(e) => rejected.push((path, e.to_string())),
                 },
                 Err(refusal) => rejected.push((path, refusal.to_string())),
             }
+        }
+
+        let mut items = Vec::with_capacity(candidates.len());
+        for (id, mut item) in candidates {
+            if let Some(ancestor) = item
+                .path
+                .ancestors()
+                .skip(1)
+                .find(|path| selected.contains(*path))
+            {
+                let reason = format!("included in selected folder {}", ancestor.display());
+                rejected.push((item.path, reason));
+                continue;
+            }
+            item.cloud = cloud::item_risk(tree, id, action, &mut stack, &mut offline);
+            accepted.push(id);
+            items.push(item);
         }
 
         let plan_id = cloud::next_plan_id();
@@ -342,7 +368,7 @@ impl ActionPlan {
     /// these figures, and the only way to execute is through it. To preview
     /// the other choice, dry-run [`ActionPlan::without_cloud_only`].
     pub fn dry_run(&self) -> ExecutionReport {
-        self.run(None)
+        self.run(None, false)
     }
 
     /// Execute. Requires read-write mode, expressed as a grant.
@@ -351,11 +377,14 @@ impl ActionPlan {
     /// with [`SkipReason::CloudNotConfirmed`]. It needs
     /// [`ActionPlan::execute_including_cloud`].
     pub fn execute(&self, grant: &ReadWriteGrant<'_>, audit: &mut AuditLog) -> ExecutionReport {
-        self.run(Some(Live {
-            _grant: grant,
-            cloud: None,
-            audit,
-        }))
+        self.run(
+            Some(Live {
+                _grant: grant,
+                cloud: None,
+                audit,
+            }),
+            false,
+        )
     }
 
     /// Execute a plan whose cloud-only files the user has accepted.
@@ -369,14 +398,34 @@ impl ActionPlan {
         confirmed: &CloudConfirmed,
         audit: &mut AuditLog,
     ) -> ExecutionReport {
-        self.run(Some(Live {
-            _grant: grant,
-            cloud: Some(confirmed),
-            audit,
-        }))
+        self.run(
+            Some(Live {
+                _grant: grant,
+                cloud: Some(confirmed),
+                audit,
+            }),
+            false,
+        )
     }
 
-    fn run(&self, live: Option<Live<'_, '_>>) -> ExecutionReport {
+    /// Observe free space around the same guarded execution used by the preview.
+    pub fn execute_measured(
+        &self,
+        grant: &ReadWriteGrant<'_>,
+        confirmed: Option<&CloudConfirmed>,
+        audit: &mut AuditLog,
+    ) -> ExecutionReport {
+        self.run(
+            Some(Live {
+                _grant: grant,
+                cloud: confirmed,
+                audit,
+            }),
+            true,
+        )
+    }
+
+    fn run(&self, live: Option<Live<'_, '_>>, measure: bool) -> ExecutionReport {
         let dry_run = live.is_none();
         let (confirmed, mut audit) = match live {
             Some(live) => (live.cloud, Some(live.audit)),
@@ -398,6 +447,7 @@ impl ActionPlan {
             dry_run,
             ..Default::default()
         };
+        let before = (measure && !dry_run && !cloud_blocked).then(|| self.observe_target_volumes());
 
         for item in &self.items {
             let mut reclaimed = item.bytes;
@@ -446,7 +496,71 @@ impl ActionPlan {
 
             report.tally(item, reclaimed, outcome);
         }
+        if let Some((before, unobserved)) = before
+            && report.succeeded + report.partial + report.failed > 0
+        {
+            report.unobserved_volume_targets = unobserved;
+            for (volume, root, first, sampled_before) in before {
+                let after = kosha_core::disk_usage(&root);
+                let after = match (first, after) {
+                    (Some(first), Some(after))
+                        if first.total == after.total
+                            && after.free <= after.total
+                            && VolumeId::at_root(&root).as_ref() == Some(&volume) =>
+                    {
+                        Some(after.free)
+                    }
+                    _ => None,
+                };
+                let observation = VolumeChange {
+                    root,
+                    before_free: first.map(|usage| usage.free),
+                    after_free: after,
+                    sampled_before,
+                    sampled_after: kosha_core::format::now_rfc3339(),
+                };
+                if let Some(audit) = audit.as_deref_mut() {
+                    audit.record_volume_change(&observation);
+                }
+                report.volume_changes.push(observation);
+            }
+        }
         report
+    }
+
+    fn observe_target_volumes(&self) -> (Vec<VolumeBaseline>, usize) {
+        use std::collections::HashMap;
+
+        let mut parents = HashMap::new();
+        let mut seen = HashSet::new();
+        let mut volumes = Vec::new();
+        let mut unobserved = 0;
+        for item in &self.items {
+            let Some(parent) = item.path.parent() else {
+                unobserved += 1;
+                continue;
+            };
+            // Removal affects the directory entry on the parent filesystem.
+            // Resolve that surviving path without following the target link.
+            match parents
+                .entry(parent)
+                .or_insert_with(|| VolumeId::containing(parent))
+            {
+                Some((volume, root)) if seen.insert(volume.clone()) => {
+                    let counters =
+                        kosha_core::disk_usage(root).filter(|usage| usage.free <= usage.total);
+                    volumes.push((
+                        volume.clone(),
+                        root.clone(),
+                        counters,
+                        kosha_core::format::now_rfc3339(),
+                    ));
+                }
+                Some(_) => {}
+                None => unobserved += 1,
+            }
+        }
+        (volumes, unobserved)
     }
 
     /// Re-check an item immediately before acting on it.
@@ -472,6 +586,8 @@ impl ActionPlan {
         Ok(())
     }
 }
+
+type VolumeBaseline = (VolumeId, PathBuf, Option<DiskUsage>, String);
 
 /// What a real (not dry) run holds: the grant that permits it, the cloud
 /// token if one was given, and the log it writes to.
@@ -796,6 +912,24 @@ pub struct ExecutionReport {
     pub bytes_examined: u64,
     /// Per-item detail, in plan order.
     pub details: Vec<(PathBuf, Outcome)>,
+    /// Filesystem-wide observations, kept apart from action estimates.
+    pub volume_changes: Vec<VolumeChange>,
+    pub unobserved_volume_targets: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct VolumeChange {
+    pub root: PathBuf,
+    pub before_free: Option<u64>,
+    pub after_free: Option<u64>,
+    pub sampled_before: String,
+    pub sampled_after: String,
+}
+
+impl VolumeChange {
+    pub fn delta(&self) -> Option<i128> {
+        Some(i128::from(self.after_free?) - i128::from(self.before_free?))
+    }
 }
 
 impl ExecutionReport {
@@ -849,13 +983,28 @@ impl ExecutionReport {
     /// happened, because on every supported platform the trash is on the same
     /// volume and the space does not come back until it is emptied.
     pub fn summary(&self) -> String {
+        self.summarize(false)
+    }
+
+    /// Describe item accounting as an estimate alongside volume observations.
+    pub fn measured_summary(&self) -> String {
+        self.summarize(true)
+    }
+
+    fn summarize(&self, measured: bool) -> String {
         use kosha_core::format::bytes;
 
         let mut parts = Vec::new();
         if self.bytes_freed > 0 {
             parts.push(format!(
                 "{} {}",
-                if self.dry_run { "would free" } else { "freed" },
+                if self.dry_run {
+                    "would free"
+                } else if measured {
+                    "estimated released allocation"
+                } else {
+                    "freed"
+                },
                 bytes(self.bytes_freed),
             ));
         }

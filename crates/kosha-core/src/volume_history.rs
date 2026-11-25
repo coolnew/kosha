@@ -10,7 +10,7 @@ use crate::{DiskUsage, SizeTree, Strategy};
 
 /// A machine-local, platform-qualified identity obtained from a mounted volume.
 /// A missing identity must never be replaced with the drive letter or path.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct VolumeId(String);
 
 impl VolumeId {
@@ -23,6 +23,51 @@ impl VolumeId {
     pub fn at_root(root: &Path) -> Option<Self> {
         persistent_id(root).map(Self)
     }
+
+    /// Resolve the persistent identity and mount path for an existing path.
+    pub fn containing(path: &Path) -> Option<(Self, PathBuf)> {
+        let root = containing_root(path)?;
+        Some((Self::at_root(&root)?, root))
+    }
+}
+
+#[cfg(unix)]
+fn containing_root(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = path.canonicalize().ok()?;
+    let device = path.metadata().ok()?.dev();
+    let mut root = path.as_path();
+    for parent in path.ancestors().skip(1) {
+        if parent.metadata().ok()?.dev() != device {
+            break;
+        }
+        root = parent;
+    }
+    Some(root.to_path_buf())
+}
+
+#[cfg(windows)]
+fn containing_root(path: &Path) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW;
+
+    let path = path.canonicalize().ok()?;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut root = vec![0u16; 32768];
+    // SAFETY: wide is terminated and root is writable for the supplied size.
+    let ok = unsafe { GetVolumePathNameW(wide.as_ptr(), root.as_mut_ptr(), root.len() as u32) };
+    if ok == 0 {
+        return None;
+    }
+    let length = root.iter().position(|unit| *unit == 0)?;
+    Some(PathBuf::from(OsString::from_wide(&root[..length])))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn containing_root(_: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// Start the measurement before scanning, then confirm the same volume is

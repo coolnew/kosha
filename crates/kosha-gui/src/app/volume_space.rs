@@ -30,6 +30,8 @@ impl KoshaApp {
         if self.folder_comparison.is_some()
             || self.volume_history.is_some()
             || self.volume_space_open
+            || self.cleanup_plan_open
+            || self.cleanup_receipt_open
         {
             return None;
         }

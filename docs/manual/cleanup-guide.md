@@ -66,6 +66,21 @@ databases or installs an extension. Build-output
 findings remain in Insights with their manifest evidence. Kosha's file actions
 still require [Read-write and a preview](safety.md).
 
+## Review a cleanup plan
+
+On a live local scan, choose **Add to cleanup plan** on each actionable
+Insights card you want to review. Open **Cleanup plan** in the status bar to see
+the queued findings or remove them. Each plan uses one action. A new scan clears
+the plan because it may find different targets.
+
+![Cleanup plan reviewing two synthetic cache findings on macOS](images/gui-macos-cleanup-plan.png)
+
+Switch to **Read-write** and choose **Preview cleanup…**. The preview folds
+duplicate targets and targets already covered by a selected folder, so their
+allocation is counted once. Review the remaining targets, estimated size, and
+any skipped items before confirming. Moving files to Trash can leave their
+allocation on the same volume until Trash is emptied.
+
 ## Run guarded uv pruning in the desktop
 
 For a detected default uv cache, **Preview uv cache prune…** is available in
@@ -102,6 +117,21 @@ rescan** measures current state. Closing a finished result with Escape or the
 close button also rescans before returning to file actions. Snapshots, disk images, incomplete scans and
 elevated sessions never offer execution. npm/browser/session-history operations
 are not routed through this executor.
+
+## Review the cleanup receipt
+
+After a confirmed file cleanup, open **Cleanup receipt** in the status bar.
+The receipt separates the estimated allocation affected by the actions from
+the observed change in free space on each measurable volume. Moving files
+to Trash can leave them on the same volume, and other disk activity can
+change the free-space counters during cleanup. The audit log retains the
+exact before-and-after readings when the volume can be identified. The receipt
+rounds each displayed total independently and calculates the change from the
+original readings. Hover over either total to see its exact byte count.
+
+![Cleanup receipt showing before and after free space and the observed change for a synthetic cleanup on macOS](images/gui-macos-cleanup-receipt.png)
+
+![Windows cleanup receipt with the exact byte count visible on hover](images/gui-windows-cleanup-receipt.png)
 
 ## Ask an AI about a tile or entry
 

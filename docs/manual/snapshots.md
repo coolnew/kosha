@@ -260,13 +260,16 @@ contents. See [file locations](settings-and-files.md) for backup and removal.
 
 ### Compare two folders or snapshots
 
-Choose **Compare folders…** from the welcome screen or the toolbar. It is
+Choose **Compare folders…** from the welcome screen or select the two-folders
+icon in the title bar. Hover over the icon to see its label. Comparison is
 also available in the command palette (Ctrl+K or Command+K). If you open it
 while browsing a local scan or saved snapshot, Kosha fills in the left side
 with that source. For each side, choose **Folder…** for a live scan or
 **Snapshot…** to use a saved Kosha record. Choose **Compare** to run it, or
 **Swap sides** to reverse the direction. You can cancel from the comparison
 page or the background actions panel.
+
+![Folder comparison icon immediately to the left of Settings, with its Compare folders tooltip visible](images/gui-macos-compare-toolbar.png)
 
 ![The macOS welcome screen offers Compare folders alongside Scan home directory and Choose a folder](images/gui-macos-folder-comparison.png)
 

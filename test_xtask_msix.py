@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
 
 import importlib.util
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 from pathlib import Path
 import tempfile
@@ -16,6 +16,22 @@ spec.loader.exec_module(msix)
 
 
 class MsixTests(unittest.TestCase):
+    def test_worker_requires_elevation_and_default_virtualization(self):
+        argv = ["xtask-msix.py", "--binary-dir", "not-built", "--fast-ntfs-worker", "worker.exe"]
+        for flags in [[], ["--store-upload", "--allow-elevation", "--unvirtualized"], ["--allow-elevation", "--unvirtualized"],
+                      ["--allow-elevation", "--test-win32-runtime"]]:
+            with self.subTest(flags=flags), patch.object(msix.sys, "argv", argv + flags), \
+                 patch.object(msix, "fresh_output") as fresh, redirect_stderr(io.StringIO()) as errors:
+                self.assertEqual(msix.main(), 1)
+                self.assertIn("requires a classic package with allowElevation and default virtualization", errors.getvalue())
+                fresh.assert_not_called()
+
+    def test_store_upload_requires_worker(self):
+        argv = ["xtask-msix.py", "--binary-dir", "not-built", "--store-upload", "--allow-elevation"]
+        with patch.object(msix.sys, "argv", argv), redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(msix.main(), 1)
+        self.assertIn("Store upload requires the dedicated Fast NTFS worker", errors.getvalue())
+
     def test_dry_run_creates_nothing_and_never_runs_tools(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

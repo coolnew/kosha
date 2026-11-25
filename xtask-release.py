@@ -431,7 +431,7 @@ RELEASE_TARGETS = {"x86_64-unknown-linux-gnu": ".tar.gz",
 SOURCE_OWNER = "x86_64-unknown-linux-gnu"
 
 
-def verify_release_assets(root: Path, commit: str, expect_msix: bool = False) -> None:
+def verify_release_assets(root: Path, commit: str, expect_msix: bool = False, *, require_msix_worker: bool = False) -> None:
     """Verify the exact published inventory, with one producer for shared sources."""
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("Expected the full selected source commit")
@@ -475,22 +475,33 @@ def verify_release_assets(root: Path, commit: str, expect_msix: bool = False) ->
                 raise ValueError(f"SHA-256 sidecar mismatch: {name}")
             expected.update({name, name + ".sha256"})
     if expect_msix:
-        expected.update(verify_msix_upload(root, commit, version))
+        expected.update(verify_msix_upload(root, commit, version, require_worker=require_msix_worker))
     if {p.name for p in files} != expected:
         raise ValueError("Unexpected files in published release inventory")
 
 
-def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
-    """Verify Store-upload identity/provenance and the same binaries as the ZIP."""
+def verify_msix_upload(root: Path, commit: str, version: str, *, require_worker: bool = False) -> set[str]:
+    """Verify Store-upload identity, shared front ends and any Store worker."""
     metadata_name = "msix-store-upload.json"
     metadata = json.loads((root / metadata_name).read_text(encoding="utf-8"))
     name = f"kosha-v{version}-x64-store-upload.msix"
+    worker_stamp = metadata.get("fast_ntfs_worker_stamp")
+    has_worker = worker_stamp is not None
+    if require_worker and not has_worker:
+        raise ValueError("Store upload is missing the required Fast NTFS worker")
+    runtime = "packagedClassicApp" if has_worker else "win32App"
     if (metadata.get("schema") != "kosha.msix-store-upload.v1" or metadata.get("package") != name
             or metadata.get("commit") != commit or metadata.get("version") != version
             or metadata.get("publication_candidate") is not True or metadata.get("signed") is not False
             or metadata.get("diagnostic_probe") is not False or metadata.get("target") != "x86_64-pc-windows-msvc"
-            or metadata.get("runtime") != "win32App"):
+            or metadata.get("runtime") != runtime
+            or (has_worker and (metadata.get("unvirtualized_resources") is not False
+                               or not isinstance(worker_stamp, str)
+                               or worker_stamp != metadata.get("binary_stamp")))):
         raise ValueError("MSIX upload provenance/purpose does not match the public release")
+    if has_worker and module(ROOT / "xtask-package.py", "msix_worker_stamp").stamp_problems(
+            worker_stamp, version, commit, "x86_64-pc-windows-msvc"):
+        raise ValueError("Fast NTFS worker stamp does not match the public release")
     package, sidecar = root / name, root / (name + ".sha256")
     digest = hashlib.sha256(package.read_bytes()).hexdigest()
     if (digest != metadata.get("sha256") or type(metadata.get("bytes")) is not int
@@ -523,8 +534,25 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
         if msix.read("CONTACT.txt").decode("utf-8") != contact:
             raise ValueError("MSIX contact metadata mismatch")
         capabilities = {e.get("Name") for e in tree.findall("f:Capabilities/rescap:Capability", ns)}
-        if capabilities != {"runFullTrust", "allowElevation", "unvirtualizedResources"}:
+        expected_capabilities = {"runFullTrust", "allowElevation"}
+        if not has_worker:
+            expected_capabilities.add("unvirtualizedResources")
+        if capabilities != expected_capabilities:
             raise ValueError("MSIX restricted capability inventory mismatch")
+        worker_name = "kosha-ntfs-worker.exe"
+        if has_worker:
+            expected_exes = {"kosha.exe", "kosha-gui.exe", worker_name}
+            if {entry for entry in names if entry.lower().endswith(".exe")} != expected_exes:
+                raise ValueError("Fast NTFS MSIX executable inventory mismatch")
+            if any(element.tag.rsplit("}", 1)[-1] in {"FileSystemWriteVirtualization", "RegistryWriteVirtualization"}
+                   for element in tree.iter()):
+                raise ValueError("Fast NTFS MSIX must use default virtualization")
+            worker = msix.read(worker_name)
+            if hashlib.sha256(worker).hexdigest() != metadata.get("fast_ntfs_worker_sha256"):
+                raise ValueError("Fast NTFS worker digest mismatch")
+            module(ROOT / "xtask-windows.py", "msix_worker_imports").verify_bytes(worker)
+        elif any(entry.rsplit("/", 1)[-1].lower() == worker_name for entry in names):
+            raise ValueError("Undeclared Fast NTFS worker in MSIX")
         apps = tree.findall("f:Applications/f:Application", ns)
         if len(apps) != 1 or apps[0].get("Id") != "Kosha" or apps[0].get("Executable") != "kosha-gui.exe":
             raise ValueError("MSIX must advertise one visible desktop application")
@@ -547,7 +575,7 @@ def verify_msix_upload(root: Path, commit: str, version: str) -> set[str]:
             aliases[alias_name] = (extension.get("Executable"), alias.get("{" + ns["desktop4"] + "}Subsystem"))
         if aliases != {"kosha.exe": ("kosha.exe", "console")}:
             raise ValueError("MSIX execution alias targets/subsystems differ")
-        if any(app.get("{" + ns["uap10"] + "}RuntimeBehavior") != "win32App"
+        if any(app.get("{" + ns["uap10"] + "}RuntimeBehavior") != runtime
                or app.get("{" + ns["uap10"] + "}TrustLevel") != "mediumIL" for app in apps):
             raise ValueError("MSIX runtime mismatch")
         with zipfile.ZipFile(root / f"kosha-v{version}-x86_64-pc-windows-msvc.zip") as windows:
@@ -708,6 +736,10 @@ def main() -> int:
             module(root / "xtask-installer.py", "release_installer").numeric_version(version)
             plan["build"] += ["--target", windows.TARGET]
             plan["archives"].append("NSIS offline Setup EXE (static CRT)")
+        if args.msix_store:
+            plan["build"] += ["-p", "kosha-core", "--features",
+                              "kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker",
+                              "--bin", "kosha", "--bin", "kosha-gui", "--bin", "kosha-ntfs-worker"]
         print(json.dumps(plan, indent=2), flush=True)
         if not args.execute:
             return 0
@@ -762,7 +794,8 @@ def main() -> int:
         protected(root, before)
         if args.msix_store:
             msix_out = out / "msix-work"
-            run_command(root, [sys.executable, "xtask-msix.py", "--store-upload", "--allow-elevation", "--unvirtualized",
+            run_command(root, [sys.executable, "xtask-msix.py", "--store-upload", "--allow-elevation",
+                              "--fast-ntfs-worker", str(binary_dir / "kosha-ntfs-worker.exe"),
                               "--binary-dir", str(binary_dir), "--output-dir", str(msix_out), "--execute"], environment, before)
             for name in [f"kosha-v{version}-x64-store-upload.msix", f"kosha-v{version}-x64-store-upload.msix.sha256", "msix-store-upload.json"]:
                 (msix_out / name).rename(out / name)

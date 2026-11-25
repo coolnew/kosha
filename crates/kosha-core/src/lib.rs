@@ -49,9 +49,11 @@ mod image;
 /// ISO 9660, read out of a disc image.
 mod iso;
 pub mod json;
+pub mod monitoring;
 mod names;
 mod node;
 mod ntfs;
+pub mod ntfs_worker;
 pub mod owner;
 pub mod partition;
 pub mod path;
@@ -77,6 +79,8 @@ pub use builder::{BuildError, Entry, TreeBuilder};
 pub use error::ScanError;
 pub use names::{NameArena, is_valid_encoded_name, is_well_formed_wtf8};
 pub use node::{Flags, Node, NodeId};
+#[cfg(windows)]
+pub use ntfs::scan_selected_volume;
 pub use owner::{Owner, OwnerId, OwnerKind, Owners, Share};
 #[cfg(target_os = "macos")]
 pub use platform::macos_mounts;

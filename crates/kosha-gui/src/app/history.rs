@@ -104,6 +104,8 @@ impl KoshaApp {
         if self.volume_history.is_some()
             || self.folder_comparison.is_some()
             || self.volume_space_open
+            || self.cleanup_plan_open
+            || self.cleanup_receipt_open
         {
             return None;
         }
@@ -566,6 +568,7 @@ pub(super) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
                                     app.folder_comparison =
                                         Some(crate::folder_comparison::View::from_snapshots(
                                             paths.clone(),
+                                            "Drive observation",
                                         ));
                                     app.compare_folders(cx);
                                 }))

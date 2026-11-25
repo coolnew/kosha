@@ -56,11 +56,17 @@ incomplete results; some strategies return a cancellation result instead.
 | `--depth N` | Limit traversal depth; unvisited directories make the result incomplete |
 | `--decimal` | Display decimal units |
 | `--query-help` | Print the query-language fields, operators, and examples without scanning |
-| `--mft` | Request NTFS table reading on an elevated Windows process |
+| `--mft` | Request NTFS table reading on Windows. An installed MSIX that includes the Fast NTFS worker can ask for administrator consent when scanning a whole NTFS drive. |
 | `--image` | Request a supported disk-image strategy |
 | `--wsl-native` | On Windows, use the installed Linux CLI to scan a [whole WSL2 distribution](scanning.md#native-wsl2-scans) |
 
 The report identifies the strategy used or why a requested strategy was unavailable.
+
+For example, `kosha D:\ --mft --stats` requests Fast NTFS for the entire
+drive. On a package with the worker, Windows can ask for administrator
+consent for that scan. If consent is declined, Kosha walks the drive with
+its ordinary permissions. A folder scan or options that change scan
+coverage, such as `--depth` or `--no-hardlinks`, use the existing scanner.
 
 ### Read the scan report
 
@@ -268,6 +274,33 @@ the source machine and never offer an action; rules about this machine's
 allocation do not run. `--duplicates`, `--snapshot` and scan options are refused.
 See [importing listings](snapshots.md#imported-listings) for limits and what is
 recorded.
+
+## Scheduled storage monitoring
+
+Add a local drive or folder with at least one threshold in bytes.
+
+```sh
+kosha monitor add /path/to/folder daily --growth-bytes 1073741824
+kosha monitor list
+kosha monitor check 1
+kosha monitor show 1
+```
+
+Use the profile ID from `list`. Add `--low-space-bytes N` to alert when
+the containing filesystem has fewer than N bytes available. `update`
+replaces the cadence and enabled thresholds for an existing profile.
+Use `pause ID` and `resume ID` to control scanning.
+Use `remove ID` to stop monitoring that location permanently. Its saved
+observations remain available through `show ID`.
+
+Schedule `kosha monitor check --jsonl` in your operating system's scheduler
+for one pass over due profiles. The command exits after that pass.
+The desktop app also checks due profiles while it is open. Both entry
+points share a lock and the last attempt time.
+Exit status 1 means a scan was skipped, cancelled, or failed during the
+pass. Exit status 2 indicates a command or setup error. `show ID` lists
+retained snapshot paths and the observation IDs behind alerts. Pass the
+two snapshot paths to `kosha compare` to inspect a growth alert.
 
 ## Exports
 

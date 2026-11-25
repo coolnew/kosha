@@ -19,6 +19,50 @@ By default, directory walks do not descend into other mounted filesystems.
 Scan settings can change this. Symbolic links are measured without following
 their targets. A scan describes its chosen scope, not necessarily an entire disk.
 
+## Fast NTFS scan on Windows
+
+**WIP for the planned v0.18.0 release.** These steps apply to the Windows
+MSIX that includes the Fast NTFS worker.
+
+Use Fast NTFS when you need a whole-drive view of a local NTFS volume,
+especially on a large HDD. Kosha reads the drive’s Master File Table (MFT)
+to build the size report. For a particular folder, use **Choose a folder**.
+
+1. In the sidebar, right-click the NTFS drive and choose **Fast NTFS scan…**.
+   Check the drive letter before continuing.
+2. At the Windows administrator consent prompt, approve only the
+   `kosha-ntfs-worker.exe` request you just started. The worker reads
+   filesystem metadata for the selected drive. Kosha keeps cleanup in the
+   main window, where its normal confirmation rules apply.
+3. Look for **Master File Table** in the status bar. If you decline consent
+   or the worker is unavailable, Kosha reports the fallback and scans what
+   your account can read. Unreadable entries can make the totals a lower bound.
+
+Use **Stop scan** or **Esc** to cancel. An interrupted Fast NTFS scan leaves
+the last completed drive snapshot available. For the packaged CLI, run
+`kosha D:\ --mft --stats` with your drive letter. The report identifies an
+MFT scan, and a fallback reason is printed separately.
+
+![Fast NTFS scan action in the sidebar drive menu on a synthetic Windows Sandbox drive](images/gui-windows-fast-ntfs-menu.png)
+
+## Monitor local storage over time
+
+Open **Monitoring** from the command palette, then select **Add location…**.
+Enter an absolute path to a local drive or folder, choose **Daily** or
+**Weekly**, and provide at least one positive threshold in bytes.
+Allocated growth compares a completed scan with the previous baseline.
+Low free space uses the available bytes on the containing filesystem.
+
+Kosha checks due profiles while the desktop app is open. **Check now**
+starts an immediate check, and **Pause** suspends checks for that profile.
+You can cancel a scheduled scan from the background activity panel.
+Use **Compare changes** on a growth alert to view the two saved snapshots.
+**Remove…** stops future checks and preserves the saved observations.
+For checks while the app is closed, use the
+[scheduler command](command-line.md#scheduled-storage-monitoring).
+
+![Monitoring on macOS showing a 2 MiB growth alert and the Compare changes action for a synthetic folder](images/gui-macos-monitoring.png)
+
 ## Native WSL2 scans
 
 On Windows, open **Settings** and enable **Scan inside WSL2** under **Scanning**.

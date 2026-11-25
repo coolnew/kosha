@@ -26,6 +26,7 @@ mod compare_snapshots;
 mod history;
 mod import;
 mod marketplace;
+mod monitoring;
 #[cfg(feature = "remote-client")]
 mod remote;
 mod search;
@@ -54,6 +55,7 @@ USAGE:
     kosha duplicate-candidates --algorithm ALGORITHM LISTING [LISTING]
     kosha compare LEFT RIGHT        compare folders or saved snapshots
     kosha history --help            record or inspect volume history
+    kosha monitor --help            configure and check storage monitoring
     kosha space --help              compare filesystem usage and scanned allocation
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
@@ -95,7 +97,8 @@ OPTIONS:
     --exact          Query exact on-disk sizes, even where it costs a syscall
     --mft            Read NTFS' Master File Table instead of walking directories
                      (Windows, NTFS, and an elevated process; falls back and
-                     says so where any of those is missing)
+                     says so where any of those is missing). MSIX builds with
+                     Fast NTFS can ask for consent on a whole-drive scan.
     --wsl-native     Scan a whole WSL2 distribution using its installed Linux CLI
     --image          Read a WSL distribution's ext4.vhdx instead of going
                      through the wsl.localhost redirector, or read a disk
@@ -317,6 +320,7 @@ fn main() -> ExitCode {
         Ok(Parsed::ChecksumCandidates(args)) => checksum_candidates::run(&args),
         Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
         Ok(Parsed::History(args)) => return history::run(&args),
+        Ok(Parsed::Monitoring(args)) => return monitoring::run(&args),
         Ok(Parsed::VolumeSpace(args)) => return volume_space::run(&args),
         Ok(Parsed::ImportHelp) => {
             say!("{}", import::USAGE);
@@ -582,9 +586,7 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(not(windows))]
             return Err("--wsl-native is supported only by the Windows CLI".into());
         } else {
-            Scanner::new(args.scan)
-                .with_cancel(Arc::clone(&cancel))
-                .scan(&args.path)?
+            scan_live_path(&args.path, args.scan, &cancel)?
         };
         if args.wsl_native {
             snapshots::report_replaced_names(&tree);
@@ -708,6 +710,45 @@ fn run(mut args: Args) -> Result<(), Box<dyn std::error::Error>> {
 /// A rows-only stream cannot carry scan coverage, and human headers are
 /// intentionally suppressed on machine stdout. Keep lower bounds visible on
 /// stderr for every export format, including exports loaded from records.
+fn scan_live_path(
+    path: &std::path::Path,
+    options: ScanOptions,
+    cancel: &Arc<AtomicBool>,
+) -> Result<SizeTree, kosha_core::ScanError> {
+    #[cfg(all(windows, feature = "fast-ntfs-worker"))]
+    let options = if options
+        == (ScanOptions {
+            use_mft: true,
+            ..ScanOptions::default()
+        })
+        && let Some(request) = kosha_core::ntfs_worker::request_for_root(path)
+    {
+        eprintln!("Fast NTFS requested. Windows may ask for administrator consent.");
+        match kosha_core::ntfs_worker::scan_with_worker(&request, &|| {
+            cancel.load(Ordering::Relaxed)
+        }) {
+            Ok(tree) => return Ok(tree),
+            Err(_) if cancel.load(Ordering::Relaxed) => {
+                return Err(kosha_core::ScanError::Cancelled);
+            }
+            Err(error) => {
+                eprintln!(
+                    "Fast NTFS scan unavailable ({error}). Scanning files Windows lets Kosha read."
+                );
+            }
+        }
+        ScanOptions {
+            use_mft: false,
+            ..options
+        }
+    } else {
+        options
+    };
+    Scanner::new(options)
+        .with_cancel(Arc::clone(cancel))
+        .scan(path)
+}
+
 fn warn_export_coverage(tree: &SizeTree) {
     let stats = tree.stats();
     if tree.is_incomplete() {
@@ -2014,6 +2055,7 @@ enum Parsed {
     ChecksumCandidates(Vec<String>),
     CompareSnapshots(Vec<String>),
     History(Vec<String>),
+    Monitoring(Vec<String>),
     VolumeSpace(Vec<String>),
     ImportHelp,
     SearchHelp,
@@ -2079,6 +2121,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "history") {
         argv.next();
         return Ok(Parsed::History(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "monitor") {
+        argv.next();
+        return Ok(Parsed::Monitoring(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "space") {
         argv.next();

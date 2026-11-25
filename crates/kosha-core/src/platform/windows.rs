@@ -295,7 +295,7 @@ fn from_metadata(md: &fs::Metadata, file_type: fs::FileType, ctx: &PlatformCtx) 
 ///
 /// `None` rather than an error: a file we cannot open is one we report from the
 /// cheap metadata we already have, which is the same answer the default gives.
-fn open_for_metadata(path: &Path) -> Option<fs::File> {
+pub(crate) fn open_for_metadata(path: &Path) -> Option<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
 
     fs::OpenOptions::new()
@@ -1320,14 +1320,20 @@ pub(super) fn token_owner() -> Option<OwnerId> {
 /// struct with a pointer into its own tail, so the buffer has to hold both and
 /// the pointer means nothing once it is dropped.
 fn token_information(class: i32, header: usize) -> Option<Vec<u8>> {
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // SAFETY: this process pseudo-handle is always valid in this process.
+    let process = unsafe { GetCurrentProcess() };
+    token_information_for(process, class, header)
+}
+
+fn token_information_for(process: HANDLE, class: i32, header: usize) -> Option<Vec<u8>> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY};
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows_sys::Win32::System::Threading::OpenProcessToken;
 
     let mut token: HANDLE = std::ptr::null_mut();
-    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing,
-    // and `token` is a live out-parameter.
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token) } == 0 {
+    // SAFETY: the caller holds the process handle and token is a live out-parameter.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &raw mut token) } == 0 {
         return None;
     }
     let mut buffer = vec![0u8; header + sid::MAX_BYTES];
@@ -1349,19 +1355,26 @@ fn token_information(class: i32, header: usize) -> Option<Vec<u8>> {
 }
 
 pub(super) fn current_owner() -> Option<OwnerId> {
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // SAFETY: this process pseudo-handle is always valid in this process.
+    let process = unsafe { GetCurrentProcess() };
+    process_owner(process)
+}
+
+pub(crate) fn process_owner(process: HANDLE) -> Option<OwnerId> {
     use windows_sys::Win32::Security::{TOKEN_USER, TokenUser};
 
     // A `TOKEN_USER` is a pointer and a u32, and the SID it points at follows it
     // in the same buffer — so the buffer has to hold both, and the pointer is
     // only meaningful while that buffer is alive.
-    let buffer = token_information(TokenUser, size_of::<TOKEN_USER>())?;
+    let buffer = token_information_for(process, TokenUser, size_of::<TOKEN_USER>())?;
     // SAFETY: the call succeeded, so `buffer` starts with a `TOKEN_USER` whose
     // `Sid` points into `buffer`, which is still alive.
-    let user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
+    let user = unsafe { buffer.as_ptr().cast::<TOKEN_USER>().read_unaligned() };
     if user.User.Sid.is_null() {
         return None;
     }
-    let offset = user.User.Sid as usize - buffer.as_ptr() as usize;
+    let offset = (user.User.Sid as usize).checked_sub(buffer.as_ptr() as usize)?;
     sid::to_string(buffer.get(offset..)?).map(OwnerId::Sid)
 }
 

@@ -1,6 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [0.18.0] — 2026-11-25
+
+Kosha 0.18.0 adds scheduled storage monitoring, more ways to explain drive
+usage, and easier review of cleanup and scan changes.
+
+The Windows Store submission package is subject to Microsoft certification.
+
+### Monitor local storage over time
+
+Set daily or weekly checks for a local drive or folder. Review growth and
+low-space alerts in **Monitoring**, and open the saved comparison behind
+a growth alert. Run `kosha monitor check --jsonl` from an OS scheduler
+to check due profiles while Kosha is closed.
+
+### Fast NTFS scans in the Windows Store package
+
+Request a read-only Master File Table scan from the drive menu or with
+`kosha D:\ --mft --stats`. Windows can ask for consent for a dedicated
+worker. If consent is declined, Kosha scans with its current permissions.
+
+### Review cleanup plans and measure recovery
+
+Queue actionable Insights from a live scan, then review the combined targets
+and estimated allocation before confirming. The cleanup receipt shows observed
+free-space changes by volume after the automatic rescan.
 
 ### Explain volume usage and scan coverage
 
@@ -18,7 +42,8 @@ allocation changed. Open a comparison for individual paths, or use
 
 ### Compare live folders and saved snapshots
 
-Choose **Compare folders…** on the desktop welcome screen or toolbar, or run
+Choose **Compare folders…** on the desktop welcome screen, select the
+two-folders icon in the title bar, or run
 `kosha compare LEFT RIGHT`. Either input can be a folder or saved snapshot.
 The report shows changed paths, entries unique to either side, and incomplete
 coverage. Desktop reports can be saved as plain text, Markdown, or JSONL.
@@ -1106,7 +1131,7 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 
 [0.10.0]: https://github.com/coolnew/kosha/releases/tag/v0.10.0
 
-[Unreleased]: https://github.com/coolnew/kosha/compare/v0.17.2...HEAD
+[Unreleased]: https://github.com/coolnew/kosha/compare/v0.18.0...HEAD
 
 [0.10.1]: https://github.com/coolnew/kosha/releases/tag/v0.10.1
 
@@ -1159,3 +1184,5 @@ see [Releasing](RELEASING.md). macOS remains experimental.
 [0.17.1]: https://github.com/coolnew/kosha/releases/tag/v0.17.1
 
 [0.17.2]: https://github.com/coolnew/kosha/releases/tag/v0.17.2
+
+[0.18.0]: https://github.com/coolnew/kosha/releases/tag/v0.18.0

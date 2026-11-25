@@ -39,7 +39,7 @@ mod windows;
 #[cfg(windows)]
 use windows as imp;
 #[cfg(windows)]
-pub(crate) use windows::{NOT_RESIDENT, file_identity};
+pub(crate) use windows::{NOT_RESIDENT, file_identity, open_for_metadata, process_owner};
 
 /// How full a mounted volume is.
 ///

@@ -219,7 +219,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                             )
                         } else {
                             format!(
-                                "{} {}, freeing {}.",
+                                "{} {}. Estimated allocation affected: {}.",
                                 verb,
                                 format::plural(preview.succeeded, "item"),
                                 app.bytes(preview.bytes_freed),
