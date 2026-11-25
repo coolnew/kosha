@@ -121,6 +121,8 @@ pub enum Action {
     CancelFragmentation,
     DeepScanFragmentation,
     CancelDeepScan,
+    CompareFolders,
+    CancelFolderComparison,
     HideDeepLayout,
     StopDuplicates,
     /// Stop a hunt that is still reading file contents.

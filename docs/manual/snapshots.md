@@ -180,3 +180,35 @@ changes in files. Read comparison warnings.
 Historical views retain snapshot safety guards: scan again before file-changing
 actions. A record of yesterday's file cannot establish its current identity or
 contents. See [file locations](settings-and-files.md) for backup and removal.
+
+### Compare two folders or snapshots
+
+Choose **Compare folders…** from the welcome screen or the toolbar. It is
+also available in the command palette (Ctrl+K or Command+K). If you open it
+while browsing a local scan or saved snapshot, Kosha fills in the left side
+with that source. For each side, choose **Folder…** for a live scan or
+**Snapshot…** to use a saved Kosha record. Choose **Compare** to run it, or
+**Swap sides** to reverse the direction. You can cancel from the comparison
+page or the background actions panel.
+
+![The macOS welcome screen offers Compare folders alongside Scan home directory and Choose a folder](images/gui-macos-folder-comparison.png)
+
+The report lists differences and indeterminate paths, with a reason for each
+finding. Select a status above the list to focus on that category. The report
+also counts matching metadata and warns when either source has
+incomplete coverage. Relative paths are matched byte for byte. The comparison
+uses entry type, apparent size, and modification time with a two-second
+tolerance. On Windows, macOS, and Linux, turn on **Verify file contents** before running
+the comparison to check equal-size regular files at matching paths. This reads
+both files and reports verified content matches separately from metadata matches.
+The option is available when both sources are live folders.
+
+On Windows, a WSL folder opened through `\\wsl.localhost` can be compared by
+metadata. If file contents show as indeterminate, the
+[command-line guide](command-line.md#compare-folders-and-saved-snapshots) shows
+how to run byte verification from inside the distribution.
+
+![With Verify file contents enabled on macOS, a same-size edit appears as File contents differ alongside files found only on one side](images/gui-macos-folder-verification.png)
+
+[View a Windows comparison with one verified content match and one file unique to each side.](images/gui-windows-folder-comparison.png)
+[View a Linux comparison that also finds a same-size edit.](images/gui-linux-folder-comparison.png)

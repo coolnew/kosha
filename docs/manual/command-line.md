@@ -345,20 +345,23 @@ Totals use apparent sizes. The cache has no inode IDs, so each hard-link
 name contributes its recorded size. Caches written by the QDirStat app
 before 1.7 may contain per-link shares instead of full file sizes.
 
-### Compare two saved snapshots
+### Compare folders and saved snapshots
 
 ![A macOS Terminal example showing a changed timestamp and paths recorded on one side of a synthetic snapshot comparison](images/snapshot-compare-macos.png)
 
 ```sh
 kosha compare before.kosha after.kosha
+kosha compare ./original ./backup
+kosha compare before.kosha ./current
 kosha compare before.kosha after.kosha --mtime-tolerance 0 --format jsonl
 ```
 
-Pass two explicit snapshot file paths. Kosha compares the stored relative paths
+Each input can be a local folder or a Kosha snapshot file. Kosha scans live
+folders for metadata and compares relative paths from the two roots
 byte for byte. For files it checks type, apparent size, and modification time,
 with a two-second default tolerance. A metadata match makes no claim about file
 contents. Directory entries compare by presence and type, and descendants get
-their own results.
+their own results. Live scans stay on the filesystem of their selected root.
 
 Missing metadata, ambiguous duplicate paths, and missing entries on an
 incomplete side can make a result indeterminate. The text report shows up to
@@ -367,6 +370,22 @@ versioned provenance header, an entry for each compared path, and a summary.
 Rows whose paths contain non-UTF-8 bytes also include `path_bytes_hex`.
 Exit status is 0 for matching metadata, 1 for known differences, and 2 for an
 error or an indeterminate comparison with no known differences.
+
+On Windows, macOS, and Linux, run `kosha compare ./original ./backup --verify` to
+read and compare bytes in equal-size regular files at matching paths. Use
+two live folders. Equal size and modification time can hide edits, so the
+report counts verified content matches separately. Links are skipped and
+files that cannot be verified are flagged. The scan can take longer because
+it reads file contents.
+
+On Windows, you can compare metadata against a WSL folder through a path such
+as `\\wsl.localhost\Ubuntu\home\me\project`. If a WSL file is indeterminate
+with `--verify`, run the Linux Kosha CLI inside the distribution and use its
+mounted Windows path for the other side.
+
+```sh
+kosha compare /mnt/c/Users/me/project /home/me/project --verify
+```
 
 ### Check fragmentation
 

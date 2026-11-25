@@ -27,6 +27,8 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
     "Win32_Foundation",
     # The token, for "is this process elevated" and for asking it to enable
     # SeBackupPrivilege before a raw volume read.

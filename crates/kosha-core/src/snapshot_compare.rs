@@ -10,12 +10,16 @@ use crate::node::{Flags, Node, NodeId};
 use crate::snapshot::{Meta, check_child_layout, valid_path_component};
 use crate::tree::SizeTree;
 
+#[cfg(any(unix, windows))]
+mod content;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     LeftOnly,
     RightOnly,
     Changed,
     MetadataMatch,
+    ContentMatch,
     Indeterminate,
 }
 
@@ -26,6 +30,7 @@ impl Status {
             Self::RightOnly => "right-only",
             Self::Changed => "changed",
             Self::MetadataMatch => "metadata-match",
+            Self::ContentMatch => "content-match",
             Self::Indeterminate => "indeterminate",
         }
     }
@@ -43,6 +48,7 @@ pub struct Summary {
     pub right_only: u64,
     pub changed: u64,
     pub matched: u64,
+    pub content_matched: u64,
     pub indeterminate: u64,
     pub incomplete: [bool; 2],
 }
@@ -64,6 +70,7 @@ impl Summary {
             Status::RightOnly => &mut self.right_only,
             Status::Changed => &mut self.changed,
             Status::MetadataMatch => &mut self.matched,
+            Status::ContentMatch => &mut self.content_matched,
             Status::Indeterminate => &mut self.indeterminate,
         } += 1;
     }
@@ -130,6 +137,8 @@ impl<'a> Side<'a> {
 pub struct Comparison<'a> {
     sides: [Side<'a>; 2],
     tolerance: u32,
+    #[cfg(any(unix, windows))]
+    verifier: Option<content::Verifier<'a>>,
 }
 
 impl<'a> Comparison<'a> {
@@ -141,11 +150,37 @@ impl<'a> Comparison<'a> {
         Ok(Self {
             sides: [Side::new(left.0, left.1)?, Side::new(right.0, right.1)?],
             tolerance,
+            #[cfg(any(unix, windows))]
+            verifier: None,
         })
+    }
+
+    /// Enable byte comparison for two freshly scanned local trees. The caller
+    /// supplies the live roots explicitly and retains ownership of cancellation.
+    #[cfg(any(unix, windows))]
+    pub fn with_content_verification(
+        mut self,
+        roots: [&std::path::Path; 2],
+        stop: &'a std::sync::atomic::AtomicBool,
+    ) -> std::io::Result<Self> {
+        self.verifier = Some(content::Verifier::new(roots, stop)?);
+        Ok(self)
     }
 
     /// Stream rows depth first in byte order within each directory.
     pub fn visit(&self, mut emit: impl FnMut(Row<'_>)) -> Summary {
+        self.try_visit(|row| {
+            emit(row);
+            Ok::<(), std::convert::Infallible>(())
+        })
+        .unwrap()
+    }
+
+    /// Stop traversal if the consumer returns an error, including cancellation.
+    pub fn try_visit<E>(
+        &self,
+        mut emit: impl FnMut(Row<'_>) -> Result<(), E>,
+    ) -> Result<Summary, E> {
         let mut summary = Summary {
             incomplete: [self.sides[0].incomplete, self.sides[1].incomplete],
             ..Summary::default()
@@ -168,17 +203,20 @@ impl<'a> Comparison<'a> {
                 path.push(b'/');
             }
             path.extend_from_slice(name);
-            let (status, reasons) = if duplicate {
+            let classified = if duplicate {
                 (Status::Indeterminate, [Some("duplicate-path"), None])
             } else {
                 self.classify(ids)
             };
+            #[cfg(any(unix, windows))]
+            let classified = self.verify_content(classified, ids, &path);
+            let (status, reasons) = classified;
             summary.count(status);
             emit(Row {
                 path: &path,
                 status,
                 reasons,
-            });
+            })?;
             if !duplicate {
                 let children = Frame::new(trees, ids);
                 if children.has_children() {
@@ -186,7 +224,51 @@ impl<'a> Comparison<'a> {
                 }
             }
         }
-        summary
+        Ok(summary)
+    }
+
+    #[cfg(any(unix, windows))]
+    fn verify_content(
+        &self,
+        (status, reasons): (Status, [Option<&'static str>; 2]),
+        ids: [Option<usize>; 2],
+        path: &[u8],
+    ) -> (Status, [Option<&'static str>; 2]) {
+        let (Some(verifier), [Some(left), Some(right)]) = (&self.verifier, ids) else {
+            return (status, reasons);
+        };
+        if reasons[0] == Some("duplicate-path") {
+            return (status, reasons);
+        }
+        let nodes = [
+            &self.sides[0].tree.nodes()[left],
+            &self.sides[1].tree.nodes()[right],
+        ];
+        if nodes.iter().any(|node| node.is_dir() || node.is_symlink())
+            || nodes[0].logical != nodes[1].logical
+        {
+            return (status, reasons);
+        }
+        let unavailable = nodes.iter().any(|node| {
+            [Flags::OFFLINE, Flags::UNREADABLE, Flags::HARDLINK_DUP]
+                .into_iter()
+                .any(|flag| node.flags.contains(flag))
+        });
+        match (!unavailable)
+            .then(|| verifier.compare(path, nodes.map(|node| (node.logical, node.mtime))))
+        {
+            Some(Ok(true)) if status != Status::Changed => (Status::ContentMatch, [None; 2]),
+            Some(Ok(true)) => (status, [reasons[0].or(reasons[1]), Some("content-matches")]),
+            Some(Ok(false)) => (
+                Status::Changed,
+                [reasons[0].or(reasons[1]), Some("content-differs")],
+            ),
+            _ if status == Status::Changed => (
+                status,
+                [reasons[0].or(reasons[1]), Some("content-unavailable")],
+            ),
+            _ => (Status::Indeterminate, [None, Some("content-unavailable")]),
+        }
     }
 
     fn classify(&self, ids: [Option<usize>; 2]) -> (Status, [Option<&'static str>; 2]) {

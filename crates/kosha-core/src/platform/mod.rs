@@ -38,6 +38,8 @@ mod unix_extents;
 mod windows;
 #[cfg(windows)]
 use windows as imp;
+#[cfg(windows)]
+pub(crate) use windows::{NOT_RESIDENT, file_identity};
 
 /// How full a mounted volume is.
 ///

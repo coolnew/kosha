@@ -55,7 +55,7 @@ const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
 const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
 
 /// Every attribute that means "the bytes are not here".
-const NOT_RESIDENT: u32 =
+pub(crate) const NOT_RESIDENT: u32 =
     FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS;
 /// The weakest access right there is: metadata only, no data, no directory
 /// listing. Enough for both handle queries here and nothing more.
@@ -352,7 +352,7 @@ fn open_for_metadata(path: &Path) -> Option<fs::File> {
 /// scanner's set only ever holds entries that could actually collide.
 ///
 /// Reported by `marg`, which lifted this layer and measured the divergence.
-fn file_identity(file: &fs::File) -> Option<(u64, u128)> {
+pub(crate) fn file_identity(file: &fs::File) -> Option<(u64, u128)> {
     use std::os::windows::io::AsRawHandle;
 
     /// `FileIdInfo` in `FILE_INFO_BY_HANDLE_CLASS`.

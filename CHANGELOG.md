@@ -2,7 +2,15 @@
 
 ## [Unreleased]
 
-Nothing yet.
+### Compare live folders and saved snapshots
+
+Choose **Compare folders…** on the desktop welcome screen or toolbar, or run
+`kosha compare LEFT RIGHT`. Either input can be a folder or saved snapshot.
+The report shows changed paths, entries unique to either side, and incomplete
+coverage. The CLI also supports JSONL for scripts.
+
+For two live folders, turn on **Verify file contents** or pass `--verify` to
+catch byte changes in equal-size files, even when timestamps agree.
 
 ## [0.17.2] — 2026-11-24
 

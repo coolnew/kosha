@@ -26,6 +26,7 @@ mod confirm;
 mod details;
 mod drive_history;
 mod elevate;
+mod folder_comparison;
 mod geometry;
 mod handoff;
 mod icons;

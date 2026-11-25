@@ -184,6 +184,7 @@ pub struct KoshaApp {
     /// The current Quick Look check, keyed to the loaded tree and selected entry.
     fragmentation: Option<(u64, NodeId, Fragments)>,
     deep_scan: Option<DeepScanJob>,
+    pub(crate) folder_comparison: Option<crate::folder_comparison::View>,
     /// The column edge being dragged, if any.
     ///
     /// Held on the view rather than on the header element because a drag
@@ -469,6 +470,7 @@ impl KoshaApp {
             details_open: false,
             fragmentation: None,
             deep_scan: None,
+            folder_comparison: None,
             column_drag: None,
             pending_query: start.query,
             pending_duplicates: start.duplicates,
@@ -1449,6 +1451,13 @@ impl KoshaApp {
             &self.volumes,
             &self.settings.saved_queries,
         );
+        commands.push(commands::Command {
+            label: "Compare folders".into(),
+            detail: "Compare two folders or saved snapshots".into(),
+            binding: None,
+            keywords: &["backup", "diff", "snapshot"],
+            action: commands::Action::CompareFolders,
+        });
         if let Some(ready) = ready
             && !ready.source.is_past()
             && ready
@@ -1888,6 +1897,13 @@ impl KoshaApp {
                 self.check_fragmentation(cx);
             }
             commands::Action::DeepScanFragmentation => self.deep_scan_fragmentation(cx),
+            commands::Action::CompareFolders => {
+                self.open_folder_comparison(cx);
+            }
+            commands::Action::CancelFolderComparison => {
+                self.cancel_folder_comparison();
+                cx.notify();
+            }
             commands::Action::CancelDeepScan => {
                 self.cancel_deep_scan();
                 cx.notify();
@@ -2750,7 +2766,7 @@ impl KoshaApp {
         .detach();
     }
 
-    fn file_picker_selection<T>(
+    pub(crate) fn file_picker_selection<T>(
         &mut self,
         selection: Result<anyhow::Result<Option<T>>, impl Into<anyhow::Error>>,
         cx: &mut Context<Self>,
@@ -3382,8 +3398,28 @@ impl KoshaApp {
         .detach();
     }
 
+    fn open_folder_comparison(&mut self, cx: &mut Context<Self>) {
+        if self.folder_comparison.is_none() {
+            self.folder_comparison = Some(crate::folder_comparison::View::new(self.state.ready()));
+        }
+        cx.notify();
+    }
+
     fn background_activities(&self) -> Vec<ActivityRow> {
         let mut rows = Vec::new();
+        if let Some(stopping) = self
+            .folder_comparison
+            .as_ref()
+            .and_then(|view| view.stopping())
+        {
+            rows.push(ActivityRow {
+                id: "compare-folders".into(),
+                title: "Compare folders",
+                scope: "Two sources".into(),
+                status: if stopping { "Cancelling" } else { "Running" },
+                cancel: (!stopping).then_some(commands::Action::CancelFolderComparison),
+            });
+        }
         if let Some(job) = &self.deep_scan {
             let stopping = job.stop.load(Ordering::Relaxed);
             rows.push(ActivityRow {
@@ -3962,10 +3998,11 @@ impl KoshaApp {
                 help_open: self.help_open,
                 settings_open: self.settings_open,
                 details_open: self.details_open,
-                comparison_open: self
-                    .state
-                    .ready()
-                    .is_some_and(|ready| ready.comparison.is_some()),
+                comparison_open: self.folder_comparison.is_some()
+                    || self
+                        .state
+                        .ready()
+                        .is_some_and(|ready| ready.comparison.is_some()),
                 hunting: self.state.ready().is_some_and(Ready::is_hunting),
                 scanning: self.is_scanning(),
                 filter_open: self.filter_open,
@@ -4027,6 +4064,10 @@ impl KoshaApp {
                 return;
             }
             KeyIntent::CloseComparison => {
+                if self.folder_comparison.is_some() {
+                    self.close_folder_comparison(cx);
+                    return;
+                }
                 self.close_comparison(cx);
                 return;
             }
@@ -4043,6 +4084,10 @@ impl KoshaApp {
                 cx.notify();
                 return;
             }
+        }
+
+        if self.folder_comparison.is_some() {
+            return;
         }
 
         if modified
@@ -4580,7 +4625,11 @@ impl Render for KoshaApp {
         // What is left after the reader has had their say. The status bar gets
         // `fits` rather than this, so it offers to widen the window only for a
         // rail that width took away.
-        let rails = fits.opened(self.settings.show_places, self.settings.show_insights);
+        let comparing_folders = self.folder_comparison.is_some();
+        let rails = fits.opened(
+            self.settings.show_places && !comparing_folders,
+            self.settings.show_insights && !comparing_folders,
+        );
 
         div()
             .id("kosha")
@@ -4635,7 +4684,9 @@ impl Render for KoshaApp {
                             .child(self.render_main(rails, &palette, cx))
                             .children(rails.insights.then(|| self.render_insights(&palette, cx))),
                     )
-                    .child(self.render_status_bar(fits, &palette, cx)),
+                    .children(
+                        (!comparing_folders).then(|| self.render_status_bar(fits, &palette, cx)),
+                    ),
             )
             .children(Self::render_background_activity(
                 self.background_activities(),
@@ -4751,6 +4802,7 @@ impl KoshaApp {
                 .justify_between()
                 .child(
                     h_flex()
+                        .min_w(px(0.0))
                         .gap(px(8.0))
                         .items_center()
                         .child(
@@ -4761,7 +4813,11 @@ impl KoshaApp {
                         )
                         .children(self.render_snapshot_chip(palette, cx))
                         .children(self.render_incomplete_chip(palette))
-                        .child(self.render_breadcrumb(palette, cx)),
+                        .children(
+                            self.folder_comparison
+                                .is_none()
+                                .then(|| self.render_breadcrumb(palette, cx)),
+                        ),
                 )
                 .child(
                     // Read the cluster from the right, which is the edge
@@ -4773,8 +4829,21 @@ impl KoshaApp {
                     // window controls, because the mode chip is the one
                     // thing here somebody goes looking for.
                     h_flex()
+                        .flex_shrink_0()
                         .gap(px(8.0))
                         .items_center()
+                        .children(
+                            (self.folder_comparison.is_none()
+                                && !matches!(self.state.phase, Phase::Idle))
+                            .then(|| {
+                                crate::ui::button("compare-folders-toolbar", palette)
+                                    .debug_selector(|| "compare-folders-toolbar".into())
+                                    .child("Compare folders…")
+                                    .on_click(
+                                        cx.listener(|app, _, _, cx| app.open_folder_comparison(cx)),
+                                    )
+                            }),
+                        )
                         // Elevation is the same kind of statement as the
                         // mode chip — a standing fact about this window —
                         // but it is not the one people look for, and the
@@ -4876,7 +4945,11 @@ impl KoshaApp {
                                 .child(mode.label())
                                 .on_click(cx.listener(|this, _, _, cx| this.toggle_mode(cx))),
                         )
-                        .child(self.render_panel_toggles(fits, palette, cx)),
+                        .children(
+                            self.folder_comparison
+                                .is_none()
+                                .then(|| self.render_panel_toggles(fits, palette, cx)),
+                        ),
                 ),
             palette,
             window,
@@ -5815,45 +5888,49 @@ impl KoshaApp {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let body = match &self.state.phase {
-            Phase::Idle => self.render_welcome(rails, palette, cx).into_any_element(),
-            Phase::Failed {
-                path,
-                message,
-                hint,
-            } => self
-                .render_failure(palette, path, message, hint.as_deref())
+        let body = if let Some(view) = &self.folder_comparison {
+            crate::folder_comparison::render(view, palette, cx)
+        } else {
+            match &self.state.phase {
+                Phase::Idle => self.render_welcome(rails, palette, cx).into_any_element(),
+                Phase::Failed {
+                    path,
+                    message,
+                    hint,
+                } => self
+                    .render_failure(palette, path, message, hint.as_deref())
+                    .into_any_element(),
+                // A scan has no tree until it finishes — `state.ready()` is `None`
+                // throughout — so this arm used to draw an empty treemap over an
+                // empty table: a blank window, with the only sign of life eleven
+                // points tall in the bottom corner.
+                Phase::Scanning {
+                    path,
+                    progress,
+                    cancel,
+                } => scanning(
+                    palette,
+                    path,
+                    *progress,
+                    cx.reduce_motion(),
+                    cancel.load(std::sync::atomic::Ordering::Relaxed),
+                    self.scan_timing.estimate(),
+                    self.scan_timing.reference_total(),
+                    cx,
+                )
                 .into_any_element(),
-            // A scan has no tree until it finishes — `state.ready()` is `None`
-            // throughout — so this arm used to draw an empty treemap over an
-            // empty table: a blank window, with the only sign of life eleven
-            // points tall in the bottom corner.
-            Phase::Scanning {
-                path,
-                progress,
-                cancel,
-            } => scanning(
-                palette,
-                path,
-                *progress,
-                cx.reduce_motion(),
-                cancel.load(std::sync::atomic::Ordering::Relaxed),
-                self.scan_timing.estimate(),
-                self.scan_timing.reference_total(),
-                cx,
-            )
-            .into_any_element(),
-            // A comparison replaces the treemap and the table rather than
-            // filtering them: its rows are differences, and half of them are
-            // about paths that are not in the tree on screen at all.
-            Phase::Ready(ready) if ready.comparison.is_some() => {
-                let comparison = ready.comparison.as_ref().expect("just checked");
-                crate::comparison::render(self, comparison, palette, cx)
+                // A comparison replaces the treemap and the table rather than
+                // filtering them: its rows are differences, and half of them are
+                // about paths that are not in the tree on screen at all.
+                Phase::Ready(ready) if ready.comparison.is_some() => {
+                    let comparison = ready.comparison.as_ref().expect("just checked");
+                    crate::comparison::render(self, comparison, palette, cx)
+                }
+                Phase::Ready(_) if self.settings.show_table => {
+                    self.render_table(palette, cx).into_any_element()
+                }
+                Phase::Ready(_) => self.render_treemap(palette, false, cx).into_any_element(),
             }
-            Phase::Ready(_) if self.settings.show_table => {
-                self.render_table(palette, cx).into_any_element()
-            }
-            Phase::Ready(_) => self.render_treemap(palette, false, cx).into_any_element(),
         };
 
         v_flex().flex_1().min_w(px(0.0)).h_full().child(body)
@@ -5931,6 +6008,8 @@ impl KoshaApp {
             .child(
                 h_flex()
                     .mt(px(8.0))
+                    .flex_wrap()
+                    .justify_center()
                     .gap(px(8.0))
                     .items_center()
                     .child(
@@ -5960,6 +6039,12 @@ impl KoshaApp {
                         crate::ui::button("choose-folder", palette)
                             .child("Choose a folder…")
                             .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx))),
+                    )
+                    .child(
+                        crate::ui::button("compare-folders-welcome", palette)
+                            .debug_selector(|| "compare-folders-welcome".into())
+                            .child("Compare folders…")
+                            .on_click(cx.listener(|app, _, _, cx| app.open_folder_comparison(cx))),
                     ),
             )
     }
@@ -6708,6 +6793,61 @@ impl KoshaApp {
                 .into_any_element(),
         )
     }
+}
+
+#[cfg(all(
+    test,
+    any(windows, target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_comparison_opens_from_welcome_and_current_scan() {
+    use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+
+    let fixture = tempfile::tempdir().unwrap();
+    let tree = Arc::new(
+        Scanner::new(kosha_core::ScanOptions::default())
+            .scan(fixture.path())
+            .unwrap(),
+    );
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    let click = |visual: &mut VisualTestContext, selector| {
+        visual.refresh().unwrap();
+        let bounds = visual.debug_bounds(selector).expect(selector);
+        visual.simulate_click(bounds.center(), Modifiers::default());
+        visual.refresh().unwrap();
+    };
+    click(&mut visual, "compare-folders-welcome");
+    assert!(visual.debug_bounds("folder-comparison").is_some());
+    assert!(visual.debug_bounds("comparison-left-selected").is_none());
+    click(&mut visual, "close-folder-comparison");
+    assert!(visual.debug_bounds("folder-comparison").is_none());
+
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.state.phase = Phase::Ready(Ready::new(tree));
+            cx.notify();
+        })
+        .unwrap();
+    click(&mut visual, "compare-folders-toolbar");
+    assert!(visual.debug_bounds("folder-comparison").is_some());
+    assert!(visual.debug_bounds("comparison-left-selected").is_some());
+    assert!(visual.debug_bounds("comparison-right-selected").is_none());
 }
 
 #[cfg(all(

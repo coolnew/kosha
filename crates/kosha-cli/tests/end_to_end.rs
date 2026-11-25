@@ -156,6 +156,102 @@ fn text(out: &Output) -> String {
 }
 
 #[test]
+fn compares_live_folders_and_snapshots() {
+    use kosha_core::snapshot::{self, Meta};
+    use kosha_core::{ScanOptions, Scanner};
+
+    let home = tempfile::tempdir().unwrap();
+    let left = home.path().join("left");
+    let right = home.path().join("right");
+    std::fs::create_dir(&left).unwrap();
+    std::fs::create_dir(&right).unwrap();
+    std::fs::write(left.join("changed"), b"one").unwrap();
+    std::fs::write(right.join("changed"), b"longer").unwrap();
+    std::fs::write(left.join("missing"), b"missing").unwrap();
+    let saved = home.path().join("left.kosha");
+    let tree = Scanner::new(ScanOptions::default()).scan(&left).unwrap();
+    let meta = Meta::of(&tree, std::time::SystemTime::now(), "left");
+    snapshot::write(&tree, &meta, std::fs::File::create(&saved).unwrap()).unwrap();
+
+    for (input, live) in [(&left, true), (&saved, false)] {
+        let output = run(
+            &[
+                "compare",
+                input.to_str().unwrap(),
+                right.to_str().unwrap(),
+                "--format",
+                "jsonl",
+            ],
+            home.path(),
+        );
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        let records: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(records[0]["left"]["kind"] == "live-folder", live);
+        assert_eq!(records[0]["right"]["kind"], "live-folder");
+        let summary = records.last().unwrap();
+        assert_eq!(summary["changed"], 1);
+        assert_eq!(summary["left_only"], 1);
+        assert_eq!(summary["indeterminate"], 0);
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn content_verification_finds_same_size_and_time_edits() {
+    use std::fs::{FileTimes, OpenOptions};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    let home = tempfile::tempdir().unwrap();
+    let left = home.path().join("left");
+    let right = home.path().join("right");
+    for (directory, changed) in [(&left, b"old"), (&right, b"new")] {
+        std::fs::create_dir_all(directory.join("nested")).unwrap();
+        let time = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        for (name, bytes) in [("nested/édité", changed), ("nested/same", b"abc")] {
+            let path = directory.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(FileTimes::new().set_modified(time))
+                .unwrap();
+        }
+    }
+    let inputs = [
+        "compare",
+        left.to_str().unwrap(),
+        right.to_str().unwrap(),
+        "--format",
+        "jsonl",
+    ];
+    assert_eq!(run(&inputs, home.path()).status.code(), Some(0));
+    let output = run(&[inputs.as_slice(), &["--verify"]].concat(), home.path());
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let records: Vec<serde_json::Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let row = |path: &str| {
+        records
+            .iter()
+            .find(|record| record["path"] == path)
+            .unwrap()
+    };
+    assert_eq!(
+        row("nested/édité")["reasons"],
+        serde_json::json!(["content-differs"])
+    );
+    assert_eq!(row("nested/same")["status"], "content-match");
+    assert_eq!(records.last().unwrap()["content_match"], 1);
+}
+
+#[test]
 fn compares_two_saved_snapshots_without_opening_their_source_roots() {
     use kosha_core::snapshot::{self, Meta, Provenance};
     use kosha_core::{Entry, Flags, ScanStats, TreeBuilder};

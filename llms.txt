@@ -107,9 +107,11 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
   equal-size checksum candidates from rclone `lsjson -R --hash` output.
   Two inputs report groups present in both. Only the listing files are read.
 - `kosha compare LEFT RIGHT [--mtime-tolerance SECONDS] [--format jsonl]`
-  compares stored metadata in two explicit snapshot files. Paths are matched
+  compares metadata in two folders, two snapshots, or one of each. Paths are matched
   byte for byte. Exit codes are 0 for matching metadata, 1 for known differences,
   and 2 for errors or indeterminate results without known differences.
+  On Windows, macOS, and Linux, `--verify` checks equal-size files at matching paths
+  byte for byte when both inputs are live folders.
 - `kosha import --from ncdu FILE|-` (0.13.0+) reads an ncdu JSON export (plain,
   gzip or zstd) into the snapshot store. It runs no program and opens no listed
   path. Imported records report `source: imported; measured_by_kosha=false` on

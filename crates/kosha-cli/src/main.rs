@@ -50,7 +50,7 @@ USAGE:
     kosha search --help             natural-language search options
     kosha import --from FORMAT FILE  keep an ncdu, rclone or QDirStat listing
     kosha duplicate-candidates --algorithm ALGORITHM LISTING [LISTING]
-    kosha compare LEFT RIGHT        compare metadata in two saved snapshots
+    kosha compare LEFT RIGHT        compare folders or saved snapshots
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
