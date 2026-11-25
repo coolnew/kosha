@@ -141,12 +141,11 @@ pub fn folder_growth(before: &SizeTree, after: &SizeTree) -> Option<Vec<FolderGr
     }
     let mut changed: Vec<_> = sizes
         .into_iter()
-        .filter_map(|(name, [before, after])| {
-            (before != after).then(|| FolderGrowth {
-                name: name.to_owned(),
-                before,
-                after,
-            })
+        .filter(|(_, [before, after])| before != after)
+        .map(|(name, [before, after])| FolderGrowth {
+            name: name.to_owned(),
+            before,
+            after,
         })
         .collect();
     changed.sort_unstable_by(|a, b| {
