@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Explain volume usage and scan coverage
+
+Open **Volume space** after a fresh drive scan, or run `kosha space ROOT` for
+text or JSONL. See filesystem usage alongside scanned allocation, including
+visible volume Trash, unreadable entries, and skipped mounts. Kosha reports
+an unexplained amount when the counters and scan coverage support it.
+
 ### Review drive history and folder growth
 
 Record drive scans explicitly or track a local drive to retain observations

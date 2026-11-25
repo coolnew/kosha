@@ -101,7 +101,10 @@ impl KoshaApp {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.volume_history.is_some() || self.folder_comparison.is_some() {
+        if self.volume_history.is_some()
+            || self.folder_comparison.is_some()
+            || self.volume_space_open
+        {
             return None;
         }
         let ready = self.state.ready()?;

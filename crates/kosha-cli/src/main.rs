@@ -34,6 +34,7 @@ mod serve_scan;
 mod snapshots;
 mod update;
 mod views;
+mod volume_space;
 
 const USAGE: &str = "\
 kosha — scan a directory tree and report what is in it
@@ -53,6 +54,7 @@ USAGE:
     kosha duplicate-candidates --algorithm ALGORITHM LISTING [LISTING]
     kosha compare LEFT RIGHT        compare folders or saved snapshots
     kosha history --help            record or inspect volume history
+    kosha space --help              compare filesystem usage and scanned allocation
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
@@ -315,6 +317,7 @@ fn main() -> ExitCode {
         Ok(Parsed::ChecksumCandidates(args)) => checksum_candidates::run(&args),
         Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
         Ok(Parsed::History(args)) => return history::run(&args),
+        Ok(Parsed::VolumeSpace(args)) => return volume_space::run(&args),
         Ok(Parsed::ImportHelp) => {
             say!("{}", import::USAGE);
             return ExitCode::SUCCESS;
@@ -2011,6 +2014,7 @@ enum Parsed {
     ChecksumCandidates(Vec<String>),
     CompareSnapshots(Vec<String>),
     History(Vec<String>),
+    VolumeSpace(Vec<String>),
     ImportHelp,
     SearchHelp,
     SearchRecipes(Option<PathBuf>, Option<String>),
@@ -2075,6 +2079,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "history") {
         argv.next();
         return Ok(Parsed::History(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "space") {
+        argv.next();
+        return Ok(Parsed::VolumeSpace(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "search") {
         argv.next();

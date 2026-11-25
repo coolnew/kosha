@@ -49,6 +49,7 @@ use crate::treemap::{self, Rect};
 mod history;
 #[cfg(feature = "remote-client")]
 mod remote_scan;
+mod volume_space;
 
 /// Window-level activity presentation. Job owners supply the status and action.
 struct ActivityRow {
@@ -187,6 +188,11 @@ pub struct KoshaApp {
     deep_scan: Option<DeepScanJob>,
     pub(crate) folder_comparison: Option<crate::folder_comparison::View>,
     volume_history: Option<history::View>,
+    volume_space: Option<(
+        std::sync::Weak<SizeTree>,
+        kosha_core::volume_space::SpaceSummary,
+    )>,
+    volume_space_open: bool,
     /// The column edge being dragged, if any.
     ///
     /// Held on the view rather than on the header element because a drag
@@ -474,6 +480,8 @@ impl KoshaApp {
             deep_scan: None,
             folder_comparison: None,
             volume_history: None,
+            volume_space: None,
+            volume_space_open: false,
             column_drag: None,
             pending_query: start.query,
             pending_duplicates: start.duplicates,
@@ -2388,6 +2396,7 @@ impl KoshaApp {
     /// everything else.
     pub(crate) fn open_snapshot(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.volume_history = None;
+        self.volume_space_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2591,6 +2600,7 @@ impl KoshaApp {
         cx: &mut Context<Self>,
     ) {
         self.volume_history = None;
+        self.volume_space_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2690,16 +2700,21 @@ impl KoshaApp {
                 return (
                     kosha_core::wsl::scan_native(&scan_path, options, &cancel),
                     None,
+                    None,
                 );
             }
             let history = track_history
                 .then(|| history::TrackedCapture::start(&scan_path))
                 .flatten();
+            let space = track_history
+                .then(|| kosha_core::volume_space::SpaceCapture::start(&scan_path))
+                .flatten();
             let scanned = Scanner::new(options)
                 .with_cancel(cancel)
                 .with_progress(tx)
                 .scan(&scan_path);
-            (scanned, history)
+            let summary = space.and_then(|capture| capture.finish(scanned.as_ref().ok()?));
+            (scanned, history, summary)
         });
 
         // Poll progress on a timer rather than waking the UI per directory.
@@ -2741,7 +2756,7 @@ impl KoshaApp {
         .detach();
 
         cx.spawn(async move |this, cx| {
-            let (outcome, history) = task.await;
+            let (outcome, history, summary) = task.await;
             this.update(cx, |this, cx| {
                 if this.load_generation != generation {
                     return;
@@ -2752,6 +2767,9 @@ impl KoshaApp {
                             tree.mark_cancelled();
                         }
                         let tree = Arc::new(tree);
+                        this.volume_space = summary
+                            .filter(|_| !tree.stats().cancelled)
+                            .map(|summary| (Arc::downgrade(&tree), summary));
                         if let Some(history) = history {
                             this.save_tracked_history(history, Arc::clone(&tree), generation, cx);
                         }
@@ -3371,6 +3389,7 @@ impl KoshaApp {
     /// Shift-click bypass this path, and an unreadable cache is never a wall.
     fn open_drive(&mut self, root: PathBuf, cx: &mut Context<Self>) {
         self.volume_history = None;
+        self.volume_space_open = false;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -3427,6 +3446,7 @@ impl KoshaApp {
 
     fn open_folder_comparison(&mut self, cx: &mut Context<Self>) {
         self.volume_history = None;
+        self.volume_space_open = false;
         if self.folder_comparison.is_none() {
             self.folder_comparison = Some(crate::folder_comparison::View::new(self.state.ready()));
         }
@@ -4122,6 +4142,14 @@ impl KoshaApp {
             }
         }
 
+        if self.volume_space_open && self.current_volume_space().is_some() {
+            if key == "escape" {
+                self.volume_space_open = false;
+                cx.notify();
+            }
+            return;
+        }
+
         if self.volume_history.is_some() {
             if key == "escape" {
                 self.volume_history = None;
@@ -4673,7 +4701,9 @@ impl Render for KoshaApp {
         // What is left after the reader has had their say. The status bar gets
         // `fits` rather than this, so it offers to widen the window only for a
         // rail that width took away.
-        let separate_view = self.folder_comparison.is_some() || self.volume_history.is_some();
+        let separate_view = self.folder_comparison.is_some()
+            || self.volume_history.is_some()
+            || (self.volume_space_open && self.current_volume_space().is_some());
         let rails = fits.opened(
             self.settings.show_places && !separate_view,
             self.settings.show_insights && !separate_view,
@@ -4864,7 +4894,8 @@ impl KoshaApp {
                                 .is_none()
                                 .then(|| self.render_breadcrumb(palette, cx)),
                         )
-                        .children(self.history_button(palette, cx)),
+                        .children(self.history_button(palette, cx))
+                        .children(self.volume_space_button(palette, cx)),
                 )
                 .child(
                     // Read the cluster from the right, which is the edge
@@ -4882,6 +4913,7 @@ impl KoshaApp {
                         .children(
                             (self.folder_comparison.is_none()
                                 && self.volume_history.is_none()
+                                && !self.volume_space_open
                                 && !matches!(self.state.phase, Phase::Idle))
                             .then(|| {
                                 crate::ui::button("compare-folders-toolbar", palette)
@@ -5940,6 +5972,11 @@ impl KoshaApp {
             crate::folder_comparison::render(view, palette, cx)
         } else if let Some(view) = &self.volume_history {
             history::render(view, palette, cx)
+        } else if let Some(summary) = self
+            .current_volume_space()
+            .filter(|_| self.volume_space_open)
+        {
+            volume_space::render(summary, palette, cx)
         } else {
             match &self.state.phase {
                 Phase::Idle => self.render_welcome(rails, palette, cx).into_any_element(),

@@ -40,6 +40,37 @@ History follows the drive's root path. A replacement removable drive or changed
 drive-letter assignment can therefore open a record of the previous disk. Check
 the age and choose **Scan again** before relying on it.
 
+## Review volume space
+
+After a fresh scan of a supported local drive, choose **Volume space** from
+the toolbar. Compare the filesystem’s reported usage and free space with
+the allocation visible in the scan. **Available to you** accounts for
+restrictions such as quotas or reserved blocks. On Windows the used figure
+follows the caller’s quota scope.
+
+![Volume space on a synthetic macOS APFS volume. The panel shows 21.1 MiB of filesystem usage, 20 MiB of scanned allocation, and 4 MiB of Trash included in the scan.](images/gui-macos-volume-space.png)
+
+[View Volume space on Windows, with caller-scoped usage and estimated scanned allocation.](images/gui-windows-volume-space.png)
+
+[View Volume space on Linux, with reserved free space and a 33 KiB unexplained difference on a synthetic ext4 volume.](images/gui-linux-volume-space.png)
+
+The scan labels partial and estimated totals and reports unreadable entries
+and skipped mounts. If the scan could read a recognized volume Trash folder,
+its allocation is shown as part of the scanned total. Trash stored elsewhere
+and snapshots can affect usage without appearing in that row. On macOS,
+Kosha can show the filesystem snapshot count when the volume exposes it.
+Snapshot space remains unquantified.
+
+Kosha reports an unexplained difference only when the filesystem accounting
+scope is supported, the counters agree before and after the scan, and scan coverage supports
+the comparison. The difference can include filesystem overhead and allocation
+outside the scan. Shared APFS accounting and Windows quotas can prevent a
+reliable difference.
+
+Run `kosha space ROOT` for a fresh read-only volume scan, or add
+`--format jsonl` for a structured summary. A null gap has a status explaining
+why a size could not be reported.
+
 ## Review drive history
 
 Open a local drive in the desktop app and choose **History** beside its

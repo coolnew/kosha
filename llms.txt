@@ -139,6 +139,9 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
   completeness. Exit 1 indicates an error or cancellation; discard incomplete output.
 - Creation dates can be unknown, especially in older snapshots; modification
   dates are not substitutes. Do not treat missing metadata as proof of no matches.
+- `kosha space ROOT --format jsonl` scans a supported local volume and reports
+  filesystem counters, scanned allocation, coverage, and the reconciliation
+  status. Gap bytes can be null when the measurements cannot be compared.
 - `kosha history record ROOT` explicitly saves an observation for a supported
   local volume root. `kosha history list ROOT --format jsonl` lists saved
   observations with snapshot paths for `kosha compare`. Check `partial` and
