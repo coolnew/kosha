@@ -555,7 +555,10 @@ mod tests {
         let profile = lease
             .add_profile(location.clone(), Cadence::Daily, Thresholds::Growth(LIMIT))
             .unwrap();
-        assert_eq!(list_profiles(storage.path()).unwrap(), [profile.clone()]);
+        assert_eq!(
+            list_profiles(storage.path()).unwrap().as_slice(),
+            std::slice::from_ref(&profile)
+        );
         assert_eq!(
             lease
                 .add_profile(location, Cadence::Daily, Thresholds::Growth(LIMIT))
