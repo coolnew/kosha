@@ -1,5 +1,7 @@
 # Changelog
 
+## [Unreleased]
+
 ## [0.18.0] — 2026-11-25
 
 Kosha 0.18.0 adds scheduled storage monitoring, more ways to explain drive
