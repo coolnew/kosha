@@ -74,6 +74,10 @@ Kosha can save the following in its application directories or locations you sel
 - Explicit snapshots, imported listings and automatic saved drive scans
   containing filesystem metadata, including names, paths, sizes, timestamps,
   and collected ownership data.
+- Drive-history observations also record a local volume identifier, capacity,
+  and free space when available. They are stored locally with bounded retention
+  per volume. Kosha records them when requested or when you opt in to tracking
+  a drive. Clear the drive’s history from its desktop History view.
 - Exported results or comparisons and an audit log of file-changing operations,
   which can include affected paths and metadata.
 - Downloaded marketplace catalogs, recipe packs and review-only insight packs.

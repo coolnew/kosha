@@ -27,6 +27,7 @@ use crate::ui;
 struct Source {
     path: PathBuf,
     snapshot: bool,
+    history: bool,
 }
 
 struct Finding {
@@ -236,11 +237,25 @@ pub(crate) struct View {
 }
 
 impl View {
+    pub(crate) fn from_snapshots(paths: [PathBuf; 2]) -> Self {
+        Self {
+            sources: paths.map(|path| {
+                Some(Source {
+                    path,
+                    snapshot: true,
+                    history: true,
+                })
+            }),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn new(ready: Option<&crate::state::Ready>) -> Self {
         let left = ready.and_then(|ready| match &ready.source {
             crate::state::Source::Snapshot(record) => Some(Source {
                 path: record.path.clone(),
                 snapshot: true,
+                history: false,
             }),
             crate::state::Source::Disk
                 if matches!(
@@ -251,6 +266,7 @@ impl View {
                 Some(Source {
                     path: ready.tree.root_path().to_path_buf(),
                     snapshot: false,
+                    history: false,
                 })
             }
             _ => None,
@@ -393,7 +409,11 @@ impl KoshaApp {
                     .expect("picker belongs to this view");
                 view.picking = None;
                 if let Some(path) = selected {
-                    view.sources[side] = Some(Source { path, snapshot });
+                    view.sources[side] = Some(Source {
+                        path,
+                        snapshot,
+                        history: false,
+                    });
                     if snapshot {
                         view.verify = false;
                     }
@@ -408,7 +428,7 @@ impl KoshaApp {
         cx.notify();
     }
 
-    fn compare_folders(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn compare_folders(&mut self, cx: &mut Context<Self>) {
         let Some(view) = self
             .folder_comparison
             .as_mut()
@@ -563,7 +583,7 @@ pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
             }))
         .child(h_flex().items_stretch().gap(px(8.)).children(["Left source", "Right source"].into_iter().enumerate().map(|(side, label)| {
             let observation = view.sources[side].as_ref().map(|source| {
-                let kind = if source.snapshot { "Snapshot" } else { "Live folder" };
+                let kind = if source.history { "History" } else if source.snapshot { "Snapshot" } else { "Live folder" };
                 view.report.as_ref().map_or_else(|| kind.to_owned(), |report| {
                     let stamp = format::stamp(report.sources[side].taken, u64::from(format::now_unix()));
                     format!("{kind} · {stamp}")
@@ -574,10 +594,14 @@ pub(crate) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
                     .text_color(palette.text_dim).child(label).children(observation.map(|value| div().child(value))));
             if let Some(source) = &view.sources[side] {
                 let path = source.path.to_string_lossy();
-                let name = source.path.file_name().map_or_else(|| path.clone(), |name| name.to_string_lossy());
+                let name = if source.history {
+                    std::borrow::Cow::Borrowed("Drive observation")
+                } else {
+                    source.path.file_name().map_or_else(|| path.clone(), |name| name.to_string_lossy())
+                };
                 card = card
                     .child(div().id(("comparison-source-name", side)).debug_selector(move || if side == 0 { "comparison-left-selected".into() } else { "comparison-right-selected".into() }).truncate().text_color(palette.text).child(format::printable(&name).into_owned()))
-                    .child(div().truncate().text_size(metrics::scaled(metrics::TEXT_SM)).text_color(palette.text_dim).child(format::printable(&path).into_owned()));
+                    .children((!source.history).then(|| div().truncate().text_size(metrics::scaled(metrics::TEXT_SM)).text_color(palette.text_dim).child(format::printable(&path).into_owned())));
             } else {
                 card = card.child(div().text_color(palette.text_dim).child("Choose a folder or saved snapshot"));
             }
@@ -848,6 +872,7 @@ mod tests {
         let sources = [left, right].map(|path| Source {
             path,
             snapshot: false,
+            history: false,
         });
         let stop = Arc::new(AtomicBool::new(false));
         let report = compare(sources.clone(), false, &stop).unwrap();

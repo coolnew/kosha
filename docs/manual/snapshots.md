@@ -24,7 +24,8 @@ for JSON/JSONL inventory and error statuses.
 
 A finished drive scan is written in the background. Selecting that drive again
 can display the finished record immediately in the same session. After an app
-restart, the drive click reads the saved record from disk.
+restart, selecting the drive reads the record from disk and shows **Opening
+saved scan** while it loads. Press Esc to dismiss the load.
 
 **Saved scan** beside the breadcrumb shows its age. **Scan again** or **Ctrl+R**
 refreshes the disk view. Shift-clicking the drive requests a new scan using an
@@ -38,6 +39,51 @@ their partial indicators. Folder scans are not saved automatically.
 History follows the drive's root path. A replacement removable drive or changed
 drive-letter assignment can therefore open a record of the previous disk. Check
 the age and choose **Scan again** before relying on it.
+
+## Review drive history
+
+Open a local drive in the desktop app and choose **History** beside its
+breadcrumb. **Record scan** takes a new drive scan and adds an observation.
+After the second observation, Kosha shows free space for each scan and ranks
+the largest top-level folder changes by allocated size.
+
+Choose **Track this drive** to add future completed drive scans to its history
+automatically. Tracking is off by default and does not schedule additional
+scans. **Stop tracking** keeps the existing observations. **Clear history…**
+asks for confirmation before removing observations for the selected drive.
+If tracking is on, future completed scans start a new history.
+
+The newest two observations are selected initially. Change the interval with
+**Start** and **End** beside the observations. **Open comparison** opens the
+two saved records to show individual path changes and export the findings.
+Kosha marks partial scans and displays folder growth only for compatible,
+complete observations.
+
+![Drive History on macOS with three free-space measurements and a selected interval showing Media and Workspaces growth and an Archives decrease](images/gui-macos-drive-history.png)
+
+[View Drive History on Windows with a 6 MiB change to a synthetic NTFS volume.](images/gui-windows-drive-history.png)
+
+### Record drive history from the command line
+
+Use a mounted local volume root, such as an external drive. Run
+`kosha history record ROOT` to take a scan and save its capacity and free-space
+measurements alongside the snapshot. Repeat after the drive changes.
+`kosha history list ROOT` lists the observations in time order. Use
+`--format jsonl` for timestamps in Unix milliseconds, byte totals and snapshot
+paths. Run `kosha history growth ROOT` to rank measured allocation changes
+in top-level folders between the newest two complete, compatible scans.
+That ranking can account for some of the volume's free-space change. Pass two
+listed snapshot paths to `kosha compare` to see individual changes.
+
+History is separate from saved drive scans and explicit snapshots. It follows a
+supported volume identifier across changes to the mount path. On Linux, this
+requires a whole local block filesystem with a matching UUID in
+`/dev/disk/by-uuid`. Network volumes, WSL paths viewed through Windows, and
+volumes without a supported identifier are unavailable. Partial scans are
+marked. A missing free-space measurement is reported as unavailable.
+
+Kosha keeps up to eight observations and 512 MiB of history per volume. It keeps
+the newest observation even if that snapshot alone exceeds the byte limit.
 
 ## Explicit snapshots
 

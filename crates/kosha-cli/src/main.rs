@@ -23,6 +23,7 @@ use kosha_core::{say, sayln};
 mod cache;
 mod checksum_candidates;
 mod compare_snapshots;
+mod history;
 mod import;
 mod marketplace;
 #[cfg(feature = "remote-client")]
@@ -51,6 +52,7 @@ USAGE:
     kosha import --from FORMAT FILE  keep an ncdu, rclone or QDirStat listing
     kosha duplicate-candidates --algorithm ALGORITHM LISTING [LISTING]
     kosha compare LEFT RIGHT        compare folders or saved snapshots
+    kosha history --help            record or inspect volume history
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
     kosha view --help              publish and query scoped metadata views
@@ -312,6 +314,7 @@ fn main() -> ExitCode {
         Ok(Parsed::Import(args)) => import::run(&args),
         Ok(Parsed::ChecksumCandidates(args)) => checksum_candidates::run(&args),
         Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
+        Ok(Parsed::History(args)) => return history::run(&args),
         Ok(Parsed::ImportHelp) => {
             say!("{}", import::USAGE);
             return ExitCode::SUCCESS;
@@ -2007,6 +2010,7 @@ enum Parsed {
     Import(Box<import::Args>),
     ChecksumCandidates(Vec<String>),
     CompareSnapshots(Vec<String>),
+    History(Vec<String>),
     ImportHelp,
     SearchHelp,
     SearchRecipes(Option<PathBuf>, Option<String>),
@@ -2067,6 +2071,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "compare") {
         argv.next();
         return Ok(Parsed::CompareSnapshots(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "history") {
+        argv.next();
+        return Ok(Parsed::History(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "search") {
         argv.next();

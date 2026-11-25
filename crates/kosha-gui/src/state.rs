@@ -30,6 +30,8 @@ pub enum Phase {
     /// Nothing scanned yet. The window is fully interactive here — this is the
     /// first frame, and it must never be a spinner on an empty canvas.
     Idle,
+    /// Reading an automatic snapshot from disk before browsing its drive.
+    OpeningDrive { path: PathBuf },
     /// A scan is running. Results stream in; the UI stays live throughout.
     Scanning {
         path: PathBuf,

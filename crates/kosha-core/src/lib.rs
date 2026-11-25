@@ -68,6 +68,7 @@ mod udf;
 pub mod version;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub mod vhdx;
+pub mod volume_history;
 /// XFS, read out of a disk image.
 mod xfs;
 

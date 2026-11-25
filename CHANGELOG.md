@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Review drive history and folder growth
+
+Record drive scans explicitly or track a local drive to retain observations
+from completed scans. History shows how free space and top-level folder
+allocation changed. Open a comparison for individual paths, or use
+`kosha history` for CLI access.
+
 ### Compare live folders and saved snapshots
 
 Choose **Compare folders…** on the desktop welcome screen or toolbar, or run
@@ -12,6 +19,11 @@ The CLI also supports JSONL for scripts.
 
 For two live folders, turn on **Verify file contents** or pass `--verify` to
 catch byte changes in equal-size files, even when timestamps agree.
+
+### Show progress while opening a saved drive scan
+
+The desktop shows **Opening saved scan** while it reads a drive record from
+disk. Press Esc to dismiss the load.
 
 ## [0.17.2] — 2026-11-24
 

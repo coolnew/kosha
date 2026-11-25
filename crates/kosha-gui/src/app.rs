@@ -46,6 +46,7 @@ use crate::state::{Duplicates, KeyIntent, PendingAction, Phase, Ready, Search, S
 use crate::theme::{Category, Palette, metrics};
 use crate::treemap::{self, Rect};
 
+mod history;
 #[cfg(feature = "remote-client")]
 mod remote_scan;
 
@@ -185,6 +186,7 @@ pub struct KoshaApp {
     fragmentation: Option<(u64, NodeId, Fragments)>,
     deep_scan: Option<DeepScanJob>,
     pub(crate) folder_comparison: Option<crate::folder_comparison::View>,
+    volume_history: Option<history::View>,
     /// The column edge being dragged, if any.
     ///
     /// Held on the view rather than on the header element because a drag
@@ -471,6 +473,7 @@ impl KoshaApp {
             fragmentation: None,
             deep_scan: None,
             folder_comparison: None,
+            volume_history: None,
             column_drag: None,
             pending_query: start.query,
             pending_duplicates: start.duplicates,
@@ -2242,6 +2245,10 @@ impl KoshaApp {
         matches!(self.state.phase, crate::state::Phase::Scanning { .. })
     }
 
+    fn is_opening_drive(&self) -> bool {
+        matches!(self.state.phase, Phase::OpeningDrive { .. })
+    }
+
     /// How this session renders sizes. Threaded through every call site rather
     /// than defaulted, so a user who picked GB never sees a stray GiB.
     pub(crate) fn units(&self) -> kosha_core::format::Units {
@@ -2380,6 +2387,7 @@ impl KoshaApp {
     /// application that blocks. So it goes to the background pool like
     /// everything else.
     pub(crate) fn open_snapshot(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.volume_history = None;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2392,7 +2400,7 @@ impl KoshaApp {
         self.comparison_generation += 1;
         self.comparison_busy = false;
         let generation = self.load_generation;
-        if self.is_scanning() {
+        if self.is_scanning() || self.is_opening_drive() {
             self.state.phase = Phase::Idle;
         }
         self.state.notice = Some(format!("Opening {}\u{2026}", path.display()));
@@ -2582,6 +2590,7 @@ impl KoshaApp {
         options: kosha_core::ScanOptions,
         cx: &mut Context<Self>,
     ) {
+        self.volume_history = None;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -2650,6 +2659,7 @@ impl KoshaApp {
         self.scan_timing = crate::scan_timing::ScanTiming::with_total(reference_entries);
         let (total_tx, total_rx) = crossbeam_channel::bounded(1);
         let started = std::time::Instant::now();
+        let track_history = self.is_automatic_scan_root(&scan_path) && !options.cross_filesystems;
         let task = cx.background_executor().spawn(async move {
             if reference_entries.is_none()
                 && options.max_depth.is_none()
@@ -2677,12 +2687,19 @@ impl KoshaApp {
             }
             #[cfg(windows)]
             if native_wsl {
-                return kosha_core::wsl::scan_native(&scan_path, options, &cancel);
+                return (
+                    kosha_core::wsl::scan_native(&scan_path, options, &cancel),
+                    None,
+                );
             }
-            Scanner::new(options)
+            let history = track_history
+                .then(|| history::TrackedCapture::start(&scan_path))
+                .flatten();
+            let scanned = Scanner::new(options)
                 .with_cancel(cancel)
                 .with_progress(tx)
-                .scan(&scan_path)
+                .scan(&scan_path);
+            (scanned, history)
         });
 
         // Poll progress on a timer rather than waking the UI per directory.
@@ -2724,7 +2741,7 @@ impl KoshaApp {
         .detach();
 
         cx.spawn(async move |this, cx| {
-            let outcome = task.await;
+            let (outcome, history) = task.await;
             this.update(cx, |this, cx| {
                 if this.load_generation != generation {
                     return;
@@ -2734,7 +2751,11 @@ impl KoshaApp {
                         if completion_cancel.load(std::sync::atomic::Ordering::Relaxed) {
                             tree.mark_cancelled();
                         }
-                        this.scan_finished(Arc::new(tree), cx);
+                        let tree = Arc::new(tree);
+                        if let Some(history) = history {
+                            this.save_tracked_history(history, Arc::clone(&tree), generation, cx);
+                        }
+                        this.scan_finished(tree, cx);
                     }
                     // Cancelling is something the user did, not something that went
                     // wrong, and a failure screen saying "the scan was cancelled"
@@ -3349,6 +3370,7 @@ impl KoshaApp {
     /// Browsing a drive prefers its last record. Explicit scan commands and
     /// Shift-click bypass this path, and an unreadable cache is never a wall.
     fn open_drive(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+        self.volume_history = None;
         #[cfg(feature = "remote-client")]
         {
             self.remote_scan = None;
@@ -3378,7 +3400,8 @@ impl KoshaApp {
             self.snapshot_opened(path, meta, tree, true, cx);
             return;
         }
-        self.state.notice = Some("Opening last drive scan…".into());
+        self.state.phase = Phase::OpeningDrive { path: root.clone() };
+        self.state.notice = None;
         cx.notify();
         let reading = root.clone();
         let task = cx
@@ -3403,6 +3426,7 @@ impl KoshaApp {
     }
 
     fn open_folder_comparison(&mut self, cx: &mut Context<Self>) {
+        self.volume_history = None;
         if self.folder_comparison.is_none() {
             self.folder_comparison = Some(crate::folder_comparison::View::new(self.state.ready()));
         }
@@ -3913,7 +3937,10 @@ impl KoshaApp {
         // Capture Escape before a focused input can consume it. Other keys
         // retain normal bubbling and overlay dismissal keeps its usual order.
         if event.keystroke.key == "escape"
-            && (self.is_scanning() || self.handoff.is_some() || self.handoff_task.is_some())
+            && (self.is_scanning()
+                || self.is_opening_drive()
+                || self.handoff.is_some()
+                || self.handoff_task.is_some())
         {
             self.on_key(event, window, cx);
             cx.stop_propagation();
@@ -4008,7 +4035,7 @@ impl KoshaApp {
                         .ready()
                         .is_some_and(|ready| ready.comparison.is_some()),
                 hunting: self.state.ready().is_some_and(Ready::is_hunting),
-                scanning: self.is_scanning(),
+                scanning: self.is_scanning() || self.is_opening_drive(),
                 filter_open: self.filter_open,
             },
         ) {
@@ -4084,10 +4111,23 @@ impl KoshaApp {
                 return;
             }
             KeyIntent::StopScan => {
-                self.state.cancel_scan();
+                if self.is_opening_drive() {
+                    self.load_generation += 1;
+                    self.state.phase = Phase::Idle;
+                } else {
+                    self.state.cancel_scan();
+                }
                 cx.notify();
                 return;
             }
+        }
+
+        if self.volume_history.is_some() {
+            if key == "escape" {
+                self.volume_history = None;
+                cx.notify();
+            }
+            return;
         }
 
         if self.folder_comparison.is_some() {
@@ -4389,7 +4429,10 @@ impl KoshaApp {
         if self.refuse_nonlocal_rescan(cx) {
             return;
         }
-        let root = self.state.session.root().to_path_buf();
+        let root = match &self.state.phase {
+            Phase::OpeningDrive { path } => path.clone(),
+            _ => self.state.session.root().to_path_buf(),
+        };
         let wsl = cfg!(windows)
             && root
                 .to_str()
@@ -4586,14 +4629,15 @@ impl Render for KoshaApp {
         let read_write = self.state.mode().is_read_write();
         // `Some(None)` is a job with no measurable end, `Some(Some(f))` one
         // that has got f of the way through, and `None` is nothing running.
-        let job: Option<Option<f32>> = if self.is_scanning() || self.comparison_busy {
-            Some(None)
-        } else {
-            self.state
-                .ready()
-                .and_then(|ready| ready.hunt.as_ref())
-                .map(|hunt| hunt.progress.and_then(|p| p.fraction()))
-        };
+        let job: Option<Option<f32>> =
+            if self.is_scanning() || self.is_opening_drive() || self.comparison_busy {
+                Some(None)
+            } else {
+                self.state
+                    .ready()
+                    .and_then(|ready| ready.hunt.as_ref())
+                    .map(|hunt| hunt.progress.and_then(|p| p.fraction()))
+            };
 
         // Before anything is built, because quick look reads the answer below
         // and this is where a moved selection is noticed.
@@ -4629,10 +4673,10 @@ impl Render for KoshaApp {
         // What is left after the reader has had their say. The status bar gets
         // `fits` rather than this, so it offers to widen the window only for a
         // rail that width took away.
-        let comparing_folders = self.folder_comparison.is_some();
+        let separate_view = self.folder_comparison.is_some() || self.volume_history.is_some();
         let rails = fits.opened(
-            self.settings.show_places && !comparing_folders,
-            self.settings.show_insights && !comparing_folders,
+            self.settings.show_places && !separate_view,
+            self.settings.show_insights && !separate_view,
         );
 
         div()
@@ -4688,9 +4732,7 @@ impl Render for KoshaApp {
                             .child(self.render_main(rails, &palette, cx))
                             .children(rails.insights.then(|| self.render_insights(&palette, cx))),
                     )
-                    .children(
-                        (!comparing_folders).then(|| self.render_status_bar(fits, &palette, cx)),
-                    ),
+                    .children((!separate_view).then(|| self.render_status_bar(fits, &palette, cx))),
             )
             .children(Self::render_background_activity(
                 self.background_activities(),
@@ -4821,7 +4863,8 @@ impl KoshaApp {
                             self.folder_comparison
                                 .is_none()
                                 .then(|| self.render_breadcrumb(palette, cx)),
-                        ),
+                        )
+                        .children(self.history_button(palette, cx)),
                 )
                 .child(
                     // Read the cluster from the right, which is the edge
@@ -4838,6 +4881,7 @@ impl KoshaApp {
                         .items_center()
                         .children(
                             (self.folder_comparison.is_none()
+                                && self.volume_history.is_none()
                                 && !matches!(self.state.phase, Phase::Idle))
                             .then(|| {
                                 crate::ui::button("compare-folders-toolbar", palette)
@@ -5894,9 +5938,44 @@ impl KoshaApp {
     ) -> impl IntoElement {
         let body = if let Some(view) = &self.folder_comparison {
             crate::folder_comparison::render(view, palette, cx)
+        } else if let Some(view) = &self.volume_history {
+            history::render(view, palette, cx)
         } else {
             match &self.state.phase {
                 Phase::Idle => self.render_welcome(rails, palette, cx).into_any_element(),
+                Phase::OpeningDrive { path } => v_flex()
+                    .id("opening-saved-drive")
+                    .debug_selector(|| "opening-saved-drive".into())
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(10.0))
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(10.0))
+                            .child(pulse(palette, cx.reduce_motion()))
+                            .child(
+                                div()
+                                    .text_size(metrics::scaled(metrics::TEXT_XL))
+                                    .text_color(palette.text)
+                                    .child("Opening saved scan"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(560.0))
+                            .truncate()
+                            .text_color(palette.text_dim)
+                            .child(format::printable(&path.to_string_lossy()).into_owned()),
+                    )
+                    .child(
+                        div()
+                            .text_size(metrics::scaled(metrics::TEXT_SM))
+                            .text_color(palette.text_faint)
+                            .child("Esc to dismiss"),
+                    )
+                    .into_any_element(),
                 Phase::Failed {
                     path,
                     message,
@@ -6852,6 +6931,45 @@ fn headless_comparison_opens_from_welcome_and_current_scan() {
     assert!(visual.debug_bounds("folder-comparison").is_some());
     assert!(visual.debug_bounds("comparison-left-selected").is_some());
     assert!(visual.debug_bounds("comparison-right-selected").is_none());
+}
+
+#[cfg(all(
+    test,
+    any(windows, target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_saved_drive_load_shows_progress_in_the_main_view() {
+    use gpui_kit::{TestAppContext, VisualTestContext};
+
+    let fixture = tempfile::tempdir().unwrap();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    assert!(visual.debug_bounds("opening-saved-drive").is_none());
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.state.phase = Phase::OpeningDrive {
+                path: fixture.path().to_path_buf(),
+            };
+            cx.notify();
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("opening-saved-drive").is_some());
 }
 
 #[cfg(all(
@@ -8220,7 +8338,9 @@ impl KoshaApp {
                 // nobody has scanned anything — and telling somebody to scan
                 // a location while one is running reads as the scan being
                 // ignored.
-                if self.is_scanning() {
+                if self.is_opening_drive() {
+                    "Findings appear after the saved scan opens."
+                } else if self.is_scanning() {
                     "Findings appear when the scan finishes."
                 } else {
                     "Scan a location to see what can be reclaimed."
@@ -8677,6 +8797,7 @@ impl KoshaApp {
     ) -> impl IntoElement {
         let text: SharedString = match &self.state.phase {
             Phase::Idle => "Ready".into(),
+            Phase::OpeningDrive { .. } => "Opening saved scan…".into(),
             Phase::Failed { .. } => "Scan failed".into(),
             Phase::Scanning { path, progress, .. } => match progress {
                 // Never a spinner without a number.

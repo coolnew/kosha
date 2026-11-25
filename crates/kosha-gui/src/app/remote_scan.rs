@@ -193,7 +193,7 @@ impl KoshaApp {
         self.disarm();
         self.state.pending = None;
         self.state.cancel_scan();
-        if self.is_scanning() {
+        if self.is_scanning() || self.is_opening_drive() {
             self.state.phase = Phase::Idle;
         }
         self.cancel_search();

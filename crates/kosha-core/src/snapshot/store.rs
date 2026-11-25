@@ -140,6 +140,248 @@ pub fn save_automatic_in(dir: &Path, tree: &SizeTree, taken: SystemTime) -> io::
     replaced.map(|_| destination)
 }
 
+/// A committed observation. Listing reads only each snapshot's header.
+#[derive(Debug)]
+pub struct HistoryEntry {
+    pub record: Kept,
+    pub usage: Option<crate::DiskUsage>,
+    pub partial: bool,
+}
+
+const HISTORY_POINTS: usize = 8;
+const HISTORY_BYTES: u64 = 512 * 1024 * 1024;
+
+pub fn history_dir() -> Option<PathBuf> {
+    Some(crate::dirs::data_dir()?.join("volume-history"))
+}
+
+fn history_series(dir: &Path, volume: &crate::volume_history::VolumeId) -> PathBuf {
+    // The ID is built only from a platform prefix and validated hex/UUID
+    // bytes. Replace the separator for a Windows-compatible component.
+    dir.join(volume.as_str().replace(':', "-"))
+}
+
+/// A tracking generation. A scan started before tracking was switched off or
+/// history was cleared must not repopulate the series after that operation.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HistoryTracking(String);
+
+pub fn history_tracking_in(
+    dir: &Path,
+    volume: &crate::volume_history::VolumeId,
+) -> io::Result<Option<HistoryTracking>> {
+    read_history_tracking(&history_series(dir, volume))
+}
+
+fn read_history_tracking(series: &Path) -> io::Result<Option<HistoryTracking>> {
+    match fs::read_to_string(series.join("tracking")) {
+        Ok(generation) => Ok(Some(HistoryTracking(generation))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_history_file(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+fn lock_history_series(series: &Path) -> io::Result<fs::File> {
+    fs::create_dir_all(series)?;
+    let lock = fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(series.join(".write.lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn write_tracking_generation(series: &Path) -> io::Result<()> {
+    use std::io::Write as _;
+    let tick = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_nanos();
+    crate::export::atomic_write(&series.join("tracking"), |out| {
+        write!(out, "{}-{tick}", std::process::id())
+    })
+}
+
+pub fn set_history_tracking_in(
+    dir: &Path,
+    volume: &crate::volume_history::VolumeId,
+    enabled: bool,
+) -> io::Result<()> {
+    let series = history_series(dir, volume);
+    let _lock = lock_history_series(&series)?;
+    if enabled {
+        if read_history_tracking(&series)?.is_none() {
+            write_tracking_generation(&series)?;
+        }
+        Ok(())
+    } else {
+        remove_history_file(&series.join("tracking"))
+    }
+}
+
+/// Remove only this volume's recorded observations and abandoned staging.
+/// Keep its tracking preference, with a fresh generation for future scans.
+pub fn clear_history_in(dir: &Path, volume: &crate::volume_history::VolumeId) -> io::Result<()> {
+    let series = history_series(dir, volume);
+    let _lock = lock_history_series(&series)?;
+    if read_history_tracking(&series)?.is_some() {
+        write_tracking_generation(&series)?;
+    }
+    for child in fs::read_dir(&series)? {
+        let child = child?;
+        if child.file_type()?.is_file() && history_filename(&child.file_name()).is_some() {
+            remove_history_file(&child.path())?;
+        }
+    }
+    remove_history_file(&series.join(".pending"))
+}
+
+pub fn list_history_in(
+    dir: &Path,
+    volume: &crate::volume_history::VolumeId,
+) -> io::Result<Vec<HistoryEntry>> {
+    let mut records = Vec::new();
+    let series = history_series(dir, volume);
+    let children = match fs::read_dir(series) {
+        Ok(children) => children,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(records),
+        Err(error) => return Err(error),
+    };
+    for child in children {
+        let child = child?;
+        if !child.file_type()?.is_file() {
+            continue;
+        }
+        let Some((stamp, usage, partial)) = history_filename(&child.file_name()) else {
+            continue;
+        };
+        let path = child.path();
+        let Ok(meta) = read_meta_at(&path) else {
+            continue;
+        };
+        if meta.at_ms() != stamp {
+            continue;
+        }
+        let bytes = match child.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        records.push(HistoryEntry {
+            record: Kept { bytes, meta, path },
+            usage,
+            partial,
+        });
+    }
+    records.sort_unstable_by(|a, b| {
+        (a.record.meta.at_ms(), &a.record.path).cmp(&(b.record.meta.at_ms(), &b.record.path))
+    });
+    Ok(records)
+}
+
+fn history_filename(name: &std::ffi::OsStr) -> Option<(u64, Option<crate::DiskUsage>, bool)> {
+    let name = name.to_str()?.strip_prefix("v1-")?.strip_suffix(".kosha")?;
+    let mut fields = name.split('-');
+    let stamp = fields.next()?.parse().ok()?;
+    let partial = match fields.next()? {
+        "complete" => false,
+        "partial" => true,
+        _ => return None,
+    };
+    let usage = match fields.next()? {
+        "unknown" => None,
+        total => Some(crate::DiskUsage {
+            total: total.parse().ok()?,
+            free: fields.next()?.parse().ok()?,
+            available: fields.next()?.parse().ok()?,
+        }),
+    };
+    let _attempt: u32 = fields.next()?.parse().ok()?;
+    fields.next().is_none().then_some((stamp, usage, partial))
+}
+
+/// Commit one observation and retain the newest points within the per-volume
+/// limits. The newest point is kept even when its arena exceeds the byte cap.
+pub fn save_history_in(
+    dir: &Path,
+    observation: &crate::volume_history::Observation<'_>,
+) -> io::Result<()> {
+    let series = history_series(dir, observation.volume());
+    let _lock = lock_history_series(&series)?;
+    save_history_locked(dir, &series, observation)
+}
+
+pub fn save_tracked_history_in(
+    dir: &Path,
+    observation: &crate::volume_history::Observation<'_>,
+    generation: &HistoryTracking,
+) -> io::Result<()> {
+    let series = history_series(dir, observation.volume());
+    let _lock = lock_history_series(&series)?;
+    if read_history_tracking(&series)?.as_ref() == Some(generation) {
+        save_history_locked(dir, &series, observation)?;
+    }
+    Ok(())
+}
+
+fn save_history_locked(
+    dir: &Path,
+    series: &Path,
+    observation: &crate::volume_history::Observation<'_>,
+) -> io::Result<()> {
+    let tree = observation.tree();
+    let meta = Meta::of(tree, observation.time(), "Drive history");
+    let stamp = meta.at_ms();
+    let coverage = if observation.partial() {
+        "partial"
+    } else {
+        "complete"
+    };
+    let usage = observation.usage().map_or_else(
+        || "unknown".to_owned(),
+        |usage| format!("{}-{}-{}", usage.total, usage.free, usage.available),
+    );
+    let destination = (0..ATTEMPTS)
+        .map(|index| series.join(format!("v1-{stamp}-{coverage}-{usage}-{index}.kosha")))
+        .find(|path| !path.exists())
+        .ok_or_else(|| io::Error::other("too many observations at the same time"))?;
+    // The volume lock makes this a single staging name, including on retry
+    // after an interrupted save. Readers ignore it until the final rename.
+    let staged = series.join(".pending");
+    match fs::remove_file(&staged) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let file = fs::File::create_new(&staged)?;
+    commit_snapshot(file, tree, &meta, &staged, &destination)?;
+
+    let mut bytes = 0u64;
+    for (index, entry) in list_history_in(dir, observation.volume())?
+        .into_iter()
+        .rev()
+        .enumerate()
+    {
+        bytes = bytes.saturating_add(entry.record.bytes);
+        if index > 0 && (index >= HISTORY_POINTS || bytes > HISTORY_BYTES) {
+            match fs::remove_file(entry.record.path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(())
+}
+
 /// How many names to try before giving up.
 ///
 /// Only reached by something taking snapshots in a loop inside one
@@ -226,30 +468,33 @@ fn save_with_meta_in(
             continue;
         }
 
-        let write = (|| {
-            let mut out = BufWriter::new(file);
-            super::write(tree, meta, &mut out)?;
-            // Flushed explicitly: a `BufWriter` dropped on the way out of
-            // scope swallows the error from its final flush, and a snapshot
-            // whose last buffer never reached the disk is the one case this
-            // whole dance is about.
-            out.into_inner()?.sync_all()
-        })();
-
-        // Every failure from here takes the half-written file with it, whether
-        // it was the writing or the rename that failed. A `.writing` file left
-        // in the directory is invisible to the listing but not to the person
-        // who goes looking at what snapshots cost.
-        if let Err(error) = write.and_then(|()| fs::rename(&temp_path, &final_path)) {
-            let _ = fs::remove_file(&temp_path);
-            return Err(error);
-        }
+        commit_snapshot(file, tree, meta, &temp_path, &final_path)?;
         return Ok(final_path);
     }
 
     Err(io::Error::other(
         "could not find an unused name for this snapshot",
     ))
+}
+
+fn commit_snapshot(
+    file: fs::File,
+    tree: &SizeTree,
+    meta: &Meta,
+    staged: &Path,
+    destination: &Path,
+) -> io::Result<()> {
+    let write = (|| {
+        let mut out = BufWriter::new(file);
+        super::write(tree, meta, &mut out)?;
+        // Explicitly flush and sync before publishing the snapshot.
+        out.into_inner()?.sync_all()
+    })();
+    let result = write.and_then(|()| fs::rename(staged, destination));
+    if result.is_err() {
+        let _ = fs::remove_file(staged);
+    }
+    result
 }
 
 /// A file in the store that is not a snapshot anybody can open.

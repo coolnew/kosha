@@ -92,6 +92,7 @@ there is no production MSIX distribution yet.
 | `insight-packs/` | Configuration | Managed review-only insight packs in builds after 0.10.7; separate from personal rules |
 | `snapshots/` | Data | Explicit `.kosha` records saved by either executable |
 | `drive-cache/` | Data | Automatic historical records written by the GUI and read explicitly by the CLI |
+| `volume-history/` | Data | Drive-history observations and opt-in tracking preferences, grouped by volume, with bounded local retention |
 | `audit.jsonl` | Data | Append-only history of file-changing actions from the GUI |
 
 Publisher-qualified packs use `recipe-packs/PUBLISHER/pack-ID.json`. Older flat

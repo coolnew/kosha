@@ -139,6 +139,12 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
   completeness. Exit 1 indicates an error or cancellation; discard incomplete output.
 - Creation dates can be unknown, especially in older snapshots; modification
   dates are not substitutes. Do not treat missing metadata as proof of no matches.
+- `kosha history record ROOT` explicitly saves an observation for a supported
+  local volume root. `kosha history list ROOT --format jsonl` lists saved
+  observations with snapshot paths for `kosha compare`. Check `partial` and
+  allow `usage` to be null when the volume did not supply capacity data.
+  `kosha history growth ROOT --format jsonl` ranks allocated-byte changes in
+  top-level folders between the latest two compatible observations.
 - `kosha "PATH" --cleanup-guide` prints known recorded workflow locations and
   owning-tool instructions. It never executes cleanup; sizes are not promised
   savings. Custom locations may not match. This is human prose, omitted when
