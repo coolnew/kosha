@@ -111,7 +111,8 @@ See [Microsoft’s AppData virtualization rules](https://learn.microsoft.com/en-
 | `snapshots/` | Data | Explicit `.kosha` records saved by either executable |
 | `drive-cache/` | Data | Automatic historical records written by the GUI and read explicitly by the CLI |
 | `volume-history/` | Data | Drive-history observations and opt-in tracking preferences, grouped by volume, with bounded local retention |
-| `audit.jsonl` | Data | Append-only history of file-changing actions from the GUI |
+| `audit.jsonl` | Data | Append-only history of approved file-changing actions |
+| `cleanup-workflows/workflows.json` | Data | Saved workflow names, pinned local locations, and relative file paths |
 
 Publisher-qualified packs use `recipe-packs/PUBLISHER/pack-ID.json`. Older flat
 `recipe-packs/pack-ID.json` copies remain valid. Personal recipe files are not

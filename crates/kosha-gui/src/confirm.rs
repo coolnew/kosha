@@ -132,12 +132,16 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
         .map(|item| item.action.label().to_string())
         .unwrap_or_else(|| "Run".into());
 
-    // A handful of real paths beats a count. Users check whether the tool
-    // understood them by reading the first few lines.
+    // Saved workflows have a bounded target list and expose every path for review.
+    let path_limit = if pending.workflow.is_some() {
+        plan.items().len()
+    } else {
+        8
+    };
     let paths: Vec<SharedString> = plan
         .items()
         .iter()
-        .take(8)
+        .take(path_limit)
         .map(|item| {
             SharedString::from(format::printable(&item.path.to_string_lossy()).into_owned())
         })

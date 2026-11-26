@@ -1,21 +1,500 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // SPDX-FileCopyrightText: 2026 Neeraj Sharma <neerajsharma.9@outlook.com> and The kosha contributors
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui_kit::base::{h_flex, v_flex};
+use gpui_kit::base::{h_flex, input::InputState, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, div, px,
+    AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, Task, Window, div, px,
 };
 use kosha_analyze::{Insight, Suggested};
 use kosha_core::{NodeId, SizeTree, Strategy, format};
-use kosha_fsops::Action;
+use kosha_fsops::{
+    Action,
+    workflows::{self, Workflow},
+};
 
 use super::KoshaApp;
 use crate::theme::{Palette, metrics};
 use crate::ui;
+
+#[derive(Default)]
+pub(super) struct Workflows {
+    saved: BTreeMap<String, Workflow>,
+    draft: Option<WorkflowDraft>,
+    message: Option<String>,
+    task: Option<Task<()>>,
+}
+
+struct WorkflowDraft {
+    original: Option<(String, Workflow)>,
+    name: Entity<InputState>,
+    root: Entity<InputState>,
+    files: Vec<PathBuf>,
+}
+
+pub(super) fn render_workflows(
+    view: &Workflows,
+    palette: &Palette,
+    cx: &mut Context<KoshaApp>,
+) -> AnyElement {
+    let mut panel = v_flex()
+        .id("saved-cleanup-workflows")
+        .w_full()
+        .max_w(px(680.))
+        .gap(px(12.))
+        .child(
+            h_flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_size(metrics::scaled(metrics::TEXT_XL))
+                        .child("Saved cleanup workflows"),
+                )
+                .child(
+                    ui::button("close-workflows", palette)
+                        .child("Done")
+                        .on_click(cx.listener(|app, _, _, cx| {
+                            app.cleanup_workflows = None;
+                            cx.notify();
+                        })),
+                ),
+        )
+        .children(
+            view.message
+                .as_ref()
+                .map(|message| ui::note(palette, message.clone())),
+        );
+    if view.task.is_none() {
+        if let Some(draft) = &view.draft {
+            panel = panel.child(ui::note(
+                palette,
+                "Choose individual files inside one local folder. Each run requires confirmation.",
+            ));
+            if let Some((name, workflow)) = &draft.original {
+                panel = panel
+                    .child(div().child(name.clone()))
+                    .child(div().child(workflow.location().root().display().to_string()));
+            } else {
+                panel = panel.child(ui::dialog_input("workflow-name", palette, &draft.name, cx));
+                if draft.files.is_empty() {
+                    panel =
+                        panel.child(ui::dialog_input("workflow-root", palette, &draft.root, cx));
+                } else {
+                    panel = panel.child(div().child(draft.root.read(cx).value().to_string()));
+                }
+            }
+            for (index, file) in draft.files.iter().enumerate() {
+                panel = panel.child(
+                    h_flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .min_w(px(0.))
+                                .truncate()
+                                .child(file.display().to_string()),
+                        )
+                        .child(
+                            ui::button(("workflow-remove-file", index), palette)
+                                .child("Remove")
+                                .on_click(cx.listener(move |app, _, _, cx| {
+                                    if let Some(draft) = app
+                                        .cleanup_workflows
+                                        .as_mut()
+                                        .and_then(|view| view.draft.as_mut())
+                                        && index < draft.files.len()
+                                    {
+                                        draft.files.remove(index);
+                                        cx.notify();
+                                    }
+                                })),
+                        ),
+                );
+            }
+            panel = panel.child(
+                h_flex()
+                    .gap(px(8.))
+                    .child(
+                        ui::button("workflow-add-files", palette)
+                            .child("Add files…")
+                            .on_click(cx.listener(|app, _, _, cx| app.add_workflow_files(cx))),
+                    )
+                    .child(
+                        ui::button("workflow-cancel-edit", palette)
+                            .child("Cancel")
+                            .on_click(cx.listener(|app, _, _, cx| {
+                                if let Some(view) = app.cleanup_workflows.as_mut() {
+                                    view.draft = None;
+                                    view.message = None;
+                                    cx.notify();
+                                }
+                            })),
+                    )
+                    .children((!draft.files.is_empty()).then(|| {
+                        ui::button("workflow-save", palette)
+                            .child("Save workflow")
+                            .on_click(cx.listener(|app, _, _, cx| app.save_workflow(cx)))
+                    })),
+            );
+        } else {
+            panel = panel.child(ui::note(
+                palette,
+                "Review the same local files again after a fresh scan.",
+            ));
+            if view.saved.is_empty() {
+                panel = panel.child(ui::note(palette, "No saved cleanup workflows yet."));
+            }
+            for (index, (name, workflow)) in view.saved.iter().enumerate() {
+                let edit = name.clone();
+                let review = name.clone();
+                let definition = workflow.clone();
+                panel = panel.child(
+                    h_flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.))
+                        .p(px(12.))
+                        .rounded(px(metrics::RADIUS_SM))
+                        .bg(palette.surface)
+                        .child(
+                            v_flex()
+                                .min_w(px(0.))
+                                .child(div().truncate().child(name.clone()))
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_color(palette.text_dim)
+                                        .child(workflow.location().root().display().to_string()),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(palette.text_dim)
+                                        .child(format::plural(workflow.targets().len(), "file")),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .gap(px(8.))
+                                .child(
+                                    ui::button(("workflow-edit", index), palette)
+                                        .child("Edit…")
+                                        .on_click(cx.listener(move |app, _, window, cx| {
+                                            app.edit_workflow(Some(edit.clone()), window, cx);
+                                        })),
+                                )
+                                .child(
+                                    ui::button(("workflow-review", index), palette)
+                                        .child("Review…")
+                                        .on_click(cx.listener(move |app, _, _, cx| {
+                                            app.review_workflow(&review, definition.clone(), cx);
+                                        })),
+                                ),
+                        ),
+                );
+            }
+            panel = panel.child(
+                ui::button("workflow-create", palette)
+                    .child("New workflow…")
+                    .on_click(
+                        cx.listener(|app, _, window, cx| app.edit_workflow(None, window, cx)),
+                    ),
+            );
+        }
+    }
+    v_flex()
+        .id("workflow-scroll")
+        .size_full()
+        .overflow_y_scroll()
+        .items_center()
+        .p(px(20.))
+        .child(panel)
+        .into_any_element()
+}
+
+impl KoshaApp {
+    pub(super) fn open_cleanup_workflows(&mut self, cx: &mut Context<Self>) {
+        if self.state.pending.is_some() || self.planning_action.is_some() {
+            return;
+        }
+        self.disarm();
+        self.cleanup_workflows = Some(Workflows::default());
+        self.load_workflows(None, cx);
+    }
+
+    fn load_workflows(
+        &mut self,
+        save: Option<(String, PathBuf, Vec<PathBuf>, Option<Workflow>)>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = self
+            .cleanup_workflows
+            .as_mut()
+            .filter(|view| view.task.is_none())
+        else {
+            return;
+        };
+        let saving = save.is_some();
+        view.message = Some(
+            if saving {
+                "Checking selected files…"
+            } else {
+                "Loading workflows…"
+            }
+            .into(),
+        );
+        view.task = Some(cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let dir = workflows::directory().ok_or_else(|| {
+                        std::io::Error::other("Cleanup workflow storage is unavailable.")
+                    })?;
+                    if let Some((name, root, paths, original)) = save {
+                        let workflow = match &original {
+                            Some(original) => original.with_targets(paths)?,
+                            None => Workflow::new(&root, paths)?,
+                        };
+                        workflow.preview()?;
+                        workflows::save(&dir, &name, workflow, original.as_ref())?;
+                    }
+                    workflows::list(&dir)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(view) = app.cleanup_workflows.as_mut() {
+                    view.task = None;
+                    match result {
+                        Ok(saved) => {
+                            view.saved = saved;
+                            view.draft = None;
+                            view.message = saving.then(|| "Workflow saved.".into());
+                        }
+                        Err(error) => view.message = Some(error.to_string()),
+                    }
+                    cx.notify();
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    fn edit_workflow(&mut self, name: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.cleanup_workflows.as_mut() else {
+            return;
+        };
+        let original = name.and_then(|name| {
+            view.saved
+                .get(&name)
+                .cloned()
+                .map(|workflow| (name, workflow))
+        });
+        let root = original
+            .as_ref()
+            .map(|(_, workflow)| workflow.location().root())
+            .or_else(|| {
+                self.state
+                    .ready()
+                    .filter(|ready| !ready.source.is_past())
+                    .map(|ready| ready.tree.root_path())
+            });
+        let mut field = |placeholder: &'static str, value: String| {
+            cx.new(|cx| {
+                let mut input = InputState::new(window, cx).placeholder(placeholder);
+                input.set_value(value, window, cx);
+                input
+            })
+        };
+        let name = field(
+            "Workflow name",
+            original
+                .as_ref()
+                .map(|(name, _)| name.clone())
+                .unwrap_or_default(),
+        );
+        let files = original
+            .as_ref()
+            .map(|(_, workflow)| workflow.targets().to_vec())
+            .unwrap_or_default();
+        view.draft = Some(WorkflowDraft {
+            name,
+            root: field(
+                "Absolute local folder path",
+                root.map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ),
+            original,
+            files,
+        });
+        view.message = None;
+        cx.notify();
+    }
+
+    fn add_workflow_files(&mut self, cx: &mut Context<Self>) {
+        let Some(draft) = self
+            .cleanup_workflows
+            .as_ref()
+            .and_then(|view| view.draft.as_ref())
+        else {
+            return;
+        };
+        let root = PathBuf::from(draft.root.read(cx).value().to_string());
+        let field = draft.name.clone();
+        let prompt = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Add files".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let selection = prompt.await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(paths) = app.file_picker_selection(selection, cx) else {
+                    return;
+                };
+                let Some(view) = app.cleanup_workflows.as_mut() else {
+                    return;
+                };
+                let Some(draft) = view.draft.as_mut().filter(|draft| draft.name == field) else {
+                    return;
+                };
+                if std::path::Path::new(&*draft.root.read(cx).value()) != root {
+                    view.message =
+                        Some("The workflow folder changed. Choose the files again.".into());
+                    cx.notify();
+                    return;
+                }
+                let result: Result<Vec<_>, _> = paths
+                    .iter()
+                    .map(|path| path.strip_prefix(&root).map(|path| path.to_path_buf()))
+                    .collect();
+                match result {
+                    Ok(paths) => {
+                        for path in paths {
+                            if !draft.files.contains(&path) {
+                                draft.files.push(path);
+                            }
+                        }
+                        view.message = None;
+                    }
+                    Err(_) => {
+                        view.message =
+                            Some("Choose files inside the workflow’s original folder.".into())
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn save_workflow(&mut self, cx: &mut Context<Self>) {
+        let Some(draft) = self
+            .cleanup_workflows
+            .as_ref()
+            .and_then(|view| view.draft.as_ref())
+        else {
+            return;
+        };
+        let (name, original) = match &draft.original {
+            Some((name, workflow)) => (name.clone(), Some(workflow.clone())),
+            None => (draft.name.read(cx).value().to_string(), None),
+        };
+        let root = PathBuf::from(draft.root.read(cx).value().to_string());
+        self.load_workflows(Some((name, root, draft.files.clone(), original)), cx);
+    }
+
+    fn review_workflow(&mut self, name: &str, workflow: Workflow, cx: &mut Context<Self>) {
+        if self.planning_action.is_some() || self.state.pending.is_some() {
+            return;
+        }
+        if !self.state.ready().is_some_and(|ready| {
+            !ready.source.is_past()
+                && kosha_core::snapshot::store::same_root(
+                    self.state.session.root(),
+                    workflow.location().root(),
+                )
+        }) {
+            if !workflow.location().is_current() {
+                if let Some(view) = self.cleanup_workflows.as_mut() {
+                    view.message =
+                        Some("The original workflow location is unavailable or changed.".into());
+                    cx.notify();
+                }
+                return;
+            }
+            self.cleanup_workflows = None;
+            self.scan(workflow.location().root().to_path_buf(), cx);
+            self.state.notice =
+                Some("Open Saved cleanup workflows after the scan to review this workflow.".into());
+            return;
+        }
+        if !self.state.mode().is_read_write() {
+            if let Some(view) = self.cleanup_workflows.as_mut() {
+                view.message =
+                    Some("Switch to Read-write in the title bar before reviewing cleanup.".into());
+                cx.notify();
+            }
+            return;
+        }
+        let Some(tree) = self.state.ready().map(|ready| Arc::clone(&ready.tree)) else {
+            return;
+        };
+        self.cleanup_workflows = None;
+        self.cleanup_plan_open = false;
+        self.state.notice = Some("Preparing workflow preview… Escape cancels.".into());
+        let name = name.to_owned();
+        self.planning_action = Some(cx.spawn(async move |this, cx| {
+            let checked = Arc::clone(&tree);
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let plan = workflow.preview()?;
+                    let preview = plan.dry_run();
+                    if preview.skipped != 0 {
+                        return Err(std::io::Error::other(
+                            "A target changed during preview. Try again.",
+                        ));
+                    }
+                    Ok(super::PendingAction {
+                        title: format!("Move to Trash · {name}"),
+                        workflow: Some((name, workflow)),
+                        plan,
+                        preview,
+                        tree: checked,
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.planning_action = None;
+                app.state.notice = None;
+                if app.state.mode().is_read_write()
+                    && app.state.pending.is_none()
+                    && !app.settings_open
+                    && !app.help_open
+                    && !app.command_open
+                    && !app.owners_open
+                    && app.state.ready().is_some_and(|ready| {
+                        Arc::ptr_eq(&ready.tree, &tree) && !ready.source.is_past()
+                    })
+                {
+                    match result {
+                        Ok(pending) => app.state.pending = Some(pending),
+                        Err(error) => app.state.notice = Some(error.to_string()),
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
 
 pub(super) struct Draft {
     tree: Arc<SizeTree>,
@@ -219,6 +698,9 @@ pub(super) fn render(
                 )
                 .child(div().child(format!("{} · {}", draft.action.label(), format::plural(draft.len(), "finding"))))
                 .children(findings)
+                .child(ui::button("cleanup-plan-saved-workflows", palette)
+                    .child("Saved workflows…")
+                    .on_click(cx.listener(|app, _, _, cx| app.open_cleanup_workflows(cx))))
                 .child(ui::note(palette, "The preview combines overlapping targets and shows the estimated size before you confirm."))
                 .when(read_write, |panel| {
                     panel.child(ui::button("cleanup-plan-preview", palette)

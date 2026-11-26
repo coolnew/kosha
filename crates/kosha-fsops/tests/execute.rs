@@ -62,6 +62,40 @@ fn writable(root: &Path) -> Session {
 
 // ------------------------------------------------------------------ dry runs
 
+#[cfg(target_os = "macos")]
+#[test]
+fn workflow_preview_rejects_invalid_missing_and_recursive_targets() {
+    use kosha_core::monitoring::Location;
+    use kosha_fsops::WorkflowPreviewError;
+    use std::path::PathBuf;
+
+    let fixture = fixture();
+    let location = Location::pin(fixture.path()).unwrap();
+    let tree = scan(location.root());
+    let preview = |targets: &[&str]| {
+        let targets: Vec<_> = targets.iter().map(PathBuf::from).collect();
+        ActionPlan::preview_workflow(&location, &tree, &targets)
+    };
+    let plan = preview(&["junk.bin"]).unwrap();
+    assert_eq!(plan.items().len(), 1);
+    assert_eq!(plan.items()[0].action, Action::Trash);
+    assert!(matches!(
+        preview(&["junk.bin", "../outside"]),
+        Err(WorkflowPreviewError::InvalidTarget(_))
+    ));
+    assert!(matches!(
+        preview(&["junk.bin", "junk.bin"]),
+        Err(WorkflowPreviewError::InvalidTarget(_))
+    ));
+    for unavailable in ["missing.bin", "cache"] {
+        assert!(matches!(
+            preview(&["junk.bin", unavailable]),
+            Err(WorkflowPreviewError::UnavailableTarget(_))
+        ));
+    }
+    assert!(fixture.path().join("junk.bin").is_file());
+}
+
 #[test]
 fn a_dry_run_changes_nothing() {
     let dir = fixture();

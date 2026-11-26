@@ -22,6 +22,7 @@ use kosha_core::{say, sayln};
 
 mod cache;
 mod checksum_candidates;
+mod cleanup_workflows;
 mod compare_snapshots;
 mod history;
 mod import;
@@ -56,6 +57,7 @@ USAGE:
     kosha compare LEFT RIGHT        compare folders or saved snapshots
     kosha history --help            record or inspect volume history
     kosha monitor --help            configure and check storage monitoring
+    kosha cleanup-workflow --help   save, preview, or run a cleanup workflow
     kosha space --help              compare filesystem usage and scanned allocation
     kosha import --help            importing listings written by other tools
     kosha marketplace --help       install and manage marketplace packs
@@ -321,6 +323,7 @@ fn main() -> ExitCode {
         Ok(Parsed::CompareSnapshots(args)) => return compare_snapshots::run(&args),
         Ok(Parsed::History(args)) => return history::run(&args),
         Ok(Parsed::Monitoring(args)) => return monitoring::run(&args),
+        Ok(Parsed::CleanupWorkflow(args)) => return cleanup_workflows::run(&args),
         Ok(Parsed::VolumeSpace(args)) => return volume_space::run(&args),
         Ok(Parsed::ImportHelp) => {
             say!("{}", import::USAGE);
@@ -2056,6 +2059,7 @@ enum Parsed {
     CompareSnapshots(Vec<String>),
     History(Vec<String>),
     Monitoring(Vec<String>),
+    CleanupWorkflow(Vec<String>),
     VolumeSpace(Vec<String>),
     ImportHelp,
     SearchHelp,
@@ -2125,6 +2129,10 @@ where
     if argv.peek().is_some_and(|arg| arg == "monitor") {
         argv.next();
         return Ok(Parsed::Monitoring(argv.collect()));
+    }
+    if argv.peek().is_some_and(|arg| arg == "cleanup-workflow") {
+        argv.next();
+        return Ok(Parsed::CleanupWorkflow(argv.collect()));
     }
     if argv.peek().is_some_and(|arg| arg == "space") {
         argv.next();

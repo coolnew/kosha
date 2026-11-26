@@ -41,6 +41,7 @@ pub mod guard;
 mod mode;
 mod plan;
 pub mod tool_cleanup;
+pub mod workflows;
 
 pub use audit::AuditLog;
 pub use cloud::{CloudConfirmed, CloudEvidence, CloudRisk, CloudWarning, ItemCloudRisk};
@@ -48,4 +49,5 @@ pub use guard::Refusal;
 pub use mode::{Mode, ModeError, ReadWriteGrant, Session, UserConfirmed};
 pub use plan::{
     Action, ActionPlan, ExecutionReport, Fingerprint, Outcome, PlanItem, SkipReason, VolumeChange,
+    WorkflowPreviewError,
 };

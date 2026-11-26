@@ -118,6 +118,28 @@ close button also rescans before returning to file actions. Snapshots, disk imag
 elevated sessions never offer execution. npm/browser/session-history operations
 are not routed through this executor.
 
+## Save a cleanup workflow
+
+Open **Saved cleanup workflows** from the command palette or from
+**Cleanup plan**. Choose **New workflow**, enter a name and the absolute
+path of a local folder, then use **Add files** to select individual files
+inside it. Save the workflow. Use **Edit** to add or remove targets later.
+
+Choose **Review** to run a fresh check. If the original folder needs to
+be opened, wait for the scan and choose **Review** again. Turn on
+**Read-write** to open the cleanup confirmation. Check the exact file
+list before approving **Move to Trash**. Open the **Cleanup receipt**
+after the rescan to see the result.
+
+Workflows are shared with the [CLI](command-line.md#saved-cleanup-workflows).
+Each run requires a new confirmation. Missing or cloud-only files and
+changes to the original location can stop review. A saved workflow stores
+file paths, so the files at those paths may differ from the previous run.
+
+![Saved cleanup workflow confirmation on macOS, showing the two selected files and the Move to Trash button](images/gui-macos-cleanup-workflow.png)
+
+![Saved cleanup workflow confirmation on Windows showing the selected file and a Cancel button](images/gui-windows-cleanup-workflow.png)
+
 ## Review the cleanup receipt
 
 After a confirmed file cleanup, open **Cleanup receipt** in the status bar.

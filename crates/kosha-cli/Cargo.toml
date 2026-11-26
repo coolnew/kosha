@@ -19,6 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 kosha-core.workspace = true
+kosha-fsops.workspace = true
 kosha-view.workspace = true
 kosha-analyze.workspace = true
 kosha-query.workspace = true

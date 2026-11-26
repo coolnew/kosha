@@ -107,6 +107,7 @@ pub enum Action {
     UnpinScope(PathBuf),
     OpenHelp,
     Monitoring,
+    CleanupWorkflows,
     CleanupGuide,
     AskAi,
     /// Show the log of everything this application has changed.
@@ -660,6 +661,14 @@ pub fn all(
             action: Action::ScanAgainForReal(std::path::PathBuf::from(&situation.root)),
         });
     }
+
+    commands.push(Command {
+        label: "Saved cleanup workflows".into(),
+        detail: "Create, edit, and review named Trash workflows".into(),
+        binding: None,
+        keywords: &["cleanup", "trash", "saved"],
+        action: Action::CleanupWorkflows,
+    });
 
     commands.push(Command {
         label: "Monitoring".into(),

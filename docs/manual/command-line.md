@@ -275,6 +275,27 @@ allocation do not run. `--duplicates`, `--snapshot` and scan options are refused
 See [importing listings](snapshots.md#imported-listings) for limits and what is
 recorded.
 
+## Saved cleanup workflows
+
+Use a named workflow to review the same explicitly selected files again
+after a new scan. File paths are relative to the original local folder.
+
+```sh
+kosha cleanup-workflow create "Build logs" ./project build/debug.log build/test.log
+kosha cleanup-workflow list
+kosha cleanup-workflow show "Build logs"
+kosha cleanup-workflow edit "Build logs" build/debug.log
+kosha cleanup-workflow preview "Build logs"
+kosha cleanup-workflow run "Build logs"
+```
+
+**Edit** replaces the whole file list and retains the original location.
+**Preview** scans the location and reports the current targets. **Run**
+requires an interactive terminal and explicit approval before it moves
+anything to Trash. A blocked or missing file stops the preview, so you can
+decide whether to edit the workflow. Keep the audit log available to run a
+workflow. See [cleanup safeguards](cleanup-guide.md#review-a-cleanup-plan).
+
 ## Scheduled storage monitoring
 
 Add a local drive or folder with at least one threshold in bytes.

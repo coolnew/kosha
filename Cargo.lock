@@ -4276,6 +4276,7 @@ dependencies = [
  "ctrlc",
  "kosha-analyze",
  "kosha-core",
+ "kosha-fsops",
  "kosha-import",
  "kosha-marketplace",
  "kosha-query",
@@ -4313,6 +4314,8 @@ version = "0.18.0"
 dependencies = [
  "blake3",
  "kosha-core",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.20",
  "trash",

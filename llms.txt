@@ -142,6 +142,9 @@ kosha import --from ncdu "export.json" --label "build-box /srv"
 - `kosha monitor check --jsonl` runs one pass over due storage monitoring
   profiles and exits. Use `kosha monitor --help` for profile management
   and `kosha monitor show ID --jsonl` for alerts and retained observations.
+- `kosha cleanup-workflow --help` describes saved Move to Trash workflows
+  for explicit files under a verified local folder. Use `preview NAME`
+  to inspect the current targets. `run NAME` requires interactive approval.
 - `kosha space ROOT --format jsonl` scans a supported local volume and reports
   filesystem counters, scanned allocation, coverage, and the reconciliation
   status. Gap bytes can be null when the measurements cannot be compared.

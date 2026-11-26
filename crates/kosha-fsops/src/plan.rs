@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use kosha_core::monitoring::Location;
 use kosha_core::volume_history::VolumeId;
 use kosha_core::{DiskUsage, NodeId, SizeTree};
 
@@ -88,6 +89,7 @@ pub struct Fingerprint {
     /// compares equal to `None` and leaves the rest to do the work.
     pub modified: Option<std::time::SystemTime>,
     pub is_dir: bool,
+    is_file: bool,
     /// What the filesystem itself calls this file, where it will say: the device
     /// and inode on Unix.
     ///
@@ -113,6 +115,7 @@ impl Fingerprint {
             len: md.len(),
             modified: md.modified().ok(),
             is_dir: md.is_dir(),
+            is_file: md.is_file(),
             identity: identity(&md),
         })
     }
@@ -148,6 +151,7 @@ pub struct PlanItem {
 #[derive(Clone, Debug)]
 pub struct ActionPlan {
     root: PathBuf,
+    workflow_location: Option<Location>,
     items: Vec<PlanItem>,
     /// Items that could not be planned at all, kept so the UI can explain the
     /// gap rather than quietly showing a smaller number.
@@ -166,7 +170,60 @@ pub struct ActionPlan {
     tree_len: usize,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum WorkflowPreviewError {
+    #[error("cleanup workflow requires a complete scan of its original location")]
+    UnverifiedLocation,
+    #[error("cleanup workflow has no targets")]
+    Empty,
+    #[error("invalid or duplicate workflow target: {}", .0.display())]
+    InvalidTarget(PathBuf),
+    #[error("workflow target is missing or is not a regular file: {}", .0.display())]
+    UnavailableTarget(PathBuf),
+    #[error("workflow target refused: {} ({})", .0.display(), .1)]
+    Refused(PathBuf, String),
+}
+
 impl ActionPlan {
+    /// Rebuild a Trash plan from saved relative file paths and a fresh scan.
+    /// Any blocked target stops preview so a workflow cannot silently shrink.
+    pub fn preview_workflow(
+        location: &Location,
+        tree: &SizeTree,
+        targets: &[PathBuf],
+    ) -> Result<Self, WorkflowPreviewError> {
+        if targets.is_empty() {
+            return Err(WorkflowPreviewError::Empty);
+        }
+        if location.sample(tree).is_none() {
+            return Err(WorkflowPreviewError::UnverifiedLocation);
+        }
+        let mut seen = HashSet::with_capacity(targets.len());
+        let mut nodes = Vec::with_capacity(targets.len());
+        for relative in targets {
+            if !crate::workflows::valid_relative_target(relative) || !seen.insert(relative) {
+                return Err(WorkflowPreviewError::InvalidTarget(relative.clone()));
+            }
+            let path = tree.root_path().join(relative);
+            let node = tree
+                .find(&path)
+                .ok_or_else(|| WorkflowPreviewError::UnavailableTarget(relative.clone()))?;
+            nodes.push(node);
+        }
+        let mut plan = Self::build(tree, &nodes, Action::Trash, &Session::new(location.root()));
+        if let Some((path, reason)) = plan.rejected.first() {
+            return Err(WorkflowPreviewError::Refused(path.clone(), reason.clone()));
+        }
+        if let Some(item) = plan.items.iter().find(|item| !item.expected.is_file) {
+            return Err(WorkflowPreviewError::UnavailableTarget(item.path.clone()));
+        }
+        if !location.is_current() {
+            return Err(WorkflowPreviewError::UnverifiedLocation);
+        }
+        plan.workflow_location = Some(location.clone());
+        Ok(plan)
+    }
+
     /// Build a plan from nodes of a scanned tree.
     ///
     /// Guard checks run here, so a plan can only ever contain paths that were
@@ -261,6 +318,7 @@ impl ActionPlan {
 
         ActionPlan {
             root,
+            workflow_location: None,
             items,
             rejected,
             cloud: risk,
@@ -307,6 +365,7 @@ impl ActionPlan {
             return plan;
         }
         let mut plan = ActionPlan::build(tree, &self.cloud_free, self.action, session);
+        plan.workflow_location = self.workflow_location.clone();
         plan.skipped_cloud_only = self.cloud.as_ref().map_or(0, |risk| risk.offline_files);
         plan
     }
@@ -379,7 +438,7 @@ impl ActionPlan {
     pub fn execute(&self, grant: &ReadWriteGrant<'_>, audit: &mut AuditLog) -> ExecutionReport {
         self.run(
             Some(Live {
-                _grant: grant,
+                grant,
                 cloud: None,
                 audit,
             }),
@@ -400,7 +459,7 @@ impl ActionPlan {
     ) -> ExecutionReport {
         self.run(
             Some(Live {
-                _grant: grant,
+                grant,
                 cloud: Some(confirmed),
                 audit,
             }),
@@ -417,7 +476,7 @@ impl ActionPlan {
     ) -> ExecutionReport {
         self.run(
             Some(Live {
-                _grant: grant,
+                grant,
                 cloud: confirmed,
                 audit,
             }),
@@ -427,6 +486,13 @@ impl ActionPlan {
 
     fn run(&self, live: Option<Live<'_, '_>>, measure: bool) -> ExecutionReport {
         let dry_run = live.is_none();
+        let workflow_blocked = self.workflow_location.as_ref().is_some_and(|location| {
+            location.root() != self.root
+                || !location.is_current()
+                || live.as_ref().is_some_and(|live| {
+                    !kosha_core::snapshot::store::same_root(live.grant.root(), &self.root)
+                })
+        });
         let (confirmed, mut audit) = match live {
             Some(live) => (live.cloud, Some(live.audit)),
             None => (None, None),
@@ -447,11 +513,14 @@ impl ActionPlan {
             dry_run,
             ..Default::default()
         };
-        let before = (measure && !dry_run && !cloud_blocked).then(|| self.observe_target_volumes());
+        let before = (measure && !dry_run && !cloud_blocked && !workflow_blocked)
+            .then(|| self.observe_target_volumes());
 
         for item in &self.items {
             let mut reclaimed = item.bytes;
-            let checked = if cloud_blocked {
+            let checked = if workflow_blocked {
+                Err(SkipReason::WorkflowLocationChanged)
+            } else if cloud_blocked {
                 Err(SkipReason::CloudNotConfirmed)
             } else {
                 self.verify(item)
@@ -592,7 +661,7 @@ type VolumeBaseline = (VolumeId, PathBuf, Option<DiskUsage>, String);
 /// What a real (not dry) run holds: the grant that permits it, the cloud
 /// token if one was given, and the log it writes to.
 struct Live<'g, 'a> {
-    _grant: &'a ReadWriteGrant<'g>,
+    grant: &'a ReadWriteGrant<'g>,
     cloud: Option<&'a CloudConfirmed>,
     audit: &'a mut AuditLog,
 }
@@ -842,6 +911,8 @@ pub enum SkipReason {
     /// The plan holds files stored in the cloud, and was executed without the
     /// [`CloudConfirmed`] its warning asks for.
     CloudNotConfirmed,
+    /// The pinned workflow location or the active write grant changed.
+    WorkflowLocationChanged,
 }
 
 impl std::fmt::Display for SkipReason {
@@ -851,6 +922,7 @@ impl std::fmt::Display for SkipReason {
                 f.write_str("not confirmed: this includes files stored in the cloud")
             }
             SkipReason::Vanished => f.write_str("already gone"),
+            SkipReason::WorkflowLocationChanged => f.write_str("workflow location is unverified"),
             SkipReason::Changed => f.write_str("changed since the scan"),
             SkipReason::Moved => f.write_str("moved since the scan"),
             SkipReason::Refused(r) => write!(f, "{r}"),

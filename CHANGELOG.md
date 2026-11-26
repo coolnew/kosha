@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Saved cleanup workflows
+
+Save a named Move to Trash workflow for individual files in a local folder.
+Edit the target list from the desktop or CLI, preview it against a fresh
+scan, and approve each run. Cleanup results are recorded in the audit log.
+
 ## [0.18.0] — 2026-11-25
 
 Kosha 0.18.0 adds scheduled storage monitoring, more ways to explain drive

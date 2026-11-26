@@ -201,6 +201,7 @@ pub struct KoshaApp {
     last_cleanup: Option<kosha_fsops::ExecutionReport>,
     cleanup_draft: Option<cleanup_plan::Draft>,
     cleanup_plan_open: bool,
+    cleanup_workflows: Option<cleanup_plan::Workflows>,
     cleanup_receipt_open: bool,
     /// The column edge being dragged, if any.
     ///
@@ -496,6 +497,7 @@ impl KoshaApp {
             last_cleanup: None,
             cleanup_draft: None,
             cleanup_plan_open: false,
+            cleanup_workflows: None,
             cleanup_receipt_open: false,
             column_drag: None,
             pending_query: start.query,
@@ -1909,6 +1911,7 @@ impl KoshaApp {
             commands::Action::ForgetQuery(query) => self.forget_query(&query, window, cx),
             commands::Action::OpenHelp => self.open_help(window, cx),
             commands::Action::Monitoring => self.open_monitoring(cx),
+            commands::Action::CleanupWorkflows => self.open_cleanup_workflows(cx),
             commands::Action::CancelScheduledMonitoring => {
                 self.cancel_scheduled_monitoring();
                 cx.notify();
@@ -4238,6 +4241,14 @@ impl KoshaApp {
             return;
         }
 
+        if self.cleanup_workflows.is_some() {
+            if key == "escape" {
+                self.cleanup_workflows = None;
+                cx.notify();
+            }
+            return;
+        }
+
         if self.cleanup_plan_open {
             if key == "escape" {
                 self.cleanup_plan_open = false;
@@ -4406,6 +4417,7 @@ impl KoshaApp {
                     let preview = plan.dry_run();
                     PendingAction {
                         title,
+                        workflow: None,
                         plan,
                         preview,
                         tree: checked,
@@ -4498,6 +4510,7 @@ impl KoshaApp {
         let preview = plan.dry_run();
         let tree = Arc::clone(&ready.tree);
         self.state.pending = Some(PendingAction {
+            workflow: None,
             title: insight.title.clone(),
             plan,
             preview,
@@ -4640,6 +4653,7 @@ impl KoshaApp {
         let preview = plan.dry_run();
         self.state.pending = Some(PendingAction {
             title: pending.title,
+            workflow: pending.workflow,
             plan,
             preview,
             tree: pending.tree,
@@ -4662,6 +4676,16 @@ impl KoshaApp {
         }
 
         let mut audit = AuditLog::open_default();
+        if let Some((name, workflow)) = &pending.workflow {
+            let current = kosha_fsops::workflows::directory()
+                .and_then(|dir| kosha_fsops::workflows::list(&dir).ok())
+                .is_some_and(|saved| saved.get(name) == Some(workflow));
+            if !current || !audit.is_active() {
+                self.state.notice = Some("Check that the workflow is unchanged and the audit log is available, then review again.".into());
+                cx.notify();
+                return;
+            }
+        }
         let warning = pending.plan.cloud_warning();
         let report = match self.state.session.grant() {
             Ok(grant) => {
@@ -4839,7 +4863,8 @@ impl Render for KoshaApp {
             || self.volume_history.is_some()
             || (self.volume_space_open && self.current_volume_space().is_some())
             || self.cleanup_receipt_open
-            || self.cleanup_plan_open;
+            || self.cleanup_plan_open
+            || self.cleanup_workflows.is_some();
         let rails = fits.opened(
             self.settings.show_places && !separate_view,
             self.settings.show_insights && !separate_view,
@@ -6154,7 +6179,9 @@ impl KoshaApp {
         palette: &Palette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let body = if let Some(view) = &self.monitoring {
+        let body = if let Some(view) = &self.cleanup_workflows {
+            cleanup_plan::render_workflows(view, palette, cx)
+        } else if let Some(view) = &self.monitoring {
             monitoring::render(view, palette, cx)
         } else if let Some(draft) = self
             .current_cleanup_draft()

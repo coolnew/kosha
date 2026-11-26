@@ -1218,6 +1218,7 @@ pub struct State {
 /// estimate.
 pub struct PendingAction {
     pub title: String,
+    pub workflow: Option<(String, kosha_fsops::workflows::Workflow)>,
     pub plan: kosha_fsops::ActionPlan,
     pub preview: kosha_fsops::ExecutionReport,
     /// The tree the plan was built from, so "Skip cloud-only items" can
