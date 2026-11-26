@@ -3,6 +3,14 @@ name: website
 on:
   push:
     branches: [main]
+    paths:
+      - 'docs/manual/**'
+      - 'website/**'
+      - 'PRIVACY.md'
+      - 'llms.txt'
+      - 'xtask-website.py'
+      - 'xtask-package.py'
+      - '.github/workflows/website.yml'
   workflow_run:
     workflows: [coverage]
     types: [completed]
@@ -17,6 +25,8 @@ permissions:
 # the manual, and a documentation push must never discard measured coverage.
 concurrency:
   group: kosha-website
+  # A coverage no-op must not evict an already queued documentation push.
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +37,8 @@ jobs:
       github.event.repository.visibility == 'public' &&
       (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.coverage.outputs.publish }}
     steps:
       # Always build current main, even when an older coverage run completed.
       # Never check out a workflow_run payload's contributor-controlled ref.
@@ -34,9 +46,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
       - name: Reviewed public checkout only
         run: |
           test ! -e publication/files.jsonl
@@ -48,50 +57,101 @@ jobs:
         with:
           script: |
             const {execFileSync} = require('node:child_process');
+            const {createHash} = require('node:crypto');
             const repo = context.repo;
+            const trusted = run => run.head_repository?.full_name === 'coolnew/kosha' &&
+              run.head_branch === 'main' &&
+              ['push', 'workflow_dispatch', 'schedule'].includes(run.event) &&
+              /^[0-9a-f]{40}$/.test(run.head_sha);
+            const artifactFor = async run => {
+              const name = `coverage-linux-${run.head_sha}`;
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
+                {...repo, run_id: run.id, per_page: 100});
+              return artifacts.find(a => a.name === name && !a.expired);
+            };
+            const trigger = context.payload.workflow_run;
+            const triggeringArtifact = trigger && trusted(trigger) ? await artifactFor(trigger) : undefined;
+            if (trigger && !triggeringArtifact) {
+              core.notice('Coverage completed without a retained report. Skipping website build.');
+              return;
+            }
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               ...repo, workflow_id: 'coverage.yml', branch: 'main', status: 'success', per_page: 100
             });
+            // A completion can arrive before the successful run is visible in
+            // the list. Compare it alongside listed runs by creation order.
+            if (triggeringArtifact && !runs.some(run => run.id === trigger.id)) {
+              runs.push(trigger);
+              runs.sort((a, b) => b.run_number - a.run_number);
+            }
+            let report;
             for (const run of runs) {
-              if (run.head_repository?.full_name !== 'coolnew/kosha' ||
-                  !['push', 'workflow_dispatch', 'schedule'].includes(run.event) ||
-                  !/^[0-9a-f]{40}$/.test(run.head_sha)) continue;
+              if (!trusted(run)) continue;
               try { execFileSync('git', ['merge-base', '--is-ancestor', run.head_sha, 'HEAD']); }
               catch { continue; }
-              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
-                {...repo, run_id: run.id, per_page: 100});
-              const name = `coverage-linux-${run.head_sha}`;
-              if (!artifacts.some(a => a.name === name && !a.expired)) continue;
+              const artifact = trigger?.id === run.id ? triggeringArtifact : await artifactFor(run);
+              if (!artifact) continue;
+              report = artifact;
               core.setOutput('run', String(run.id));
-              core.setOutput('name', name);
+              core.setOutput('name', artifact.name);
               core.setOutput('sha', run.head_sha);
-              return;
+              break;
             }
-            core.notice('No retained successful coverage report; publish an explicit unavailable page.');
+            if (!report) core.notice('No retained successful coverage report; publish an explicit unavailable page.');
+            const inputs = execFileSync('git', ['ls-tree', '-r', '-z', 'HEAD', '--',
+              'docs/manual', 'website', 'PRIVACY.md', 'llms.txt', 'xtask-website.py',
+              'xtask-package.py', '.github/workflows/website.yml']);
+            const fingerprint = createHash('sha256').update(inputs)
+              .update(report ? `\0coverage:${report.id}` : '\0coverage:unavailable').digest('hex');
+            if (context.eventName !== 'workflow_dispatch') {
+              try {
+                const url = new URL('https://coolnew.github.io/kosha/website-inputs.txt');
+                url.searchParams.set('run', `${context.runId}-${process.env.GITHUB_RUN_ATTEMPT}`);
+                const response = await fetch(url, {redirect: 'error', signal: AbortSignal.timeout(5000)});
+                if (response.ok && (await response.text()).trim() === fingerprint) {
+                  core.notice('The deployed website already has these inputs. Skipping build and deployment.');
+                  return;
+                }
+              } catch {
+                core.notice('Could not read the deployed fingerprint. Building the website.');
+              }
+            }
+            core.setOutput('fingerprint', fingerprint);
+            core.setOutput('publish', 'true');
+      - uses: actions/setup-python@v6
+        if: steps.coverage.outputs.publish == 'true'
+        with:
+          python-version: '3.12'
       - uses: actions/download-artifact@v7
-        if: steps.coverage.outputs.run != ''
+        if: steps.coverage.outputs.publish == 'true' && steps.coverage.outputs.run != ''
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.coverage.outputs.run }}
           name: ${{ steps.coverage.outputs.name }}
           path: target/website-coverage
       - run: python -m pip install -r website/requirements.txt
+        if: steps.coverage.outputs.publish == 'true'
       - name: Build manual and compose coverage
+        if: steps.coverage.outputs.publish == 'true'
         env:
           COVERAGE_SHA: ${{ steps.coverage.outputs.sha }}
+          SITE_FINGERPRINT: ${{ steps.coverage.outputs.fingerprint }}
         run: |
           if [ -n "$COVERAGE_SHA" ]; then
             python xtask-website.py --coverage target/website-coverage/site --coverage-sha "$COVERAGE_SHA"
           else
             python xtask-website.py
           fi
+          printf '%s\n' "$SITE_FINGERPRINT" > target/website/site/website-inputs.txt
       - uses: actions/upload-pages-artifact@v5
+        if: steps.coverage.outputs.publish == 'true'
         with:
           path: target/website/site
 
   deploy:
     name: Publish manual and coverage
     needs: build
+    if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write
