@@ -73,14 +73,32 @@ last completed observation across sessions. Windows scan
 data stays in the local profile rather than roaming with settings. macOS
 interactive coverage is less extensive than Windows and Linux.
 
-The Windows paths above describe the portable ZIP installation. Development
-MSIX packages can retain those logical paths while Windows redirects new data
-to per-package storage. An experimental unvirtualized package can instead use
-the ordinary AppData folders directly. Do not assume a packaged installation
-and the ZIP share every record, or that records survive package reset/uninstall.
-Back up explicit snapshots and export important results outside package-managed
-storage before changing installations. Development MSIX builds are test artifacts;
-there is no production MSIX distribution yet.
+### Windows Store package storage
+
+The portable ZIP and offline Setup use the ordinary Windows paths above.
+The Store MSIX uses the same logical AppData paths, with Windows redirecting
+new files to package storage. On a fresh Windows Sandbox profile, a
+test-signed copy of the v0.18.0 Store-upload MSIX wrote these physical paths:
+
+```text
+%LOCALAPPDATA%\Packages\41817QuickEffectiveApps.KoshaApp_janh1e0nresyp\LocalCache\
+  Roaming\coolnew\kosha\settings.json
+  Local\coolnew\kosha\snapshots\
+```
+
+Open the `LocalCache` path in File Explorer. Use the `Roaming\coolnew\kosha`
+branch for configuration and `Local\coolnew\kosha` for data. The packaged
+GUI wrote the settings file and the packaged CLI saved and listed its
+snapshot. The portable CLI saved to ordinary
+`%LOCALAPPDATA%\coolnew\kosha\snapshots\` and listed its own snapshot.
+Uninstalling the MSIX removed its redirected settings and snapshot and
+preserved the portable snapshot.
+
+Windows may use an existing ordinary AppData file when the package has
+no private copy. Check both locations when looking for an older record.
+Before resetting, uninstalling, or switching editions, copy needed
+snapshots and exports to a folder you choose outside package storage.
+See [Microsoft’s AppData virtualization rules](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization).
 
 | File or folder | Directory | Purpose |
 | --- | --- | --- |
@@ -111,6 +129,9 @@ Close kosha before managing its files. Back up `settings.json`,
 `search-recipes.json`, `rules.d/`, and `snapshots/` to retain preferences,
 recipes, rule packs, and explicit history. Copy exports you want to preserve.
 Snapshots can be large on large trees.
+
+For a Store installation, check the [package storage paths](#windows-store-package-storage)
+as well as the ordinary AppData folders before backing up or removing records.
 
 Removing `drive-cache/` discards remembered drive scans; the next drive click
 scans again. Removing an explicit snapshot discards that observation. Renaming
