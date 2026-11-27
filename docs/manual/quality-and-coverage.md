@@ -65,18 +65,33 @@ dependencies; inline test modules may contribute to the totals. Production code 
 
 ## Scenario coverage
 
-Choose **Fast NTFS drive scan** on the coverage page to see the expected drive
-menu, consent, fallback and cancellation behaviors. Each scenario links to the
-relevant source line and shows any mapped passing component test. Review rows
-marked **Needs end-to-end evidence** before making a claim about the whole
-workflow. An LLVM line hit can come from any test in the run. Windows UAC,
-desktop interactions and snapshot preservation need separate acceptance tests.
+Kosha aims to make disk analysis fast and dependable across operating systems.
+The scenario reports make the tested workflows and remaining gaps visible to
+users and contributors. Choose a report for
+[Linux](https://coolnew.github.io/kosha/coverage/linux/scenarios.html),
+[macOS](https://coolnew.github.io/kosha/coverage/macos/scenarios.html), or
+[Windows](https://coolnew.github.io/kosha/coverage/windows/scenarios.html).
+All three list
+Kosha CLI workflows backed by integration tests that invoke the executable.
+Sections cover scanning and comparison, search, offline caches, imports,
+shared views, and pipes. Native cases include Linux updater rollback and
+recipe matching, macOS volume identity, and Windows creation-date search,
+long paths, and Fast NTFS. Scanner integration tests also cover cancellation,
+unreadable folders and hard links.
 
-To extend the report, add a reviewed workflow case to `xtask-coverage.py` with
-a unique source line and, where applicable, the exact Rust test name. The
-script resolves the current line from the checked-out source and compares it
-with LLVM LCOV and named results from the same run. A missing or ambiguous
-source anchor asks the maintainer to review the mapping.
+Each row links to relevant code or to the integration test. A documented
+manual observation links to the user manual and describes what the capture
+shows. The desktop observations include folder comparison on all three
+platforms, Linux Quick Look and Volume space, and macOS monitoring. The
+Fast NTFS drive-menu screenshot confirms the menu
+action was visible on the tested drive. Consent, a completed scan, fallback
+and snapshot preservation require their own evidence.
+LLVM line hits measure execution across the run.
+
+To extend the report, add a reviewed workflow case to `xtask-coverage.py`
+with a unique source anchor and, where applicable, an exact test name or a
+public manual evidence link. For manual checks, record the tested platform
+and version when known, the observed result, and the step it supports.
 
 ## Reproduce the report
 
@@ -95,10 +110,11 @@ full Git commit and actual platform, for example:
 
     python xtask-coverage.py --input target/coverage/llvm-summary.json --output target/coverage/site --commit FULL_40_CHARACTER_SHA --platform linux --scope workspace
 
-For the Windows scenario report, enable
-`--features kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker` on the
-instrumented test command and save its `-- --format pretty` output as a log.
-After rendering the Windows landing page, run:
+For scenario coverage, pass `-- --format pretty --color never` to the
+instrumented test command and capture both stdout and stderr in `tests.log`.
+Windows also enables
+`--features kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker` before the
+test-harness arguments. After rendering the platform landing page, run:
 
     python xtask-coverage.py --scenarios --input target/coverage/lcov.info --test-log tests.log --output target/coverage/site --commit FULL_40_CHARACTER_SHA --platform windows --scope workspace
 

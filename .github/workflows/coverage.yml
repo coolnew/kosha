@@ -88,7 +88,7 @@ jobs:
           if [ "$PLATFORM" = windows ]; then
             features=(--features kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker)
           fi
-          cargo llvm-cov --locked --workspace "${features[@]}" --no-report -- --format pretty |
+          cargo llvm-cov --locked --workspace "${features[@]}" --no-report -- --format pretty --color never 2>&1 |
             tee "target/coverage/raw/$PLATFORM/tests.log"
       - name: Export source and scenario coverage
         shell: bash
@@ -102,9 +102,7 @@ jobs:
           cargo llvm-cov report --lcov --output-path "$raw/lcov.info"
           cargo llvm-cov report --json --summary-only --output-path "$raw/llvm-summary.json"
           python xtask-coverage.py --input "$raw/llvm-summary.json" --output "$site" --platform "$PLATFORM" --scope workspace
-          if [ "$PLATFORM" = windows ]; then
-            python xtask-coverage.py --scenarios --input "$raw/lcov.info" --test-log "$raw/tests.log" --output "$site" --platform "$PLATFORM" --scope workspace
-          fi
+          python xtask-coverage.py --scenarios --input "$raw/lcov.info" --test-log "$raw/tests.log" --output "$site" --platform "$PLATFORM" --scope workspace
       - uses: actions/upload-artifact@v6
         with:
           name: coverage-native-${{ matrix.platform }}-${{ github.sha }}
@@ -125,12 +123,12 @@ jobs:
           pattern: coverage-native-*-${{ github.sha }}
           path: target/coverage
           merge-multiple: true
-      - name: Require all platform reports and Windows scenarios
+      - name: Require source and scenario reports for every platform
         run: |
           for platform in linux windows macos; do
             test -f "target/coverage/site/$platform/summary.json"
+            test -f "target/coverage/site/$platform/scenarios.json"
           done
-          test -f target/coverage/site/windows/scenarios.json
       - uses: actions/upload-artifact@v6
         with:
           name: coverage-platforms-${{ github.sha }}

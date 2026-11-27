@@ -124,6 +124,17 @@ class WebsiteTests(unittest.TestCase):
             for label in ("Linux", "Windows", "macOS", "Fast NTFS"):
                 self.assertIn(label, page)
             self.assertIn("80.00%", page)
+            for platform in ("linux", "windows", "macos"):
+                (src / platform / "scenarios.html").write_text("<h1>Scenarios</h1>")
+                (src / platform / "scenarios.json").write_text(json.dumps({
+                    "schema": "kosha.scenarios.v2", "commit": sha, "platform": platform,
+                    "repository": "coolnew/kosha",
+                }))
+            website.compose_coverage(src, out, sha)
+            index = (out / "coverage/index.html").read_text()
+            for platform in ("linux", "windows", "macos"):
+                self.assertIn(f'href="{platform}/scenarios.html"', index)
+            website.validate_site(out)
             self.assertIn("../linux/coverage/html/index.html", (out / "coverage/html/index.html").read_text())
             summary = src / "macos/summary.json"
             summary.write_text(summary.read_text().replace(sha, "b" * 40))

@@ -143,10 +143,19 @@ def compose_coverage(source, site, expected_sha=None):
         if len(commits) != 1:
             raise ValueError("Coverage must use the same source commit across platforms")
         commit = commits.pop()
-        scenarios = json.loads((source / "windows/scenarios.json").read_text(encoding="utf-8"))
-        if (scenarios.get("schema"), scenarios.get("commit"), scenarios.get("platform"),
-                scenarios.get("repository")) != ("kosha.scenarios.v1", commit, "windows", "coolnew/kosha") or not (source / "windows/scenarios.html").is_file():
-            raise ValueError("Scenario evidence does not match the Windows measurement")
+        windows_scenarios = json.loads((source / "windows/scenarios.json").read_text(encoding="utf-8"))
+        scenario_platforms = platforms if windows_scenarios.get("schema") == "kosha.scenarios.v2" else ("windows",)
+        for key in scenario_platforms:
+            directory = source / key
+            scenarios = json.loads((directory / "scenarios.json").read_text(encoding="utf-8"))
+            schema = windows_scenarios.get("schema")
+            if (schema not in {"kosha.scenarios.v1", "kosha.scenarios.v2"}
+                    or (scenarios.get("schema"), scenarios.get("commit"), scenarios.get("platform"),
+                        scenarios.get("repository")) != (schema, commit, key, "coolnew/kosha")
+                    or not (directory / "scenarios.html").is_file()):
+                raise ValueError(f"Scenario evidence does not match the {platforms[key]} measurement")
+        scenario_links = " &middot; ".join(
+            f'<a href="{key}/scenarios.html">{platforms[key]}</a>' for key in scenario_platforms)
         rows = []
         for key, label in platforms.items():
             metrics = reports[key]["metrics"]["lines"]
@@ -159,8 +168,11 @@ def compose_coverage(source, site, expected_sha=None):
         normalize_llvm_links(target / "windows/coverage/html")
         for key in platforms:
             page = target / key / "index.html"
+            nav_links = '<a href="../">All platforms</a>'
+            if key in scenario_platforms:
+                nav_links += ' &middot; <a href="scenarios.html">Scenario coverage</a>'
             page.write_text(page.read_text(encoding="utf-8").replace("<h1>",
-                '<nav><a href="../">All platforms</a></nav><h1>', 1), encoding="utf-8")
+                f'<nav>{nav_links}</nav><h1>', 1), encoding="utf-8")
         page = f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Kosha test coverage</title><style>body{{font:17px/1.6 system-ui;color:#182c2b;background:#f8f9f5;max-width:60rem;margin:2rem auto;padding:0 1rem}}
 a{{color:#176553}}table{{width:100%;border-collapse:collapse}}td,th{{padding:.65rem;text-align:left;border-bottom:1px solid #cedbd6}}
@@ -170,8 +182,8 @@ code{{overflow-wrap:anywhere}}</style>
 <table><thead><tr><th scope="col">Platform</th><th scope="col">Lines executed / measured</th><th scope="col">Line coverage</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table>
 <p>Each platform has its own annotated source, measured totals and timestamp.</p>
-<h2>Scenario coverage</h2><p><a href="windows/scenarios.html">Fast NTFS drive scan</a>
-tracks the drive menu, scan result, fallback and cancellation against available test evidence.</p></main></html>"""
+<h2>Scenario coverage</h2><p>{scenario_links}</p>
+<p>See the test evidence for individual workflows. Windows includes Fast NTFS drive scan.</p></main></html>"""
         (target / "index.html").write_text(page, encoding="utf-8")
         badge_source = target / "linux"
         annotated = "linux/coverage/html/index.html"

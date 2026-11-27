@@ -66,12 +66,37 @@ class CoverageTests(unittest.TestCase):
             number = next(n for n, line in enumerate(lines, 1) if line.strip() == coverage.fast_ntfs_cases()[0][3])
             lcov = f"SF:C:/{source}\nDA:{number},7\nend_of_record\n".replace("/", chr(92))
             test_log = ("test ntfs_worker::launch::worker_preflight_requires_a_whole_lettered_drive ... ok\n"
-                        "test ntfs_worker::tests::malformed_requests_are_rejected_before_scanning ... ignored\n")
+                        "test ntfs_worker::tests::malformed_requests_are_rejected_before_scanning ... ignored\n"
+                        "     Running tests\\end_to_end.rs (target/test.exe)\n"
+                        "test a_scan_reports_the_tree_it_was_given ... ok\n"
+                        "     Running tests/unrelated.rs (target/other.exe)\n"
+                        "test a_path_that_is_not_there_says_so_and_fails ... ok\n"
+                        "     Running crates/kosha-cli/tests/search.rs (target/search.exe)\n"
+                        "test freshly_scanned_files_keep_their_recorded_creation_dates ... ok\n"
+                        "     Running tests/unreadable_root.rs (target/unreadable.exe)\n"
+                        "test a_root_that_could_not_be_read_says_so_rather_than_reading_as_empty ... ok\n")
             coverage.scenario_report(root, lcov, test_log, out, sha, "coolnew/kosha")
             result = json.loads((out / "scenarios.json").read_text())
             by_id = {row["id"]: row for row in result["scenarios"]}
             self.assertEqual(by_id["offer-action"]["line_hits"], 7)
-            self.assertEqual(by_id["offer-action"]["status"], "Needs end-to-end evidence")
+            self.assertEqual(by_id["offer-action"]["status"], "Documented manual observation")
+            self.assertEqual(by_id["accept"]["status"], "Needs end-to-end evidence")
+            self.assertEqual(by_id["cli-scan"]["status"], "CLI integration test passed")
+            self.assertEqual(by_id["cli-missing-path"]["status"], "Mapped test did not pass in this run")
+            self.assertEqual(by_id["windows-creation-dates"]["status"], "CLI integration test passed")
+            self.assertEqual(by_id["scan-denied"]["status"], "Scanner integration test passed")
+            for platform in ("linux", "macos"):
+                coverage.render(report(), out, sha, "coolnew/kosha", platform)
+                coverage.scenario_report(root, lcov, test_log, out, sha, "coolnew/kosha", platform)
+                cases = json.loads((out / "scenarios.json").read_text())["scenarios"]
+                self.assertTrue(any(row["workflow"] == "Kosha CLI: search" for row in cases))
+                identifiers = {row["id"] for row in cases}
+                self.assertIn("unix-symlink", identifiers)
+                self.assertNotIn("offer-action", identifiers)
+                self.assertEqual("macos-volume-uuid" in identifiers, platform == "macos")
+                self.assertEqual("linux-rollback" in identifiers, platform == "linux")
+                self.assertGreaterEqual(len(cases), 40)
+            coverage.render(report(), out, sha, "coolnew/kosha", "windows")
             self.assertEqual(by_id["ineligible"]["status"], "Component test passed")
             self.assertEqual(by_id["malformed"]["status"], "Mapped test did not pass in this run")
             with self.assertRaisesRegex(ValueError, "matching Windows measurement"):
