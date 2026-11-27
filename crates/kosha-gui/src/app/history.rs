@@ -56,7 +56,7 @@ fn headless_history_compares_saved_intervals_and_handles_missing_observations() 
             partial: false,
         });
     }
-    let missing = entries[1].record.path.clone();
+    let missing = fixture.path().join("missing.kosha");
     let mut cx = TestAppContext::single();
     cx.update(gpui_kit::init);
     let window = cx.add_window(|window, cx| {
@@ -108,9 +108,9 @@ fn headless_history_compares_saved_intervals_and_handles_missing_observations() 
             assert!(rows[0].delta() > 0);
         })
         .unwrap();
-    std::fs::remove_file(missing).unwrap();
     window
         .update(&mut cx, |app, _, cx| {
+            app.volume_history.as_mut().unwrap().entries[1].record.path = missing;
             app.select_history_interval([0, 1], cx)
         })
         .unwrap();

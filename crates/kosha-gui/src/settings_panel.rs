@@ -636,7 +636,7 @@ fn render_option(
     let label = spec.label;
     let mut row = v_flex()
         .id(label)
-        .debug_selector(move || format!("settings-option-{label}").into())
+        .debug_selector(move || format!("settings-option-{label}"))
         .flex_none()
         .gap(px(4.0))
         .pb(px(5.0))
