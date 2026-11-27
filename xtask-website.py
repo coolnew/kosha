@@ -68,6 +68,18 @@ def stage(files, docs):
     (docs / "llms.txt").write_bytes(files["llms.txt"])
 
 
+def platform_coverage(directory, platform, expected_sha):
+    data = json.loads((directory / "summary.json").read_text(encoding="utf-8"))
+    if (data.get("schema") != "kosha.coverage.v1" or data.get("repository") != "coolnew/kosha"
+            or data.get("platform") != platform or not re.fullmatch(r"[0-9a-f]{40}", data.get("commit", ""))
+            or not data.get("scope", "").startswith("Rust workspace;")
+            or (expected_sha and data["commit"] != expected_sha)):
+        raise ValueError(f"Coverage provenance does not match the selected {platform} workspace artifact")
+    if not (directory / "coverage/html/index.html").is_file():
+        raise ValueError("Coverage artifact is missing annotated HTML")
+    return data
+
+
 def compose_coverage(source, site, expected_sha=None):
     target = site / "coverage"
     target.mkdir(parents=True, exist_ok=True)
@@ -77,14 +89,6 @@ def compose_coverage(source, site, expected_sha=None):
             + nav + '<h1>Coverage report unavailable</h1><p>No retained successful coverage artifact was found. '
             'This does not mean zero coverage. See <a href="https://github.com/coolnew/kosha/actions/workflows/coverage.yml">Actions reports</a>.</p></html>', encoding="utf-8")
         return
-    data = json.loads((source / "summary.json").read_text(encoding="utf-8"))
-    if (data.get("schema") != "kosha.coverage.v1" or data.get("repository") != "coolnew/kosha"
-            or data.get("platform") != "linux" or not re.fullmatch(r"[0-9a-f]{40}", data.get("commit", ""))
-            or not data.get("scope", "").startswith("Rust workspace;")
-            or (expected_sha and data["commit"] != expected_sha)):
-        raise ValueError("Coverage provenance does not match the selected Linux workspace artifact")
-    if not (source / "coverage/html/index.html").is_file():
-        raise ValueError("Coverage artifact is missing annotated HTML")
     # Never follow links out of downloaded artifacts or copy executable files.
     paths = list(source.rglob("*"))
     for path in paths:
@@ -94,16 +98,65 @@ def compose_coverage(source, site, expected_sha=None):
             raise ValueError(f"Unexpected coverage artifact file: {path.name}")
     if sum(p.stat().st_size for p in paths if p.is_file()) > 512 * 1024 * 1024:
         raise ValueError("Coverage artifact exceeds website size budget")
-    shutil.copytree(source, target, dirs_exist_ok=True)
-    page = (target / "index.html").read_text(encoding="utf-8")
-    (target / "index.html").write_text(page.replace("<h1>", nav + "<h1>", 1), encoding="utf-8")
-    # Preserve old badge/JSON URLs and the old annotated-report entry point.
+    platforms = {"linux": "Linux", "windows": "Windows", "macos": "macOS"}
+    matrix = not (source / "summary.json").exists()
+    if matrix:
+        reports = {key: platform_coverage(source / key, key, expected_sha) for key in platforms}
+        commits = {report["commit"] for report in reports.values()}
+        if len(commits) != 1:
+            raise ValueError("Coverage must use the same source commit across platforms")
+        commit = commits.pop()
+        scenarios = json.loads((source / "windows/scenarios.json").read_text(encoding="utf-8"))
+        if (scenarios.get("schema"), scenarios.get("commit"), scenarios.get("platform"),
+                scenarios.get("repository")) != ("kosha.scenarios.v1", commit, "windows", "coolnew/kosha") or not (source / "windows/scenarios.html").is_file():
+            raise ValueError("Scenario evidence does not match the Windows measurement")
+        rows = []
+        for key, label in platforms.items():
+            metrics = reports[key]["metrics"]["lines"]
+            covered, count = metrics["covered"], metrics["count"]
+            if type(count) is not int or type(covered) is not int or not 0 <= covered <= count or not count:
+                raise ValueError("Invalid platform coverage counters")
+            rows.append(f'<tr><th scope="row"><a href="{key}/">{label}</a></th>'
+                        f'<td>{covered:,} / {count:,}</td><td>{100 * covered / count:.2f}%</td></tr>')
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        for key in platforms:
+            page = target / key / "index.html"
+            page.write_text(page.read_text(encoding="utf-8").replace("<h1>",
+                '<nav><a href="../">All platforms</a></nav><h1>', 1), encoding="utf-8")
+        page = f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Kosha test coverage</title><style>body{{font:17px/1.6 system-ui;color:#182c2b;background:#f8f9f5;max-width:60rem;margin:2rem auto;padding:0 1rem}}
+a{{color:#176553}}table{{width:100%;border-collapse:collapse}}td,th{{padding:.65rem;text-align:left;border-bottom:1px solid #cedbd6}}
+code{{overflow-wrap:anywhere}}</style>
+{nav}<main><h1>Kosha test coverage</h1>
+<p>Rust workspace tests measured on three native runners using <a href="{REPOSITORY}/tree/{commit}"><code>{commit}</code></a>.</p>
+<table><thead><tr><th scope="col">Platform</th><th scope="col">Lines executed / measured</th><th scope="col">Line coverage</th></tr></thead>
+<tbody>{"".join(rows)}</tbody></table>
+<p>Each platform has its own annotated source, measured totals and timestamp.</p>
+<h2>Scenario coverage</h2><p><a href="windows/scenarios.html">Fast NTFS drive scan</a>
+tracks the drive menu, scan result, fallback and cancellation against available test evidence.</p></main></html>"""
+        (target / "index.html").write_text(page, encoding="utf-8")
+        badge_source = target / "linux"
+        annotated = "linux/coverage/html/index.html"
+        redirect_coverage(target / "coverage/html/index.html", "../../" + annotated)
+    else:
+        platform_coverage(source, "linux", expected_sha)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+        page = target / "index.html"
+        page.write_text(page.read_text(encoding="utf-8").replace("<h1>", nav + "<h1>", 1), encoding="utf-8")
+        badge_source = target
+        annotated = "coverage/html/index.html"
+    # Keep existing Linux badge, JSON and source entry points working.
     for name in ("coverage.svg", "summary.json"):
-        shutil.copyfile(target / name, site / name)
-    legacy = target / "html/index.html"
-    legacy.parent.mkdir(parents=True, exist_ok=True)
-    legacy.write_text('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=../coverage/html/index.html">'
-                      '<a href="../coverage/html/index.html">Open source coverage</a>', encoding="utf-8")
+        if matrix:
+            shutil.copyfile(badge_source / name, target / name)
+        shutil.copyfile(badge_source / name, site / name)
+    redirect_coverage(target / "html/index.html", "../" + annotated)
+
+
+def redirect_coverage(path, url):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url={url}">'
+                    f'<a href="{url}">Open source coverage</a>', encoding="utf-8")
 
 
 def validate_site(site):

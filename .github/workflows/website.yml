@@ -64,10 +64,11 @@ jobs:
               ['push', 'workflow_dispatch', 'schedule'].includes(run.event) &&
               /^[0-9a-f]{40}$/.test(run.head_sha);
             const artifactFor = async run => {
-              const name = `coverage-linux-${run.head_sha}`;
               const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts,
                 {...repo, run_id: run.id, per_page: 100});
-              return artifacts.find(a => a.name === name && !a.expired);
+              return ['platforms', 'linux'].map(platform =>
+                artifacts.find(a => a.name === `coverage-${platform}-${run.head_sha}` && !a.expired)
+              ).find(Boolean);
             };
             const trigger = context.payload.workflow_run;
             const triggeringArtifact = trigger && trusted(trigger) ? await artifactFor(trigger) : undefined;
@@ -128,7 +129,7 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ steps.coverage.outputs.run }}
           name: ${{ steps.coverage.outputs.name }}
-          path: target/website-coverage
+          path: ${{ startsWith(steps.coverage.outputs.name, 'coverage-platforms-') && 'target/website-coverage/site' || 'target/website-coverage' }}
       - run: python -m pip install -r website/requirements.txt
         if: steps.coverage.outputs.publish == 'true'
       - name: Build manual and compose coverage

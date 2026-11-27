@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never
   CARGO_INCREMENTAL: '0'
 
 jobs:
@@ -31,15 +31,22 @@ jobs:
         run: python xtask-ci.py
 
   measure:
-    name: Linux workspace coverage
+    name: Workspace coverage (${{ matrix.platform }})
     needs: changes
     if: needs.changes.outputs.coverage == 'true' && github.repository == 'coolnew/kosha'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux, runner: ubuntu-latest}
+          - {platform: windows, runner: windows-latest}
+          - {platform: macos, runner: macos-latest}
     timeout-minutes: 60
     # Only selected coverage jobs acquire this group. A docs-only push cannot
     # cancel the preceding code revision's instrumented run.
     concurrency:
-      group: coverage-measure-${{ github.ref }}
+      group: coverage-measure-${{ github.ref }}-${{ matrix.platform }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
@@ -47,6 +54,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Reviewed public checkout only
+        shell: bash
         run: |
           test ! -e publication/files.jsonl
           test ! -e CLAUDE.md
@@ -58,6 +66,7 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.7
       - name: Linux GUI build prerequisites
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -69,25 +78,63 @@ jobs:
           key: llvm-coverage
           workspaces: ". -> target/coverage-build"
       - name: Instrument and test once
+        shell: bash
         env:
           CARGO_TARGET_DIR: target/coverage-build
-        run: cargo llvm-cov --locked --workspace --no-report
-      - name: Export HTML, LCOV and measured totals
-        env:
-          CARGO_TARGET_DIR: target/coverage-build
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          cargo llvm-cov report --html --output-dir target/coverage/site/coverage
-          cargo llvm-cov report --lcov --output-path target/coverage/lcov.info
-          cargo llvm-cov report --json --summary-only --output-path target/coverage/llvm-summary.json
-          python xtask-coverage.py --input target/coverage/llvm-summary.json --output target/coverage/site --platform linux --scope workspace
+          mkdir -p "target/coverage/raw/$PLATFORM"
+          features=()
+          if [ "$PLATFORM" = windows ]; then
+            features=(--features kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker)
+          fi
+          cargo llvm-cov --locked --workspace "${features[@]}" --no-report -- --format pretty |
+            tee "target/coverage/raw/$PLATFORM/tests.log"
+      - name: Export source and scenario coverage
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: target/coverage-build
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          raw="target/coverage/raw/$PLATFORM"
+          site="target/coverage/site/$PLATFORM"
+          cargo llvm-cov report --html --output-dir "$site/coverage"
+          cargo llvm-cov report --lcov --output-path "$raw/lcov.info"
+          cargo llvm-cov report --json --summary-only --output-path "$raw/llvm-summary.json"
+          python xtask-coverage.py --input "$raw/llvm-summary.json" --output "$site" --platform "$PLATFORM" --scope workspace
+          if [ "$PLATFORM" = windows ]; then
+            python xtask-coverage.py --scenarios --input "$raw/lcov.info" --test-log "$raw/tests.log" --output "$site" --platform "$PLATFORM" --scope workspace
+          fi
       - uses: actions/upload-artifact@v6
         with:
-          name: coverage-linux-${{ github.sha }}
+          name: coverage-native-${{ matrix.platform }}-${{ github.sha }}
           path: |
             target/coverage/site/
-            target/coverage/lcov.info
-            target/coverage/llvm-summary.json
+            target/coverage/raw/
           if-no-files-found: error
+          overwrite: true
           retention-days: 30
-      # website.yml consumes this measured artifact and publishes it alongside
-      # the manual. Coverage never replaces the entire Pages site itself.
+
+  bundle:
+    name: Bundle native reports for Pages
+    needs: measure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: coverage-native-*-${{ github.sha }}
+          path: target/coverage
+          merge-multiple: true
+      - name: Require all platform reports and Windows scenarios
+        run: |
+          for platform in linux windows macos; do
+            test -f "target/coverage/site/$platform/summary.json"
+          done
+          test -f target/coverage/site/windows/scenarios.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: coverage-platforms-${{ github.sha }}
+          path: target/coverage/site/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30

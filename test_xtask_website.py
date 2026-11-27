@@ -86,3 +86,34 @@ class WebsiteTests(unittest.TestCase):
             (root / 'index.html').write_text('<a href="../outside">escape</a>')
             with self.assertRaises(ValueError):
                 website.validate_site(root)
+
+    def test_matrix_composition_preserves_platform_reports_and_refuses_mixed_commits(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            src, out = root / "input", root / "site"
+            sha = "a" * 40
+            for platform in ("linux", "windows", "macos"):
+                report = src / platform
+                (report / "coverage/html").mkdir(parents=True)
+                (report / "coverage/html/index.html").write_text("annotated source")
+                (report / "index.html").write_text("<h1>Platform</h1>")
+                (report / "coverage.svg").write_text("<svg/>")
+                (report / "summary.json").write_text(json.dumps({
+                    "schema": "kosha.coverage.v1", "commit": sha, "repository": "coolnew/kosha",
+                    "platform": platform, "scope": "Rust workspace; test",
+                    "metrics": {"lines": {"covered": 8, "count": 10}},
+                }))
+            (src / "windows/scenarios.html").write_text("<h1>Scenarios</h1>")
+            (src / "windows/scenarios.json").write_text(json.dumps({
+                "schema": "kosha.scenarios.v1", "commit": sha, "platform": "windows", "repository": "coolnew/kosha",
+            }))
+            website.compose_coverage(src, out, sha)
+            page = (out / "coverage/index.html").read_text()
+            for label in ("Linux", "Windows", "macOS", "Fast NTFS"):
+                self.assertIn(label, page)
+            self.assertIn("80.00%", page)
+            self.assertIn("../linux/coverage/html/index.html", (out / "coverage/html/index.html").read_text())
+            summary = src / "macos/summary.json"
+            summary.write_text(summary.read_text().replace(sha, "b" * 40))
+            with self.assertRaisesRegex(ValueError, "same source commit"):
+                website.compose_coverage(src, out)
