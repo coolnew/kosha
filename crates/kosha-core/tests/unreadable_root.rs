@@ -23,6 +23,8 @@ use kosha_core::{ScanOptions, Scanner};
 /// totals are a floor, and a floor of nothing is not a number worth showing.
 #[test]
 fn a_root_that_could_not_be_read_says_so_rather_than_reading_as_empty() {
+    #[cfg(windows)]
+    disable_backup_privilege();
     let dir = tempfile::tempdir().unwrap();
     let locked = dir.path().join("locked");
     std::fs::create_dir(&locked).unwrap();
@@ -53,20 +55,20 @@ fn a_root_that_could_not_be_read_says_so_rather_than_reading_as_empty() {
 
 /// Make a directory unopenable, and put it back afterwards.
 ///
-/// Both platforms, because the defect was found on one and the code is shared.
-/// On Windows that means an explicit deny for this account — the temporary
-/// directory is ours, so no privilege is needed — and on Unix a mode with no
-/// bits on it. Either way the guard restores it, or `tempfile` cannot clean up
-/// and the test leaves a folder nobody can delete.
+/// On Windows the temporary directory denies listing to Everyone. On Unix
+/// the fixture sets mode 000. The guard restores access before tempfile cleanup.
 fn deny_reading(path: &Path) -> impl Drop {
+    #[cfg(windows)]
+    const EVERYONE: &str = "*S-1-1-0";
+
     struct Restore(std::path::PathBuf);
     impl Drop for Restore {
         fn drop(&mut self) {
             #[cfg(windows)]
             {
-                let who = std::env::var("USERNAME").unwrap_or_default();
                 let _ = std::process::Command::new("icacls.exe")
-                    .args([&self.0.to_string_lossy() as &str, "/remove:d", &who, "/q"])
+                    .arg(&self.0)
+                    .args(["/remove:d", EVERYONE, "/q"])
                     .output();
             }
             #[cfg(unix)]
@@ -79,14 +81,9 @@ fn deny_reading(path: &Path) -> impl Drop {
 
     #[cfg(windows)]
     {
-        let who = std::env::var("USERNAME").expect("an account name");
         let done = std::process::Command::new("icacls.exe")
-            .args([
-                &path.to_string_lossy() as &str,
-                "/deny",
-                &format!("{who}:(RX)"),
-                "/q",
-            ])
+            .arg(path)
+            .args(["/deny", &format!("{EVERYONE}:(RD)"), "/q"])
             .output()
             .expect("icacls runs");
         assert!(
@@ -101,4 +98,62 @@ fn deny_reading(path: &Path) -> impl Drop {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
     }
     Restore(path.to_path_buf())
+}
+
+#[cfg(windows)]
+fn disable_backup_privilege() {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+
+    use windows_sys::Win32::Foundation::{ERROR_NOT_ALL_ASSIGNED, ERROR_SUCCESS, GetLastError};
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_BACKUP_NAME,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token = std::ptr::null_mut();
+    // SAFETY: The pseudo-handle refers to this process and token is writable.
+    let opened =
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut token) };
+    assert_ne!(opened, 0, "{}", std::io::Error::last_os_error());
+    // SAFETY: A successful OpenProcessToken returns a newly owned handle.
+    let token = unsafe { OwnedHandle::from_raw_handle(token) };
+    let mut luid = windows_sys::Win32::Foundation::LUID {
+        LowPart: 0,
+        HighPart: 0,
+    };
+    // SAFETY: The name is NUL-terminated and luid is writable.
+    let found = unsafe { LookupPrivilegeValueW(std::ptr::null(), SE_BACKUP_NAME, &mut luid) };
+    assert_ne!(found, 0, "{}", std::io::Error::last_os_error());
+
+    let privileges = TOKEN_PRIVILEGES {
+        PrivilegeCount: 1,
+        Privileges: [LUID_AND_ATTRIBUTES {
+            Luid: luid,
+            Attributes: 0,
+        }],
+    };
+    // SAFETY: The token and privilege record are live for the call. Previous
+    // state is unnecessary because this dedicated test process exits afterward.
+    let (adjusted, status) = unsafe {
+        let adjusted = AdjustTokenPrivileges(
+            token.as_raw_handle(),
+            0,
+            &privileges,
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        (adjusted, GetLastError())
+    };
+    assert_ne!(
+        adjusted,
+        0,
+        "{}",
+        std::io::Error::from_raw_os_error(status as i32)
+    );
+    assert!(
+        matches!(status, ERROR_SUCCESS | ERROR_NOT_ALL_ASSIGNED),
+        "unexpected token status {status}"
+    );
 }
