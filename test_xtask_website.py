@@ -107,7 +107,19 @@ class WebsiteTests(unittest.TestCase):
             (src / "windows/scenarios.json").write_text(json.dumps({
                 "schema": "kosha.scenarios.v1", "commit": sha, "platform": "windows", "repository": "coolnew/kosha",
             }))
+            annotated = src / "windows/coverage/html"
+            report_path = "coverage/a/kosha/kosha/crates/kosha-analyze/src/cleanup.rs.html"
+            (annotated / report_path).parent.mkdir(parents=True)
+            (annotated / report_path).write_text("<h1>Source</h1>")
+            windows_link = report_path.replace("/", chr(92))
+            (annotated / "index.html").write_text(f'<a href="{windows_link}#L1">Source</a><code>{windows_link}</code>')
             website.compose_coverage(src, out, sha)
+            published = out / "coverage/windows/coverage/html/index.html"
+            self.assertIn(f'href="{report_path}#L1"', published.read_text())
+            self.assertIn(f'<code>{windows_link}</code>', published.read_text())
+            self.assertIn(windows_link, (annotated / "index.html").read_text())
+            (out / "manual/quality-and-coverage").mkdir(parents=True)
+            website.validate_site(out)
             page = (out / "coverage/index.html").read_text()
             for label in ("Linux", "Windows", "macOS", "Fast NTFS"):
                 self.assertIn(label, page)

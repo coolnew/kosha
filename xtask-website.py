@@ -80,6 +80,43 @@ def platform_coverage(directory, platform, expected_sha):
     return data
 
 
+def normalize_llvm_links(directory):
+    """LLVM on Windows writes filesystem separators into relative HTML URLs."""
+    attribute = re.compile(r"""(\s(?:href|src)=)(["'])(.*?)\2""", re.IGNORECASE)
+
+    def browser_path(match):
+        prefix, quote, url = match.groups()
+        parts = urlsplit(url)
+        if parts.scheme or parts.netloc or "\\" not in parts.path:
+            return match[0]
+        path = parts.path.replace("\\", "/")
+        return prefix + quote + path + url[len(parts.path):] + quote
+
+    class Links(HTMLParser):
+        def __init__(self, page):
+            super().__init__()
+            self.offsets = [0, *(match.end() for match in re.finditer("\n", page))]
+            self.edits = []
+            self.feed(page)
+            self.close()
+
+        def handle_starttag(self, tag, attrs):
+            original = self.get_starttag_text()
+            replacement = attribute.sub(browser_path, original)
+            if replacement != original:
+                line, column = self.getpos()
+                start = self.offsets[line - 1] + column
+                self.edits.append((start, start + len(original), replacement))
+
+    for path in directory.rglob("*.html"):
+        page = path.read_text(encoding="utf-8")
+        edits = Links(page).edits
+        if edits:
+            for start, end, replacement in reversed(edits):
+                page = page[:start] + replacement + page[end:]
+            path.write_text(page, encoding="utf-8", newline="\n")
+
+
 def compose_coverage(source, site, expected_sha=None):
     target = site / "coverage"
     target.mkdir(parents=True, exist_ok=True)
@@ -119,6 +156,7 @@ def compose_coverage(source, site, expected_sha=None):
             rows.append(f'<tr><th scope="row"><a href="{key}/">{label}</a></th>'
                         f'<td>{covered:,} / {count:,}</td><td>{100 * covered / count:.2f}%</td></tr>')
         shutil.copytree(source, target, dirs_exist_ok=True)
+        normalize_llvm_links(target / "windows/coverage/html")
         for key in platforms:
             page = target / key / "index.html"
             page.write_text(page.read_text(encoding="utf-8").replace("<h1>",
