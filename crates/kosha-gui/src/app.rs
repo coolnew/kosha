@@ -7150,6 +7150,74 @@ impl KoshaApp {
     debug_assertions
 ))]
 #[test]
+fn headless_search_replaces_pending_queries_and_recovers_from_invalid_input() {
+    use gpui_kit::{TestAppContext, VisualTestContext};
+
+    let fixture = tempfile::tempdir().unwrap();
+    std::fs::write(fixture.path().join("notes.txt"), b"notes").unwrap();
+    std::fs::write(fixture.path().join("photo.png"), b"image").unwrap();
+    let tree = Arc::new(
+        Scanner::new(kosha_core::ScanOptions::default())
+            .scan(fixture.path())
+            .unwrap(),
+    );
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    window
+        .update(&mut cx, |app, window, cx| {
+            app.state.phase = Phase::Ready(Ready::new(tree));
+            app.apply_query("ext = png".into(), window, cx);
+            let superseded = Arc::clone(app.search_cancel.as_ref().unwrap());
+            app.apply_query("ext = txt".into(), window, cx);
+            assert!(superseded.load(std::sync::atomic::Ordering::Relaxed));
+            assert!(matches!(app.state.ready().unwrap().search, Search::Pending));
+            assert!(app.state.ready().unwrap().rows.is_empty());
+        })
+        .unwrap();
+    visual.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(180));
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, window, cx| {
+            let ready = app.state.ready().unwrap();
+            assert!(matches!(ready.search, Search::Results { matched: 1, .. }));
+            assert_eq!(ready.tree.name(ready.rows[0]), "notes.txt");
+            assert!(app.search_index.is_some());
+
+            app.apply_query("size >".into(), window, cx);
+            let ready = app.state.ready().unwrap();
+            assert!(matches!(ready.search, Search::Invalid { .. }));
+            assert!(ready.rows.is_empty());
+
+            app.apply_query(String::new(), window, cx);
+            let ready = app.state.ready().unwrap();
+            assert!(matches!(ready.search, Search::Browsing));
+            assert_eq!(ready.rows.len(), 2);
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+}
+
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
 fn headless_settings_search_can_be_cleared_and_closed() {
     use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
 

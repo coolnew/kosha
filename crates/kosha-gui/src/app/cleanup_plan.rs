@@ -665,6 +665,7 @@ pub(super) fn render(
                 )
                 .child(
                     ui::button(("cleanup-plan-remove", index), palette)
+                        .debug_selector(move || format!("cleanup-plan-remove-{index}"))
                         .flex_none()
                         .child("Remove")
                         .on_click(
@@ -704,6 +705,7 @@ pub(super) fn render(
                 .child(ui::note(palette, "The preview combines overlapping targets and shows the estimated size before you confirm."))
                 .when(read_write, |panel| {
                     panel.child(ui::button("cleanup-plan-preview", palette)
+                        .debug_selector(|| "cleanup-plan-preview".into())
                         .child("Preview cleanup…")
                         .on_click(cx.listener(|app, _, _, cx| app.preview_cleanup_draft(cx))))
                 })
@@ -712,4 +714,123 @@ pub(super) fn render(
                 }),
         )
         .into_any_element()
+}
+
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_cleanup_draft_blocks_mixed_actions_and_read_only_preview() {
+    use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+    use kosha_analyze::{Confidence, RuleId, Severity};
+    use kosha_core::{ScanOptions, Scanner};
+
+    let fixture = tempfile::tempdir().unwrap();
+    let file = fixture.path().join("old.bin");
+    let cache = fixture.path().join("cache");
+    std::fs::write(&file, b"keep until confirmed").unwrap();
+    std::fs::create_dir(&cache).unwrap();
+    let tree = Arc::new(
+        Scanner::new(ScanOptions::default())
+            .scan(fixture.path())
+            .unwrap(),
+    );
+    let finding = |name, action| {
+        let node = tree
+            .children(tree.root())
+            .find(|&id| tree.name(id) == name)
+            .unwrap();
+        Insight {
+            rule: RuleId::new("cleanup-test"),
+            title: format!("Review {name}"),
+            detail: "Synthetic cleanup candidate".into(),
+            subject: "candidate".into(),
+            nodes: vec![node],
+            superseded: 0,
+            reclaimable: tree.node(node).allocated,
+            confidence: Confidence::Certain,
+            action,
+            severity: Severity::Notice,
+        }
+    };
+    let insights = vec![
+        finding("old.bin", Suggested::Trash),
+        finding("cache", Suggested::EmptyContents),
+    ];
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            super::Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.state.session = kosha_fsops::Session::new(tree.root_path().to_owned());
+            let mut ready = crate::state::Ready::new(tree);
+            ready.insights = Some(Arc::new(insights));
+            app.state.phase = crate::state::Phase::Ready(ready);
+            assert!(!app.state.mode().is_read_write());
+            app.toggle_cleanup_finding(0, cx);
+            app.toggle_cleanup_finding(1, cx);
+            assert_eq!(app.current_cleanup_draft().unwrap().len(), 1);
+            assert!(
+                app.state
+                    .notice
+                    .as_deref()
+                    .unwrap()
+                    .contains("Current action")
+            );
+            app.cleanup_plan_open = true;
+            app.preview_cleanup_draft(cx);
+            assert!(app.planning_action.is_none() && app.state.pending.is_none());
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("cleanup-plan-preview").is_none());
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.state.ask_to_unlock();
+            app.state.unlock_confirmed();
+            cx.notify();
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    let preview = visual.debug_bounds("cleanup-plan-preview").unwrap();
+    visual.simulate_click(preview.center(), Modifiers::default());
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, _, cx| {
+            let pending = app.state.pending.as_ref().unwrap();
+            assert!(pending.preview.dry_run);
+            assert_eq!(pending.preview.details.len(), 1);
+            assert_eq!(pending.preview.details[0].0.file_name().unwrap(), "old.bin");
+            assert_eq!(std::fs::read(&file).unwrap(), b"keep until confirmed");
+            app.cancel_action(cx);
+            assert!(app.state.pending.is_none());
+            assert_eq!(app.current_cleanup_draft().unwrap().len(), 1);
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    let remove = visual.debug_bounds("cleanup-plan-remove-0").unwrap();
+    visual.simulate_click(remove.center(), Modifiers::default());
+    window
+        .update(&mut cx, |app, _, _| {
+            assert!(app.current_cleanup_draft().is_none());
+            assert!(!app.cleanup_plan_open);
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(file).unwrap(), b"keep until confirmed");
+    assert!(cache.is_dir());
 }

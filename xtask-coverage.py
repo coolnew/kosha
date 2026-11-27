@@ -303,6 +303,8 @@ def scenario_report(root, lcov, test_log, output, commit, repository, platform="
              "headless_owners_distinguishes_unscanned_uncollected_and_collected_data"),
             ("gui-settings-search", "Find a setting, clear the search and close the panel",
              "headless_settings_search_can_be_cleared_and_closed"),
+            ("gui-search-replacement", "Replace a pending search and recover from an invalid query",
+             "headless_search_replaces_pending_queries_and_recovers_from_invalid_input"),
         )
         workflows["Headless desktop workflows"] = [
             (case, label, GUI, f"fn {test}() {{", f"app::{test}", None, None)
@@ -312,6 +314,9 @@ def scenario_report(root, lcov, test_log, output, commit, repository, platform="
             ("gui-drive-history", "Compare saved drive observations and report a missing snapshot",
              "app/history.rs", "app::history",
              "headless_history_compares_saved_intervals_and_handles_missing_observations"),
+            ("gui-cleanup-draft", "Reject mixed cleanup actions and cancel a preview without changing files",
+             "app/cleanup_plan.rs", "app::cleanup_plan",
+             "headless_cleanup_draft_blocks_mixed_actions_and_read_only_preview"),
             ("gui-monitoring-lifecycle", "Detect growth, pause monitoring and retain observations after removal",
              "app/monitoring.rs", "app::monitoring::tests",
              "desktop_monitoring_lifecycle_keeps_observations_after_profile_removal"),
@@ -322,7 +327,7 @@ def scenario_report(root, lcov, test_log, output, commit, repository, platform="
              "folder_comparison.rs", "folder_comparison::tests",
              "verified_comparison_detects_same_size_changes"),
         ):
-            workflow = "Headless desktop workflows" if case == "gui-drive-history" else "Desktop workflow components"
+            workflow = "Headless desktop workflows" if test.startswith("headless_") else "Desktop workflow components"
             workflows.setdefault(workflow, []).append((
                 case, label, f"crates/kosha-gui/src/{source}", f"fn {test}() {{",
                 f"{module}::{test}", None, None))
