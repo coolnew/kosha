@@ -87,7 +87,10 @@ jobs:
           features=()
           if [ "$PLATFORM" = windows ]; then
             features=(--features kosha-cli/fast-ntfs-worker,kosha-gui/fast-ntfs-worker)
+          else
+            features=(--features kosha-gui/headless-ui-tests)
           fi
+          cargo llvm-cov clean --workspace
           cargo llvm-cov --locked --workspace "${features[@]}" --no-report -- --format pretty --color never 2>&1 |
             tee "target/coverage/raw/$PLATFORM/tests.log"
       - name: Export source and scenario coverage
@@ -101,8 +104,9 @@ jobs:
           cargo llvm-cov report --html --output-dir "$site/coverage"
           cargo llvm-cov report --lcov --output-path "$raw/lcov.info"
           cargo llvm-cov report --json --summary-only --output-path "$raw/llvm-summary.json"
-          python xtask-coverage.py --input "$raw/llvm-summary.json" --output "$site" --platform "$PLATFORM" --scope workspace
-          python xtask-coverage.py --scenarios --input "$raw/lcov.info" --test-log "$raw/tests.log" --output "$site" --platform "$PLATFORM" --scope workspace
+          provenance=(--commit "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" --platform "$PLATFORM" --scope workspace)
+          python xtask-coverage.py --input "$raw/llvm-summary.json" --output "$site" "${provenance[@]}"
+          python xtask-coverage.py --scenarios --input "$raw/lcov.info" --test-log "$raw/tests.log" --output "$site" "${provenance[@]}"
       - uses: actions/upload-artifact@v6
         with:
           name: coverage-native-${{ matrix.platform }}-${{ github.sha }}

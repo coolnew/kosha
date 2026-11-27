@@ -860,6 +860,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_comparison_preserves_baseline_and_refuses_content_verification() {
+        let fixture = tempfile::tempdir().unwrap();
+        let live = fixture.path().join("live");
+        std::fs::create_dir(&live).unwrap();
+        let file = live.join("document.txt");
+        std::fs::write(&file, b"before").unwrap();
+        let baseline = Scanner::new(ScanOptions::default()).scan(&live).unwrap();
+        let saved =
+            snapshot::store::save_in(fixture.path(), &baseline, "baseline", SystemTime::now())
+                .unwrap();
+        std::fs::write(&file, b"a longer document").unwrap();
+        let sources = [
+            Source {
+                path: saved,
+                snapshot: true,
+                observation: None,
+            },
+            Source {
+                path: live,
+                snapshot: false,
+                observation: None,
+            },
+        ];
+        let stop = Arc::new(AtomicBool::new(false));
+        let report = compare(sources.clone(), false, &stop).unwrap();
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].path, "document.txt");
+        assert_eq!(report.findings[0].status, Status::Changed);
+        assert!(!report.verified);
+        assert!(
+            matches!(compare(sources.clone(), true, &stop), Err(error) if error.contains("requires two live folders"))
+        );
+
+        std::fs::remove_file(&sources[0].path).unwrap();
+        let path = sources[0].path.to_string_lossy().into_owned();
+        assert!(matches!(compare(sources, false, &stop), Err(error) if error.starts_with(&path)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verified_comparison_detects_same_size_changes() {
+        let fixture = tempfile::tempdir().unwrap();
+        let left = fixture.path().join("left");
+        let right = fixture.path().join("right");
+        let name = "data.txt";
+        for (dir, bytes) in [(&left, b"aaaa"), (&right, b"bbbb")] {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::write(dir.join(name), bytes).unwrap();
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let report = compare(
+            [left, right].map(|path| Source {
+                path,
+                snapshot: false,
+                observation: None,
+            }),
+            true,
+            &stop,
+        )
+        .unwrap();
+        assert!(report.verified);
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.findings[0].status, Status::Changed);
+        assert_eq!(report.findings[0].path, name);
+    }
+
+    #[test]
     fn folder_report_keeps_only_findings_and_honours_cancellation() {
         let home = tempfile::tempdir().unwrap();
         let left = home.path().join("left");

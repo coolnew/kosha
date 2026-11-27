@@ -69,6 +69,7 @@ pub fn panel(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> A
                         )
                         .child(
                             ui::close("owners-close", palette, "Close  (Esc)")
+                                .debug_selector(|| "owners-close".into())
                                 .on_click(cx.listener(|this, _, _, cx| this.close_owners(cx))),
                         ),
                 )
@@ -86,6 +87,7 @@ fn table(shares: &[Share], total: u64, app: &KoshaApp, palette: &Palette) -> Any
 
     v_flex()
         .id("owners-list")
+        .debug_selector(|| "owners-list".into())
         .flex_1()
         .min_h(px(0.0))
         .gap(px(2.0))

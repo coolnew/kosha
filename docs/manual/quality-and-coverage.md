@@ -58,7 +58,10 @@ failed measurements do not publish a new badge. A current report is evidence
 that lines executed, not that every behavior was asserted correctly.
 
 Each platform measures only the code compiled and exercised on its runner.
-Windows includes the Fast NTFS worker feature. The reports exclude Python
+Windows includes the Fast NTFS worker feature. Linux and macOS include
+headless desktop tests for workflows such as comparison, loading progress,
+text scaling, fragmentation, and owner information. Native desktop acceptance
+is recorded separately. The reports exclude Python
 automation, branch coverage and doctest coverage. Regular CI still runs
 doctests. The tool's default exclusions remove standalone test files and
 dependencies; inline test modules may contribute to the totals. Production code is not excluded just to improve a score.

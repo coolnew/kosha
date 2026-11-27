@@ -262,9 +262,12 @@ impl KoshaApp {
         cx.notify();
         let cancel = Arc::clone(&job);
         let saving = matches!(operation, Operation::Save(..));
-        let task = cx
-            .background_executor()
-            .spawn(async move { run(operation, cancel) });
+        let task = cx.background_executor().spawn(async move {
+            let dir = store::monitoring_dir().ok_or_else(|| {
+                std::io::Error::other("Monitoring data directory is unavailable.")
+            })?;
+            run(&dir, operation, cancel)
+        });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |app, cx| {
@@ -335,16 +338,15 @@ fn run_due(dir: &Path, job: &ScheduledCheck) -> std::io::Result<(bool, usize)> {
 }
 
 fn run(
+    dir: &Path,
     operation: Operation,
     cancel: Arc<AtomicBool>,
 ) -> std::io::Result<(Vec<Row>, Option<String>)> {
-    let dir = store::monitoring_dir()
-        .ok_or_else(|| std::io::Error::other("Monitoring data directory is unavailable."))?;
     let mut message = None;
     if !matches!(&operation, Operation::Refresh) {
-        let mut lease = MonitoringLease::try_acquire(&dir)?;
+        let mut lease = MonitoringLease::try_acquire(dir)?;
         let profile = |id| {
-            monitoring::list_profiles(&dir)?
+            monitoring::list_profiles(dir)?
                 .into_iter()
                 .find(|profile| profile.id == id)
                 .ok_or_else(|| std::io::Error::other("This monitoring profile was removed."))
@@ -385,9 +387,9 @@ fn run(
         }
     }
     let mut rows = Vec::new();
-    for profile in monitoring::list_profiles(&dir)? {
-        let entries = store::list_monitoring_in(&dir, profile.id)?;
-        let alerts = monitoring::alerts(&dir, profile.id)?;
+    for profile in monitoring::list_profiles(dir)? {
+        let entries = store::list_monitoring_in(dir, profile.id)?;
+        let alerts = monitoring::alerts(dir, profile.id)?;
         let growth = alerts.growth;
         let path = |id| {
             entries
@@ -409,7 +411,7 @@ fn run(
             (None, true) => Some("Low free space".into()),
             (None, false) => None,
         };
-        let attempt = store::last_monitoring_attempt_in(&dir, profile.id)?;
+        let attempt = store::last_monitoring_attempt_in(dir, profile.id)?;
         let cadence = match profile.cadence {
             Cadence::Daily => "Daily",
             Cadence::Weekly => "Weekly",
@@ -715,6 +717,66 @@ pub(super) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_monitoring_lifecycle_keeps_observations_after_profile_removal() {
+        let storage = tempfile::tempdir().unwrap();
+        let fixture = tempfile::tempdir().unwrap();
+        let execute = |operation| run(storage.path(), operation, Arc::default()).unwrap();
+        assert!(execute(Operation::Refresh).0.is_empty());
+
+        let limit = Thresholds::Growth(NonZeroU64::new(1024).unwrap());
+        let (rows, _) = execute(Operation::Save(
+            None,
+            fixture.path().to_owned(),
+            Cadence::Daily,
+            limit,
+        ));
+        let id = rows[0].profile.id;
+        assert!(rows[0].status.contains("No checks yet"));
+        assert_eq!(
+            execute(Operation::Check(id)).1.as_deref(),
+            Some("Check completed.")
+        );
+
+        std::fs::write(fixture.path().join("new.bin"), vec![b'x'; 65536]).unwrap();
+        let (rows, _) = execute(Operation::Check(id));
+        assert!(
+            rows[0]
+                .alert
+                .as_deref()
+                .unwrap()
+                .contains("allocated growth")
+        );
+        let [before, after] = rows[0].comparison.clone().unwrap();
+        assert_ne!(before, after);
+        assert!(rows[0].status.contains("Last saved"));
+
+        let (rows, _) = execute(Operation::Pause(id, true));
+        assert!(rows[0].status.contains("Paused"));
+        assert_eq!(
+            execute(Operation::Check(id)).1.as_deref(),
+            Some("Resume this profile before checking.")
+        );
+        let (rows, _) = execute(Operation::Save(
+            Some(id),
+            fixture.path().to_owned(),
+            Cadence::Weekly,
+            limit,
+        ));
+        assert!(rows[0].status.starts_with("Weekly · Paused"));
+
+        let (rows, message) = execute(Operation::Remove(id));
+        assert!(rows.is_empty());
+        assert_eq!(
+            message.as_deref(),
+            Some("Profile removed. Saved observations were kept.")
+        );
+        assert!(before.is_file() && after.is_file());
+        assert!(
+            matches!(run(storage.path(), Operation::Check(id), Arc::default()), Err(error) if error.to_string().contains("profile was removed"))
+        );
+    }
 
     #[test]
     fn schedule_checks_due_profiles_once_and_skips_paused_profiles() {

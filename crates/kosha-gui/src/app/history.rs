@@ -20,6 +20,116 @@ use super::KoshaApp;
 use crate::theme::{Palette, metrics};
 use crate::ui;
 
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_history_compares_saved_intervals_and_handles_missing_observations() {
+    use std::time::{Duration, SystemTime};
+
+    use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+    use kosha_core::snapshot::Meta;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().join("scanned");
+    let folder = root.join("documents");
+    std::fs::create_dir_all(&folder).unwrap();
+    let now = SystemTime::now();
+    let mut entries = Vec::new();
+    for index in 0..2 {
+        if index == 1 {
+            std::fs::write(folder.join("new.bin"), vec![b'x'; 65536]).unwrap();
+        }
+        let tree = Scanner::new(ScanOptions::default()).scan(&root).unwrap();
+        let taken = now + Duration::from_secs(index);
+        let path = store::save_in(fixture.path(), &tree, "observation", taken).unwrap();
+        entries.push(HistoryEntry {
+            record: store::Kept {
+                bytes: path.metadata().unwrap().len(),
+                path,
+                meta: Meta::of(&tree, taken, "observation"),
+            },
+            usage: None,
+            partial: false,
+        });
+    }
+    let missing = entries[1].record.path.clone();
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            super::Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.volume_history = Some(View {
+                root,
+                volume: None,
+                entries,
+                interval: None,
+                growth: None,
+                growth_ticket: None,
+                job: None,
+                recording: false,
+                tracking: false,
+                message: None,
+            });
+            app.select_history_interval([1, 0], cx);
+            assert!(app.volume_history.as_ref().unwrap().interval.is_none());
+            app.select_history_interval([0, 1], cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, _, _| {
+            let rows = app
+                .volume_history
+                .as_ref()
+                .unwrap()
+                .growth
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].name, "documents");
+            assert!(rows[0].delta() > 0);
+        })
+        .unwrap();
+    std::fs::remove_file(missing).unwrap();
+    window
+        .update(&mut cx, |app, _, cx| {
+            app.select_history_interval([0, 1], cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    window
+        .update(&mut cx, |app, _, _| {
+            assert!(matches!(
+                app.volume_history.as_ref().unwrap().growth,
+                Some(Err(_))
+            ));
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    let close = visual.debug_bounds("history-close").unwrap();
+    visual.simulate_click(close.center(), Modifiers::default());
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("history-close").is_none());
+}
+
 pub(super) struct TrackedCapture {
     dir: PathBuf,
     capture: ScanObservation,
@@ -392,6 +502,7 @@ pub(super) fn render(view: &View, palette: &Palette, cx: &mut Context<KoshaApp>)
                             }))
                             .child(
                                 ui::button("history-close", palette)
+                                    .debug_selector(|| "history-close".into())
                                     .child("Close")
                                     .on_click(cx.listener(|app, _, _, cx| {
                                         app.volume_history = None;

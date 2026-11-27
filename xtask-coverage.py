@@ -289,6 +289,43 @@ def scenario_report(root, lcov, test_log, output, commit, repository, platform="
         for case, label, test in cases:
             workflows.setdefault(workflow, []).append(
                 (case, label, source, f"fn {test}() {{", test, None, (crate, harness)))
+    if platform in {"linux", "macos"}:
+        desktop_tests = (
+            ("gui-comparison-entry", "Open folder comparison from the welcome screen and a scan",
+             "headless_comparison_opens_from_welcome_and_current_scan"),
+            ("gui-saved-drive-load", "Show progress when opening a saved drive scan",
+             "headless_saved_drive_load_shows_progress_in_the_main_view"),
+            ("gui-text-scale", "Resize text with the modified scroll gesture",
+             "headless_text_size_routes_modified_wheel_through_the_window"),
+            ("gui-fragmentation", "Start and cancel fragmentation checks from Quick Look",
+             "headless_fragmentation_quick_look_checks_and_cancels"),
+            ("gui-owner-panel", "Distinguish missing and collected owner information",
+             "headless_owners_distinguishes_unscanned_uncollected_and_collected_data"),
+            ("gui-settings-search", "Find a setting, clear the search and close the panel",
+             "headless_settings_search_can_be_cleared_and_closed"),
+        )
+        workflows["Headless desktop workflows"] = [
+            (case, label, GUI, f"fn {test}() {{", f"app::{test}", None, None)
+            for case, label, test in desktop_tests
+        ]
+        for case, label, source, module, test in (
+            ("gui-drive-history", "Compare saved drive observations and report a missing snapshot",
+             "app/history.rs", "app::history",
+             "headless_history_compares_saved_intervals_and_handles_missing_observations"),
+            ("gui-monitoring-lifecycle", "Detect growth, pause monitoring and retain observations after removal",
+             "app/monitoring.rs", "app::monitoring::tests",
+             "desktop_monitoring_lifecycle_keeps_observations_after_profile_removal"),
+            ("gui-saved-baseline", "Compare against a saved baseline and report a missing snapshot",
+             "folder_comparison.rs", "folder_comparison::tests",
+             "saved_comparison_preserves_baseline_and_refuses_content_verification"),
+            ("gui-verify-content", "Verify a same-size change in two live folders",
+             "folder_comparison.rs", "folder_comparison::tests",
+             "verified_comparison_detects_same_size_changes"),
+        ):
+            workflow = "Headless desktop workflows" if case == "gui-drive-history" else "Desktop workflow components"
+            workflows.setdefault(workflow, []).append((
+                case, label, f"crates/kosha-gui/src/{source}", f"fn {test}() {{",
+                f"{module}::{test}", None, None))
     if platform == "macos":
         workflows["Filesystem scanning"].append((
             "macos-volume-uuid", "Identify the macOS system volume by a stable UUID",
@@ -322,7 +359,8 @@ def scenario_report(root, lcov, test_log, output, commit, repository, platform="
                             (None, harness[1], test) in integration_passed):
                 status = "CLI integration test passed" if harness[0] == "kosha-cli" else "Scanner integration test passed"
             elif not harness and test in passed:
-                status = "Component test passed"
+                status = ("Headless desktop test passed" if workflow == "Headless desktop workflows"
+                          else "Component test passed")
             elif test:
                 status = "Mapped test did not pass in this run"
             elif manual:

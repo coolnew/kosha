@@ -67,6 +67,8 @@ class CoverageTests(unittest.TestCase):
             lcov = f"SF:C:/{source}\nDA:{number},7\nend_of_record\n".replace("/", chr(92))
             test_log = ("test ntfs_worker::launch::worker_preflight_requires_a_whole_lettered_drive ... ok\n"
                         "test ntfs_worker::tests::malformed_requests_are_rejected_before_scanning ... ignored\n"
+                        "test app::monitoring::tests::desktop_monitoring_lifecycle_keeps_observations_after_profile_removal ... ok\n"
+                        "test folder_comparison::tests::saved_comparison_preserves_baseline_and_refuses_content_verification ... ok\n"
                         "     Running tests\\end_to_end.rs (target/test.exe)\n"
                         "test a_scan_reports_the_tree_it_was_given ... ok\n"
                         "     Running tests/unrelated.rs (target/other.exe)\n"
@@ -95,6 +97,10 @@ class CoverageTests(unittest.TestCase):
                 self.assertNotIn("offer-action", identifiers)
                 self.assertEqual("macos-volume-uuid" in identifiers, platform == "macos")
                 self.assertEqual("linux-rollback" in identifiers, platform == "linux")
+                statuses = {row["id"]: row["status"] for row in cases}
+                self.assertEqual(statuses["gui-monitoring-lifecycle"], "Component test passed")
+                self.assertEqual(statuses["gui-saved-baseline"], "Component test passed")
+                self.assertEqual(statuses["gui-verify-content"], "Mapped test did not pass in this run")
                 self.assertGreaterEqual(len(cases), 40)
             coverage.render(report(), out, sha, "coolnew/kosha", "windows")
             self.assertEqual(by_id["ineligible"]["status"], "Component test passed")

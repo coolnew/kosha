@@ -5112,6 +5112,7 @@ impl KoshaApp {
                         })
                         .child(
                             title_button("settings-toggle", palette)
+                                .debug_selector(|| "settings-toggle".into())
                                 .tooltip(|window, cx| {
                                     tooltip("Settings: thresholds, units, and what a scan collects")
                                         .build(window, cx)
@@ -7140,6 +7141,123 @@ impl KoshaApp {
                 .into_any_element(),
         )
     }
+}
+
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_settings_search_can_be_cleared_and_closed() {
+    use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    let click = |visual: &mut VisualTestContext, selector| {
+        let bounds = visual.debug_bounds(selector).expect(selector);
+        visual.simulate_click(bounds.center(), Modifiers::default());
+        visual.refresh().unwrap();
+    };
+    visual.refresh().unwrap();
+    click(&mut visual, "settings-toggle");
+    assert!(visual.debug_bounds("settings-close").is_some());
+    assert!(visual.debug_bounds("settings-option-Text size").is_some());
+
+    for (query, expected) in [("text size", true), ("no-such-option-123", false)] {
+        window
+            .update(&mut cx, |app, window, cx| {
+                app.settings_search
+                    .update(cx, |input, cx| input.set_value(query, window, cx));
+            })
+            .unwrap();
+        visual.refresh().unwrap();
+        assert_eq!(
+            visual.debug_bounds("settings-option-Text size").is_some(),
+            expected
+        );
+        assert!(visual.debug_bounds("settings-option-Theme").is_none());
+    }
+    click(&mut visual, "settings-search-clear");
+    assert!(visual.debug_bounds("settings-search-clear").is_none());
+    assert!(visual.debug_bounds("settings-option-Text size").is_some());
+    click(&mut visual, "settings-close");
+    assert!(visual.debug_bounds("settings-close").is_none());
+}
+
+#[cfg(all(
+    test,
+    any(target_os = "linux", target_os = "macos"),
+    feature = "headless-ui-tests",
+    debug_assertions
+))]
+#[test]
+fn headless_owners_distinguishes_unscanned_uncollected_and_collected_data() {
+    use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
+
+    let fixture = tempfile::tempdir().unwrap();
+    std::fs::write(fixture.path().join("data.bin"), [b'x'; 4096]).unwrap();
+    let plain = Scanner::new(kosha_core::ScanOptions::default())
+        .scan(fixture.path())
+        .unwrap();
+    let collected = Scanner::new(kosha_core::ScanOptions {
+        collect_owners: true,
+        ..Default::default()
+    })
+    .scan(fixture.path())
+    .unwrap();
+    assert!(collected.owners().were_collected());
+
+    let mut cx = TestAppContext::single();
+    cx.update(gpui_kit::init);
+    let window = cx.add_window(|window, cx| {
+        KoshaApp::new(
+            window,
+            crate::settings::Loaded {
+                settings: Default::default(),
+                problem: Some("isolated test without a settings file".into()),
+            },
+            Start::default(),
+            None,
+            cx,
+        )
+    });
+    let mut visual = VisualTestContext::from_window(window.into(), &cx);
+    window
+        .update(&mut cx, |app, _, cx| app.open_owners(cx))
+        .unwrap();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("owners-close").is_some());
+    assert!(visual.debug_bounds("owners-list").is_none());
+
+    for (tree, expect_list) in [(plain, false), (collected, true)] {
+        window
+            .update(&mut cx, |app, _, cx| {
+                app.state.phase = Phase::Ready(Ready::new(Arc::new(tree)));
+                cx.notify();
+            })
+            .unwrap();
+        visual.refresh().unwrap();
+        assert_eq!(visual.debug_bounds("owners-list").is_some(), expect_list);
+    }
+    let close = visual.debug_bounds("owners-close").unwrap();
+    visual.simulate_click(close.center(), Modifiers::default());
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("owners-close").is_none());
 }
 
 #[cfg(all(

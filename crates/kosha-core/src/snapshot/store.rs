@@ -203,7 +203,15 @@ fn lock_history_series(series: &Path) -> io::Result<fs::File> {
 /// handle alive from before scanning through the final observation write.
 pub struct MonitoringLease {
     dir: PathBuf,
-    _lock: fs::File,
+    lock: fs::File,
+}
+
+impl Drop for MonitoringLease {
+    fn drop(&mut self) {
+        // A concurrent fork can briefly retain a copy of this descriptor on Unix.
+        // Release the lease now so the next check need not wait for that copy to close.
+        let _ = self.lock.unlock();
+    }
 }
 
 /// A committed observation ID and its snapshot, in commit order even if the
@@ -231,7 +239,7 @@ impl MonitoringLease {
         lock.try_lock().map_err(io::Error::from)?;
         Ok(Self {
             dir: dir.to_path_buf(),
-            _lock: lock,
+            lock,
         })
     }
 
@@ -461,6 +469,17 @@ mod monitoring_tests {
         assert!(MonitoringLease::try_acquire(dir.path()).is_err());
         drop(lease);
         assert!(MonitoringLease::try_acquire(dir.path()).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn monitoring_lease_releases_even_while_a_duplicate_descriptor_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let lease = MonitoringLease::try_acquire(dir.path()).unwrap();
+        let duplicate = lease.lock.try_clone().unwrap();
+        drop(lease);
+        assert!(MonitoringLease::try_acquire(dir.path()).is_ok());
+        drop(duplicate);
     }
 
     #[test]

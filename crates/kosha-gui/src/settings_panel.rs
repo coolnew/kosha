@@ -399,9 +399,11 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                 .child("Settings"),
                         )
                         .child(
-                            ui::close("settings-close", palette, "Close (Esc)").on_click(
-                                cx.listener(|this, _, window, cx| this.close_settings(window, cx)),
-                            ),
+                            ui::close("settings-close", palette, "Close (Esc)")
+                                .debug_selector(|| "settings-close".into())
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_settings(window, cx)
+                                })),
                         ),
                 )
                 .child(
@@ -428,6 +430,7 @@ pub fn render(app: &KoshaApp, palette: &Palette, cx: &mut Context<KoshaApp>) -> 
                                     palette,
                                     "Clear settings search",
                                 )
+                                .debug_selector(|| "settings-search-clear".into())
                                 .role(gpui_kit::Role::Button)
                                 .aria_label("Clear settings search")
                                 .child("\u{00d7}")
@@ -630,7 +633,10 @@ fn render_option(
             .child(spec.label)
             .into_any_element(),
     };
+    let label = spec.label;
     let mut row = v_flex()
+        .id(label)
+        .debug_selector(move || format!("settings-option-{label}").into())
         .flex_none()
         .gap(px(4.0))
         .pb(px(5.0))
